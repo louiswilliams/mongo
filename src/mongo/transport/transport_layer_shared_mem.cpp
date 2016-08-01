@@ -75,9 +75,9 @@ void TransportLayerSharedMem::initAndListen() {
 
     while (!inShutdown()) {
 
-	 	SharedMemoryStream stream = _acceptor.accept();
+	 	auto stream = _acceptor.accept();
 
-        std::thread t1(&TransportLayerSharedMem::accepted, this, stream);
+        std::thread t1(&TransportLayerSharedMem::accepted, this, std::move(stream));
         t1.detach();
     }
 }
@@ -95,7 +95,7 @@ Status TransportLayerSharedMem::start() {
 
     _running.store(true);
 
-    _listenerThread = stdx::thread([this]() { initAndListen(); });
+    _listenerThread = std::thread([this]() { initAndListen(); });
 
     return Status::OK();
 }
@@ -105,15 +105,29 @@ Ticket TransportLayerSharedMem::sourceMessage(const Session& session,
                                         Date_t expiration) {
     auto sourceCb = [message](SharedMemoryStream* stream) -> Status {
 
-        auto buf = SharedBuffer::allocate(msgLen);
-        MsgData::View md = buf.get();
+        MSGHEADER::Value header;
+        int headerLen = sizeof(MSGHEADER::Value);
+        stream->receive((char*)&header, headerLen);
+        int len = header.constView().getMessageLength();
 
-        if (stream->receive(md.view2ptr(), msgLen) < 0) {
-
-            return {ErrorCodes::HostUnreachable, "Recv failed"};
+        if (static_cast<size_t>(len) < sizeof(MSGHEADER::Value) ||
+            static_cast<size_t>(len) > MaxMessageSizeBytes) {
+            LOG(0) << "recv(): message len " << len << " is invalid. "
+                   << "Min " << sizeof(MSGHEADER::Value) << " Max: " << MaxMessageSizeBytes;
+            return {ErrorCodes::Overflow, "Message len is invalid"};
         }
 
+        int z = (len + 1023) & 0xfffffc00;
+        verify(z >= len);
+        auto buf = SharedBuffer::allocate(z);
+        MsgData::View md = buf.get();
+        memcpy(md.view2ptr(), &header, headerLen);
+        int left = len - headerLen;
+
+        stream->receive(md.data(), left);
+
         message->setData(std::move(buf));
+
         return Status::OK();
     };
 
@@ -204,7 +218,7 @@ void TransportLayerSharedMem::_endSession_inlock(decltype(TransportLayerSharedMe
         conn->second.ended = true;
     } else {
         _ticketHolder.release();
-        _connections.erase(stream);
+        _connections.erase(conn);
     }
 }
 
@@ -266,8 +280,8 @@ Status TransportLayerSharedMem::_runTicket(Ticket ticket) {
         stream = std::move(conn->second.stream);
     }
 
-    auto ShMemTicket = dynamic_cast<ShMemTicket*>(getTicketImpl(ticket));
-    auto res = ShMemTicket->_fill(stream.get());
+    auto shMemTicket = dynamic_cast<ShMemTicket*>(getTicketImpl(ticket));
+    auto res = shMemTicket->_fill(stream.get());
 
     {
         stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);

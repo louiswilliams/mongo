@@ -28,7 +28,11 @@
 
 #include <string>
 
-#include "shmem_stream.h"
+extern "C" {
+#include "shmem_stream.h"	
+}
+
+#include "mongo/stdx/memory.h"
 
 #pragma once
 
@@ -37,14 +41,13 @@ namespace transport {
 
 class SharedMemoryStream  {
 public:
+
 	SharedMemoryStream(shmem_stream_t stream) : _stream(stream) {}
 
 	~SharedMemoryStream() {};
 
-	static SharedMemoryStream connect(std::string name) {
-		shmem_stream_t stream;
-		shmem_stream_connect(const_cast<char*>(name.c_str()), &stream);
-		return SharedMemoryStream(stream);
+	void connect(std::string name) {
+		shmem_stream_connect(const_cast<char*>(name.c_str()), &_stream);
 	}
 
 	void receive(char* buffer, int len) {
@@ -73,10 +76,10 @@ public:
 		shmem_stream_listen(const_cast<char*>(_name.c_str()), &_acceptor);
 	}
 
-	SharedMemoryStream accept() {
+	std::unique_ptr<SharedMemoryStream> accept() {
 		shmem_stream_t stream;
 		shmem_stream_accept(_acceptor, &stream);
-		return SharedMemoryStream(stream);
+		return stdx::make_unique<SharedMemoryStream>(stream);
 	}
 
 	void shutdown() {

@@ -255,6 +255,7 @@ mongodLibDeps = [
     "executor/network_interface_factory",
     's/commands/shared_cluster_commands',
     "transport/transport_layer_legacy",
+    "transport/transport_layer_shmem",
     "transport/service_entry_point_utils",
     "util/clock_sources",
     "util/ntservice",

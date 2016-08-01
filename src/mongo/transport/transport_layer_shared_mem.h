@@ -29,6 +29,7 @@
 #define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kNetwork
 
 #include <unordered_map>
+#include <thread>
 
 #include "shared_memory_stream.h"
 
@@ -46,15 +47,14 @@
 #include "mongo/util/net/listen.h"
 #include "mongo/util/net/socket_exception.h"
 
-
 #include "mongo/stdx/memory.h"
-#include "mongo/stdx/thread.h"
-
 
 namespace mongo {
 namespace transport {
 
 class TransportLayerSharedMem : public TransportLayer {
+    MONGO_DISALLOW_COPYING(TransportLayerSharedMem);
+
 public:
     
     struct Options {
@@ -150,7 +150,7 @@ private:
 
     std::shared_ptr<ServiceEntryPoint> _sep;
 
-    stdx::thread _listenerThread;
+    std::thread _listenerThread;
 
     stdx::mutex _connectionsMutex;
     std::unordered_map<Session::Id, Connection> _connections;

@@ -58,13 +58,16 @@ env.Library(
 )
 
 env.Library(
-    target='transport_layer_shared_mem',
+    target='transport_layer_shmem',
     source=[
         'transport_layer_shared_mem.cpp',
         'shmem_stream.c',
+    ],LIBDEPS=[
+        'transport_layer_common',
+        '$BUILD_DIR/mongo/db/service_context',
+        '$BUILD_DIR/mongo/db/stats/counters',
     ]
 )
-
 
 env.Library(
     target='service_entry_point_test_suite',

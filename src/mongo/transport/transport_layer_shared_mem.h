@@ -26,11 +26,50 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kNetwork
+
+#include <unordered_map>
+
+#include "shared_memory_stream.h"
+
+#include "mongo/platform/basic.h"
+#include "mongo/db/service_context.h"
+#include "mongo/db/stats/counters.h"
+#include "mongo/util/net/message.h"
+#include "mongo/transport/session.h"
+#include "mongo/transport/service_entry_point.h"
+#include "mongo/transport/ticket_impl.h"
+#include "mongo/transport/transport_layer.h"
+#include "mongo/util/concurrency/ticketholder.h"
+#include "mongo/util/exit.h"
+#include "mongo/util/log.h"
+#include "mongo/util/net/listen.h"
+#include "mongo/util/net/socket_exception.h"
+
+
+#include "mongo/stdx/memory.h"
+#include "mongo/stdx/thread.h"
+
+
 namespace mongo {
 namespace transport {
 
-class TransportLayerSharedMem : final TransportLayer {
- 
+class TransportLayerSharedMem : public TransportLayer {
+public:
+    
+    struct Options {
+        std::string name;  // named segment to listen on
+
+        Options() : name("") {}
+    };
+
+    TransportLayerSharedMem(const TransportLayerSharedMem::Options& opts,
+                            std::shared_ptr<ServiceEntryPoint> sep);
+
+    ~TransportLayerSharedMem() {
+        shutdown();
+    }
+
      Ticket sourceMessage(const Session& session,
                                  Message* message,
                                  Date_t expiration = Ticket::kNoExpirationDate) override;
@@ -58,8 +97,73 @@ class TransportLayerSharedMem : final TransportLayer {
      Status start() override;
 
      void shutdown() override;
+private:
 
-}
+    void initAndListen();
+
+    void accepted(std::unique_ptr<SharedMemoryStream> stream);
+
+    Status _runTicket(Ticket ticket);
+
+    using WorkHandle = stdx::function<Status(SharedMemoryStream*)>;
+
+    /**
+     * A TicketImpl implementation for this TransportLayer. WorkHandle is a callable that
+     * can be invoked to fill this ticket.
+     */
+    class ShMemTicket : public TicketImpl {
+        MONGO_DISALLOW_COPYING(ShMemTicket);
+
+    public:
+        ShMemTicket(const Session& session, Date_t expiration, WorkHandle work);
+
+        SessionId sessionId() const override;
+        Date_t expiration() const override;
+
+        SessionId _sessionId;
+        Date_t _expiration;
+
+        WorkHandle _fill;
+    };
+
+    /**
+     * Connection object, to associate Session ids with AbstractMessagingPorts.
+     */
+    struct Connection {
+        Connection(std::unique_ptr<SharedMemoryStream> stream,
+                   bool ended,
+                   Session::TagMask tags,
+                   long connectionId)
+            : stream(std::move(stream)),
+              connectionId(connectionId),
+              inUse(false),
+              ended(false),
+              tags(tags) {}
+
+        std::unique_ptr<SharedMemoryStream> stream;
+        const long long connectionId;
+        boost::optional<std::string> x509SubjectName;
+        bool inUse;
+        bool ended;
+        Session::TagMask tags;
+    };
+
+    std::shared_ptr<ServiceEntryPoint> _sep;
+
+    stdx::thread _listenerThread;
+
+    stdx::mutex _connectionsMutex;
+    std::unordered_map<Session::Id, Connection> _connections;
+
+    void _endSession_inlock(decltype(_connections.begin()) conn);
+
+    AtomicWord<bool> _running;
+    static AtomicInt64 _connectionNumber;
+    static TicketHolder _ticketHolder;
+
+    Options _options;
+    SharedMemoryAcceptor _acceptor;
+};
 
 } //transport
 } //mongo

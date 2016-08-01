@@ -58,6 +58,15 @@ env.Library(
 )
 
 env.Library(
+    target='transport_layer_shared_mem',
+    source=[
+        'transport_layer_shared_mem.cpp',
+        'shmem_stream.c',
+    ]
+)
+
+
+env.Library(
     target='service_entry_point_test_suite',
     source=[
         'service_entry_point_test_suite.cpp',

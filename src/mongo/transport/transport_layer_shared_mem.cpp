@@ -26,37 +26,263 @@
  *    it in the license file.
  */
 
+#include "transport_layer_shared_mem.h"
+
 namespace mongo {
 namespace transport {
 
+TicketHolder TransportLayerSharedMem::_ticketHolder(DEFAULT_MAX_CONN);
+AtomicInt64 TransportLayerSharedMem::_connectionNumber;
+
+TransportLayerSharedMem::TransportLayerSharedMem(const TransportLayerSharedMem::Options& opts,
+                                     std::shared_ptr<ServiceEntryPoint> sep)
+    : _sep(sep), _running(false), _options(opts), _acceptor(opts.name) {}
+
+TransportLayerSharedMem::ShMemTicket::ShMemTicket(const Session& session, Date_t expiration, WorkHandle work)
+    : _sessionId(session.id()), _expiration(expiration), _fill(std::move(work)) {}
+
+Session::Id TransportLayerSharedMem::ShMemTicket::sessionId() const {
+    return _sessionId;
+}
+
+Date_t TransportLayerSharedMem::ShMemTicket::expiration() const {
+    return _expiration;
+}
+
+
+void TransportLayerSharedMem::accepted(std::unique_ptr<SharedMemoryStream> stream) {
+    if (!_ticketHolder.tryAcquire()) {
+        log() << "connection refused because too many open connections: " << _ticketHolder.used();
+        return;
+    }
+
+    Session session(HostAndPort(), HostAndPort(), this);
+
+    {
+        stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
+        _connections.emplace(
+            std::piecewise_construct,
+            std::forward_as_tuple(session.id()),
+            std::forward_as_tuple(
+                std::move(stream), false, session.getTags(), _connectionNumber.addAndFetch(1)));
+    }
+
+    invariant(_sep);
+    _sep->startSession(std::move(session));
+}
+
+void TransportLayerSharedMem::initAndListen() {
+
+    while (!inShutdown()) {
+
+	 	SharedMemoryStream stream = _acceptor.accept();
+
+        std::thread t1(&TransportLayerSharedMem::accepted, this, stream);
+        t1.detach();
+    }
+}
+
+Status TransportLayerSharedMem::start() {
+    if (_running.load()) {
+        return {ErrorCodes::InternalError, "TransportLayerSharedMem is already running"};
+    }
+
+	if (_options.name.length() == 0) {
+		return {ErrorCodes::BadValue, "Must specify name for shared memory file"};
+	}
+	_acceptor.listen();
+
+
+    _running.store(true);
+
+    _listenerThread = stdx::thread([this]() { initAndListen(); });
+
+    return Status::OK();
+}
+
 Ticket TransportLayerSharedMem::sourceMessage(const Session& session,
-                                 Message* message,
-                                 Date_t expiration = Ticket::kNoExpirationDate)  {}
+                                        Message* message,
+                                        Date_t expiration) {
+    auto sourceCb = [message](SharedMemoryStream* stream) -> Status {
+
+        auto buf = SharedBuffer::allocate(msgLen);
+        MsgData::View md = buf.get();
+
+        if (stream->receive(md.view2ptr(), msgLen) < 0) {
+
+            return {ErrorCodes::HostUnreachable, "Recv failed"};
+        }
+
+        message->setData(std::move(buf));
+        return Status::OK();
+    };
+
+    return Ticket(this, stdx::make_unique<ShMemTicket>(session, expiration, std::move(sourceCb)));
+}
+
+std::string TransportLayerSharedMem::getX509SubjectName(const Session& session) {
+    {
+        stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
+        auto conn = _connections.find(session.id());
+        if (conn == _connections.end()) {
+            // Return empty string if the session is not found
+            return "";
+        }
+
+        return conn->second.x509SubjectName.value_or("");
+    }
+}
+
+TransportLayer::Stats TransportLayerSharedMem::sessionStats() {
+    Stats stats;
+    {
+        stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
+        stats.numOpenSessions = _connections.size();
+    }
+
+    stats.numAvailableSessions = _ticketHolder.available();
+    stats.numCreatedSessions = _connectionNumber.load();
+
+    return stats;
+}
 
 Ticket TransportLayerSharedMem::sinkMessage(const Session& session,
-                               const Message& message,
-                               Date_t expiration = Ticket::kNoExpirationDate)  {}
+                                      const Message& message,
+                                      Date_t expiration) {
+    auto sinkCb = [&message](SharedMemoryStream* stream) -> Status {
+        try {
+            invariant(!message.empty());
+            auto buf = message.buf();
+            if (buf) {
+                stream->send(buf, MsgData::ConstView(buf).getLen());
+            }
+        } catch (const SocketException& e) {
+            return {ErrorCodes::HostUnreachable, e.what()};
+        }
+        return Status::OK();
+    };
 
-Status TransportLayerSharedMem::wait(Ticket&& ticket)  {}
+    return Ticket(this, stdx::make_unique<ShMemTicket>(session, expiration, std::move(sinkCb)));
+}
 
-using TicketCallback = stdx::function<void(Status)>;
+Status TransportLayerSharedMem::wait(Ticket&& ticket) {
+    return _runTicket(std::move(ticket));
+}
 
-void  TransportLayerSharedMem::asyncWait(Ticket&& ticket, TicketCallback callback)  {}
+void TransportLayerSharedMem::asyncWait(Ticket&& ticket, TicketCallback callback) {
+    // Left unimplemented because there is no reasonable way to offer general async waiting besides
+    // offering a background thread that can handle waits for multiple tickets. We may never
+    // implement this for the legacy TL.
+    MONGO_UNREACHABLE;
+}
 
-void TransportLayerSharedMem::registerTags(const Session& session)  {}
 
-std::string TransportLayerSharedMem::getX509SubjectName(const Session& session)  {}
+void TransportLayerSharedMem::end(const Session& session) {
+    {
+        stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
+        auto conn = _connections.find(session.id());
+        if (conn != _connections.end()) {
+            _endSession_inlock(conn);
+        }
+    }
+}
 
-Stats TransportLayerSharedMem::sessionStats()  {}
+void TransportLayerSharedMem::registerTags(const Session& session) {
+    {
+        stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
+        auto conn = _connections.find(session.id());
+        if (conn != _connections.end()) {
+            conn->second.tags = session.getTags();
+        }
+    }
+}
 
-void TransportLayerSharedMem::end(const Session& session)  {}
+void TransportLayerSharedMem::_endSession_inlock(decltype(TransportLayerSharedMem::_connections.begin()) conn) {
 
-void TransportLayerSharedMem::endAllSessions(Session::TagMask tags = Session::kEmptyTagMask)  {}
+    // If the communicator is not there, then it is currently in use.
+    if (!(conn->second.stream)) {
+        conn->second.ended = true;
+    } else {
+        _ticketHolder.release();
+        _connections.erase(stream);
+    }
+}
 
-Status TransportLayerSharedMem::start()  {}
+void TransportLayerSharedMem::endAllSessions(Session::TagMask tags) {
+    log() << "transport layer, ending all sessions";
+    {
+        stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
+        auto&& conn = _connections.begin();
+        while (conn != _connections.end()) {
+            // If we erase this connection below, we invalidate our iterator, use a placeholder.
+            auto placeholder = conn;
+            placeholder++;
 
-void TransportLayerSharedMem::shutdown()  {}
+            if (conn->second.tags & tags) {
+                log() << "Skip closing connection for connection # " << conn->second.connectionId;
+            } else {
+                _endSession_inlock(conn);
+            }
 
+            conn = placeholder;
+        }
+    }
+}
+
+void TransportLayerSharedMem::shutdown() {
+    
+    if (_running.load()) {
+    	_running.store(false);
+	    // stop the listener??
+	    _listenerThread.join();
+	    endAllSessions();
+
+	    _acceptor.shutdown();
+	}
+}
+
+Status TransportLayerSharedMem::_runTicket(Ticket ticket) {
+    if (!_running.load()) {
+        return {ErrorCodes::ShutdownInProgress, "TransportLayer in shutdown"};
+    }
+
+    if (ticket.expiration() < Date_t::now()) {
+        return {ErrorCodes::ExceededTimeLimit, "Ticket has expired"};
+    }
+
+    // TODO not sure if bringing out connection like this will be okay
+    // fix thi sto stdmove
+
+    std::unique_ptr<SharedMemoryStream> stream;
+
+    {
+        stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
+
+        auto conn = _connections.find(ticket.sessionId());
+        if (conn == _connections.end()) {
+            return {ErrorCodes::TransportSessionNotFound, "No such session in TransportLayer"};
+        }
+
+        stream = std::move(conn->second.stream);
+    }
+
+    auto ShMemTicket = dynamic_cast<ShMemTicket*>(getTicketImpl(ticket));
+    auto res = ShMemTicket->_fill(stream.get());
+
+    {
+        stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
+
+        auto conn = _connections.find(ticket.sessionId());
+        invariant(conn != _connections.end());
+
+        conn->second.stream = std::move(stream);
+        if (conn->second.ended) {
+            _endSession_inlock(conn);
+        }
+    }
+
+    return res;
+}
 
 } //transport
 } //mongo

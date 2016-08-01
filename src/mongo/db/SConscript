@@ -484,6 +484,7 @@ env.Library(
         '$BUILD_DIR/mongo/util/net/hostandport',
         '$BUILD_DIR/mongo/transport/transport_layer_common',
         '$BUILD_DIR/mongo/transport/transport_layer_manager',
+        '$BUILD_DIR/mongo/transport/transport_layer_shared_mem',
     ],
 )
 

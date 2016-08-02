@@ -74,7 +74,9 @@ class SharedMemoryAcceptor {
 public:
 	SharedMemoryAcceptor(std::string name) : _name(name) {}
 
-	~SharedMemoryAcceptor() {};
+	~SharedMemoryAcceptor() {
+		shutdown();
+	};
 
 	void listen() {
 		shmem_stream_listen(const_cast<char*>(_name.c_str()), &_acceptor);

@@ -262,10 +262,11 @@ void TransportLayerSharedMem::shutdown() {
     if (_running.load()) {
     	_running.store(false);
 	    // stop the listener??
-	    _listenerThread.join();
-	    endAllSessions();
 
 	    _acceptor.shutdown();
+
+	    _listenerThread.join();
+	    endAllSessions();
 	}
 }
 

@@ -28,7 +28,7 @@ int ftruncate(int fd, off_t length);
 // Client waits for ready_cond, server takes lock, creates its control block, sets server_control,
 // signals ready_cond. Connection is established.
 typedef struct {
-	volatile bool ready;
+	volatile bool running;
 	int fd;
 	char name[MAX_SHM_KEY_LEN + 1];
 	pthread_mutex_t accept_mutex;

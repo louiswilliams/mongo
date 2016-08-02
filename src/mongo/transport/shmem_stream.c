@@ -68,7 +68,7 @@ int shmem_stream_listen(char* name, shmem_acceptor_t** acceptor_ptr) {
     pthread_cond_init(&acceptor->accept_cond, &condattr);
 
     pthread_mutex_lock(&acceptor->accept_mutex);
-    acceptor->ready = true;
+    acceptor->running = true;
     acceptor->client_control[0] = '\0';
     acceptor->server_control[0] = '\0';
     pthread_mutex_unlock(&acceptor->accept_mutex);
@@ -83,6 +83,12 @@ int shmem_stream_accept(shmem_acceptor_t* acceptor, shmem_stream_t* stream) {
     pthread_mutex_lock(&acceptor->accept_mutex);
     while (strlen(acceptor->client_control) == 0) {
         pthread_cond_wait(&acceptor->accept_cond, &acceptor->accept_mutex);
+
+        /* Exit if the acceptor was shut down */
+        if (!acceptor->running) {
+        	pthread_mutex_unlock(&acceptor->accept_mutex);
+        	return SHMEM_ERR_NOT_READY;
+        }
     }
 
     int ec;
@@ -124,7 +130,7 @@ int shmem_stream_accept(shmem_acceptor_t* acceptor, shmem_stream_t* stream) {
     pthread_cond_init(&mem_control->write_cond, &condattr);
 
     // Signal to client we are ready
-    acceptor->ready = true;
+    mem_control->open = true;
     pthread_cond_signal(&acceptor->ready_cond);
     pthread_mutex_unlock(&acceptor->accept_mutex);
     return SHMEM_OK;
@@ -139,7 +145,7 @@ int shmem_stream_connect(char* server_name, shmem_stream_t* stream) {
         return ec;
     }
 
-    if (!acceptor->ready) {
+    if (!acceptor->running) {
         printf("acceptor control block not ready!");
         return SHMEM_ERR_NOT_READY;
     }
@@ -186,6 +192,7 @@ int shmem_stream_connect(char* server_name, shmem_stream_t* stream) {
         return ec;
     }
 
+    mem_control->open = true;
     acceptor->server_control[0] = '\0';
     pthread_mutex_unlock(&acceptor->accept_mutex);
 
@@ -276,6 +283,9 @@ int shmem_stream_control_advance(shmem_control_t* control, size_t len) {
 }
 
 int shmem_stream_shutdown(shmem_acceptor_t* acceptor) {
+	pthread_mutex_lock(&acceptor->accept_mutex);
+	pthread_cond_signal(&acceptor->accept_cond);
+	pthread_mutex_unlock(&acceptor->accept_mutex);
     close(acceptor->fd);
     shm_unlink(acceptor->name);
     return SHMEM_OK;

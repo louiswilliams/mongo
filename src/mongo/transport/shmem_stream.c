@@ -295,6 +295,7 @@ int shmem_stream_control_advance(shmem_control_t* control, size_t len) {
 
 int shmem_stream_shutdown(shmem_acceptor_t* acceptor) {
 	pthread_mutex_lock(&acceptor->accept_mutex);
+	acceptor->running = false;
 	pthread_cond_signal(&acceptor->accept_cond);
 	pthread_mutex_unlock(&acceptor->accept_mutex);
     close(acceptor->fd);

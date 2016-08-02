@@ -78,12 +78,19 @@ void TransportLayerSharedMem::accepted(std::unique_ptr<SharedMemoryStream> strea
 
 void TransportLayerSharedMem::initAndListen() {
 
-    while (!inShutdown()) {
+    while (!inShutdown() && _running.load()) {
 
 	 	auto stream = _acceptor.accept();
 
-        std::thread t1(&TransportLayerSharedMem::accepted, this, std::move(stream));
-        t1.detach();
+	 	if (stream) {
+	 		LOG(1) << "Accepted connection"; 
+		
+		    std::thread t1(&TransportLayerSharedMem::accepted, this, std::move(stream));
+		    t1.detach();
+	 	} else {
+	 		LOG(1) << "Failed to accept!";
+	 	}
+
     }
 }
 

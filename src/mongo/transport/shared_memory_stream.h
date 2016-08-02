@@ -80,7 +80,9 @@ public:
 
 	std::unique_ptr<SharedMemoryStream> accept() {
 		shmem_stream_t stream;
-		shmem_stream_accept(_acceptor, &stream);
+		if (shmem_stream_accept(_acceptor, &stream)) {
+			return nullptr;
+		}
 		return stdx::make_unique<SharedMemoryStream>(stream);
 	}
 

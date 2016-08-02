@@ -93,7 +93,9 @@ bool MessagingPortSharedMem::recv(Message& message) {
     memcpy(md.view2ptr(), &header, headerLen);
     int left = len - headerLen;
 
-    _stream->receive(md.data(), left);
+    if (!_stream->receive(md.data(), left)) {
+        return false;
+    }
 
     message.setData(std::move(buf));
 
@@ -150,8 +152,7 @@ void MessagingPortSharedMem::send(const std::vector<std::pair<char*, int>>& data
 }
 
 bool MessagingPortSharedMem::connect(SockAddr& farEnd) {
-    _stream->connect(farEnd.getAddr());
-    return true;
+    return _stream->connect(farEnd.getAddr());
 }
 
 void MessagingPortSharedMem::setX509SubjectName(const std::string& x509SubjectName) {

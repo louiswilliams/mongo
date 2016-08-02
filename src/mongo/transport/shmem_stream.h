@@ -16,7 +16,7 @@
 #define SHMEM_ERR_OPEN 1
 #define SHMEM_ERR_MMAP 2
 #define SHMEM_ERR_RESIZE 3
-#define SHMEM_ERR_NOT_READY 4
+#define SHMEM_ERR_CLOSED 4
 #define SHMEM_ERR_BUFFER 5
 
 

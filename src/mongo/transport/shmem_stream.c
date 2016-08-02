@@ -87,7 +87,7 @@ int shmem_stream_accept(shmem_acceptor_t* acceptor, shmem_stream_t* stream) {
         /* Exit if the acceptor was shut down */
         if (!acceptor->running) {
         	pthread_mutex_unlock(&acceptor->accept_mutex);
-        	return SHMEM_ERR_NOT_READY;
+        	return SHMEM_ERR_CLOSED;
         }
     }
 
@@ -147,7 +147,7 @@ int shmem_stream_connect(char* server_name, shmem_stream_t* stream) {
 
     if (!acceptor->running) {
         printf("acceptor control block not ready!");
-        return SHMEM_ERR_NOT_READY;
+        return SHMEM_ERR_CLOSED;
     }
 
     // Take lock, make local control block, set name, signal accept
@@ -179,6 +179,7 @@ int shmem_stream_connect(char* server_name, shmem_stream_t* stream) {
 
     pthread_cond_signal(&acceptor->accept_cond);
 
+    // TODO: add timeout
     while (strlen(acceptor->server_control) == 0) {
         pthread_cond_wait(&acceptor->ready_cond, &acceptor->accept_mutex);
     }
@@ -212,6 +213,11 @@ int shmem_stream_control_write(shmem_control_t* control, const char* buffer, siz
 
     while (control->length + len > MAX_BUFFER_LEN) {
         pthread_cond_wait(&control->write_cond, &control->mutex);
+
+        if (!control->open) {
+        	pthread_mutex_unlock(&control->mutex);
+        	return SHMEM_ERR_CLOSED;
+        }
     }
 
     int cursor = control->write_cursor;
@@ -248,6 +254,11 @@ int shmem_stream_control_peek(shmem_control_t* control, char** buffer, size_t le
 
     while ((size_t)control->length < len) {
         pthread_cond_wait(&control->read_cond, &control->mutex);
+
+        if (!control->open) {
+        	pthread_mutex_unlock(&control->mutex);
+        	return SHMEM_ERR_CLOSED;
+        }
     }
     if (len + control->read_cursor > MAX_BUFFER_LEN) {
         printf("Oops. Can't read past end of buffer yet. Implement an iovec\n");
@@ -292,8 +303,20 @@ int shmem_stream_shutdown(shmem_acceptor_t* acceptor) {
 }
 
 int shmem_stream_close(shmem_stream_t* stream) {
-    shm_unlink(stream->control->name);
+	/* Close both local and remote control blocks */
+	pthread_mutex_lock(&stream->control->mutex);
+	stream->control->open = false;
+	pthread_cond_signal(&stream->control->read_cond);
+	pthread_mutex_unlock(&stream->control->mutex);
+
+	pthread_mutex_lock(&stream->dest_control->mutex);
+	stream->dest_control->open = false;
+	pthread_cond_signal(&stream->dest_control->write_cond);
+	pthread_mutex_unlock(&stream->dest_control->mutex);
+
+	/* Close our file descriptors, but remote end should unlink its segment */
     close(stream->fd);
     close(stream->dest_fd);
+    shm_unlink(stream->control->name);
     return SHMEM_OK;
 }

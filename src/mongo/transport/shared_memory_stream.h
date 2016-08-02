@@ -46,22 +46,24 @@ public:
 
 	SharedMemoryStream() = default;
 
-	~SharedMemoryStream() {};
+	~SharedMemoryStream() {
+		close();
+	};
 
 	bool connect(std::string name) {
 		return (shmem_stream_connect(const_cast<char*>(name.c_str()), &_stream) == 0);
 	}
 
-	void receive(char* buffer, int len) {
-		shmem_stream_recv(&_stream, buffer, len);
+	bool receive(char* buffer, int len) {
+		return (shmem_stream_recv(&_stream, buffer, len) == 0);
 	}
 
-	void send(const char* buffer, int len) {
-		shmem_stream_send(&_stream, buffer, len);
+	bool send(const char* buffer, int len) {
+		return (shmem_stream_send(&_stream, buffer, len) == 0);
 	}
 
-	void close() {
-		shmem_stream_close(&_stream);
+	bool close() {
+		return (shmem_stream_close(&_stream) == 0);
 	}
 
 private:

@@ -107,6 +107,8 @@ Status TransportLayerSharedMem::start() {
 
     _running.store(true);
 
+    LOG(0) << "Waiting for shared memory connections on " << _options.name;
+
     _listenerThread = std::thread([this]() { initAndListen(); });
 
     return Status::OK();

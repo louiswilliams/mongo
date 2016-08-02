@@ -12,6 +12,14 @@
 #define MAX_BUFFER_LEN 48 * 1000 * 1000
 #define MAX_SHM_KEY_LEN 255
 
+#define SHMEM_OK 0
+#define SHMEM_ERR_OPEN 1
+#define SHMEM_ERR_MMAP 2
+#define SHMEM_ERR_RESIZE 3
+#define SHMEM_ERR_NOT_READY 4
+#define SHMEM_ERR_BUFFER 5
+
+
 // C standard issues with compiling
 int ftruncate(int fd, off_t length);
 

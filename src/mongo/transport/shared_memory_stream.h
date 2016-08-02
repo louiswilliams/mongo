@@ -49,7 +49,7 @@ public:
 	~SharedMemoryStream() {};
 
 	bool connect(std::string name) {
-		return (!shmem_stream_connect(const_cast<char*>(name.c_str()), &_stream));
+		return (shmem_stream_connect(const_cast<char*>(name.c_str()), &_stream) == 0);
 	}
 
 	void receive(char* buffer, int len) {

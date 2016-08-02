@@ -26,7 +26,10 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kNetwork
+
 #include "transport_layer_shared_mem.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 namespace transport {
@@ -36,7 +39,9 @@ AtomicInt64 TransportLayerSharedMem::_connectionNumber;
 
 TransportLayerSharedMem::TransportLayerSharedMem(const TransportLayerSharedMem::Options& opts,
                                      std::shared_ptr<ServiceEntryPoint> sep)
-    : _sep(sep), _running(false), _options(opts), _acceptor(opts.name) {}
+    : _sep(sep), _running(false), _options(opts), _acceptor(opts.name) {
+    	LOG(0) << "Opening shared memory port on " << opts.name;
+    }
 
 TransportLayerSharedMem::ShMemTicket::ShMemTicket(const Session& session, Date_t expiration, WorkHandle work)
     : _sessionId(session.id()), _expiration(expiration), _fill(std::move(work)) {}

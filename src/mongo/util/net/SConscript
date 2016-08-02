@@ -38,6 +38,7 @@ networkEnv.Library(
         "listen.cpp",
         "message.cpp",
         "message_port.cpp",
+        "message_port_shared_mem.cpp",
         "message_port_startup_param.cpp",
         "sock.cpp",
         "sockaddr.cpp",
@@ -51,6 +52,7 @@ networkEnv.Library(
     LIBDEPS=[
         '$BUILD_DIR/mongo/db/server_options_core',
         '$BUILD_DIR/mongo/db/server_parameters',
+        '$BUILD_DIR/mongo/transport/shared_memory_stream',
         '$BUILD_DIR/mongo/util/background_job',
         '$BUILD_DIR/mongo/util/concurrency/ticketholder',
         '$BUILD_DIR/mongo/util/decorable',

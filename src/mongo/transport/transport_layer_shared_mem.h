@@ -26,12 +26,9 @@
  *    it in the license file.
  */
 
-#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kNetwork
-
 #include <unordered_map>
 #include <thread>
 
-#include "shared_memory_stream.h"
 
 #include "mongo/platform/basic.h"
 #include "mongo/db/service_context.h"
@@ -39,11 +36,11 @@
 #include "mongo/util/net/message.h"
 #include "mongo/transport/session.h"
 #include "mongo/transport/service_entry_point.h"
+#include "mongo/transport/shared_memory_stream.h"
 #include "mongo/transport/ticket_impl.h"
 #include "mongo/transport/transport_layer.h"
 #include "mongo/util/concurrency/ticketholder.h"
 #include "mongo/util/exit.h"
-#include "mongo/util/log.h"
 #include "mongo/util/net/listen.h"
 #include "mongo/util/net/socket_exception.h"
 

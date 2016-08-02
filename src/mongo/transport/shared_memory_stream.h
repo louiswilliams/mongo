@@ -44,10 +44,12 @@ public:
 
 	SharedMemoryStream(shmem_stream_t stream) : _stream(stream) {}
 
+	SharedMemoryStream() = default;
+
 	~SharedMemoryStream() {};
 
-	void connect(std::string name) {
-		shmem_stream_connect(const_cast<char*>(name.c_str()), &_stream);
+	bool connect(std::string name) {
+		return (!shmem_stream_connect(const_cast<char*>(name.c_str()), &_stream));
 	}
 
 	void receive(char* buffer, int len) {

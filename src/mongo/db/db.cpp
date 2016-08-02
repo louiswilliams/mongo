@@ -116,6 +116,7 @@
 #include "mongo/stdx/memory.h"
 #include "mongo/stdx/thread.h"
 #include "mongo/transport/transport_layer_legacy.h"
+#include "mongo/transport/transport_layer_shared_mem.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/cmdline_utils/censor_cmdline.h"
 #include "mongo/util/concurrency/task.h"
@@ -527,6 +528,14 @@ static ExitCode _initAndListen(int listenPort) {
         return EXIT_NET_ERROR;
     }
 
+    transport::TransportLayerSharedMem::Options shmOptions;
+    shmOptions.name = serverGlobalParams.bind_ip;
+
+    // Create, start, and attach the TL
+    auto shmTransportLayer = stdx::make_unique<transport::TransportLayerSharedMem>(
+        shmOptions,
+        std::make_shared<ServiceEntryPointMongod>(getGlobalServiceContext()->getTransportLayer()));
+
     std::shared_ptr<DbWebServer> dbWebServer;
     if (serverGlobalParams.isHttpInterfaceEnabled) {
         dbWebServer.reset(new DbWebServer(serverGlobalParams.bind_ip,
@@ -742,6 +751,12 @@ static ExitCode _initAndListen(int listenPort) {
     startupOpCtx.reset();
 
     auto start = getGlobalServiceContext()->addAndStartTransportLayer(std::move(transportLayer));
+    if (!start.isOK()) {
+        error() << "Failed to start the listener: " << start.toString();
+        return EXIT_NET_ERROR;
+    }
+
+    start = getGlobalServiceContext()->addAndStartTransportLayer(std::move(shmTransportLayer));
     if (!start.isOK()) {
         error() << "Failed to start the listener: " << start.toString();
         return EXIT_NET_ERROR;

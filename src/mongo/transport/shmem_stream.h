@@ -12,6 +12,9 @@
 #define MAX_BUFFER_LEN 48 * 1000 * 1000
 #define MAX_SHM_KEY_LEN 255
 
+// C standard issues with compiling
+int ftruncate(int fd, off_t length);
+
 // Acceptor is identified by 'name'. Client must know the name before opening
 // To connect, client takes lock, sets client_control, and signals accept_cond.
 // Client waits for ready_cond, server takes lock, creates its control block, sets server_control,

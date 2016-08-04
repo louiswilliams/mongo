@@ -9,8 +9,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define MAX_BUFFER_LEN 48 * 1000 * 1000
-#define MAX_SHM_KEY_LEN 255
+#define SHMEM_MAX_KEY_LEN 255
+#define SHMEM_MAX_KEY_BYTES SHMEM_MAX_KEY_LEN + 1
+#define SHMEM_BUF_GROW_LEN sysconf(_SC_PAGESIZE)
+#define SHMEM_CONTROL_LEN sysconf(_SC_PAGESIZE)
+#define SHMEM_MIN_BUF_LEN (SHMEM_BUF_GROW_LEN - sizeof(shmem_control_t))
+#define SHMEM_MAX_BUF_LEN 4096
 
 #define SHMEM_OK 0
 #define SHMEM_ERR_OPEN 1
@@ -23,33 +27,35 @@
 // C standard issues with compiling
 int ftruncate(int fd, off_t length);
 
-// Acceptor is identified by 'name'. Client must know the name before opening
-// To connect, client takes lock, sets client_control, and signals accept_cond.
-// Client waits for ready_cond, server takes lock, creates its control block, sets server_control,
-// signals ready_cond. Connection is established.
+/** Connection establishment using the acceptor:
+ Acceptor is identified by 'name'. Client must know the name before opening.  To connect,
+ a client takes the lock, sets client_control to the name of its control block.  The client then
+ signals accept_cond. The client waits for ready_cond, the server takes the lock, creates its
+ control block, sets server_control to the name of it's control block, and signals ready_cond.
+ */
 typedef struct {
-	volatile bool running;
-	int fd;
-	char name[MAX_SHM_KEY_LEN + 1];
-	pthread_mutex_t accept_mutex;
-	pthread_cond_t accept_cond;
-	pthread_cond_t ready_cond;
-	char server_control[MAX_SHM_KEY_LEN + 1];
-	char client_control[MAX_SHM_KEY_LEN + 1];
+	volatile bool running; // The server is listening to connections
+	int fd; // Server's file descriptor 
+	char name[SHMEM_MAX_KEY_BYTES]; // Name (client must know) to connect
+	pthread_mutex_t accept_mutex; // Mutex protecting this acceptor
+	pthread_cond_t accept_cond; // The client is ready to be accepted
+	pthread_cond_t ready_cond; // The server is done accepting and ready to talk
+	char server_control[SHMEM_MAX_KEY_BYTES]; // The server sets this to a non-empty name when accepting
+	char client_control[SHMEM_MAX_KEY_BYTES]; // The client sets this to a non-empty name when connecting
 } shmem_acceptor_t;
 
 // Each peer has one control_block per open connection, which acts as its receive buffer.
 // Peers write to the control block, and the application reads from it.
 typedef struct {
-	volatile bool open;
-	pthread_mutex_t mutex;
-	pthread_cond_t read_cond;
-	pthread_cond_t write_cond;
-	int length;
-	int write_cursor;
-    int read_cursor;
-	char name[MAX_SHM_KEY_LEN + 1];
-	char ring_buffer[MAX_BUFFER_LEN];
+	volatile bool open; // Used by peers to check if the control block has been initialized
+	pthread_mutex_t mutex; // Mutex protecting this control block
+	pthread_cond_t read_cond; // Bytes available to be read
+	pthread_cond_t write_cond; // Space available for writing
+	size_t length;	// The amount of bytes in the buffer
+	size_t write_cursor; // The position of the next byte to write
+    size_t read_cursor;  // The position of the next byte to read
+	char name[SHMEM_MAX_KEY_BYTES];
+	char ring_buffer[SHMEM_MAX_BUF_LEN];
 } shmem_control_t;
 
 // There is one stream per open connection. There is a local control block for receiving data

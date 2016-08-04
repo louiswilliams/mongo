@@ -53,7 +53,7 @@ int shmem_stream_listen(char* name, shmem_acceptor_t** acceptor_ptr) {
     }
 
     shmem_acceptor_t* acceptor = *acceptor_ptr;
-    strncpy(acceptor->name, name, MAX_SHM_KEY_LEN);
+    strncpy(acceptor->name, name, SHMEM_MAX_KEY_LEN);
 
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
@@ -106,15 +106,15 @@ int shmem_stream_accept(shmem_acceptor_t* acceptor, shmem_stream_t* stream) {
     acceptor->client_control[0] = '\0';
 
     // Construct local control block
-    char name[MAX_SHM_KEY_LEN + 1];
+    char name[SHMEM_MAX_KEY_BYTES];
     sprintf(name, "%s-%d-%d", acceptor->name, getpid(), _shm_counter++);
     if ((ec = shmem_create(name, sizeof(shmem_control_t), &stream->fd, (void**)&stream->control))) {
         printf("Error intializing shared memory for control block\n");
         pthread_mutex_unlock(&acceptor->accept_mutex);
         return ec;
     }
-    strncpy(stream->control->name, name, MAX_SHM_KEY_LEN);
-    strncpy(acceptor->server_control, name, MAX_SHM_KEY_LEN);
+    strncpy(stream->control->name, name, SHMEM_MAX_KEY_LEN);
+    strncpy(acceptor->server_control, name, SHMEM_MAX_KEY_LEN);
 
     shmem_control_t* mem_control = stream->control;
 
@@ -153,7 +153,7 @@ int shmem_stream_connect(char* server_name, shmem_stream_t* stream) {
     // Take lock, make local control block, set name, signal accept
     pthread_mutex_lock(&acceptor->accept_mutex);
 
-    char name[MAX_SHM_KEY_LEN + 1];
+    char name[SHMEM_MAX_KEY_BYTES];
     sprintf(name, "%s-%d-%d", server_name, getpid(), _shm_counter++);
     if ((ec = shmem_create(name, sizeof(shmem_control_t), &stream->fd, (void**)&stream->control))) {
         printf("Error intializing shared memory for control block\n");
@@ -161,8 +161,8 @@ int shmem_stream_connect(char* server_name, shmem_stream_t* stream) {
         return ec;
     }
 
-    strncpy(acceptor->client_control, name, MAX_SHM_KEY_LEN + 1);
-    strncpy(stream->control->name, name, MAX_SHM_KEY_LEN + 1);
+    strncpy(acceptor->client_control, name, SHMEM_MAX_KEY_LEN);
+    strncpy(stream->control->name, name, SHMEM_MAX_KEY_LEN);
 
     shmem_control_t* mem_control = stream->control;
 
@@ -211,40 +211,80 @@ int shmem_stream_send(shmem_stream_t* stream, const char* buffer, size_t len) {
 int shmem_stream_control_write(shmem_control_t* control, const char* buffer, size_t len) {
     pthread_mutex_lock(&control->mutex);
 
-    while (control->length + len > MAX_BUFFER_LEN) {
-        pthread_cond_wait(&control->write_cond, &control->mutex);
+    size_t bytes_written = 0;
+    
+    /* While not all data written */
+    while (bytes_written < len) {
 
-        if (!control->open) {
-        	pthread_mutex_unlock(&control->mutex);
-        	return SHMEM_ERR_CLOSED;
-        }
+    	/* Wait until there is space in the buffer */
+    	while (control->length == SHMEM_MAX_BUF_LEN ) {
+	        pthread_cond_wait(&control->write_cond, &control->mutex);
+
+            if (!control->open) {
+	        	pthread_mutex_unlock(&control->mutex);
+	        	return SHMEM_ERR_CLOSED;
+	        }
+    	}
+
+		size_t cursor = control->write_cursor;
+
+		/*	If the read cursor is after the write cursor, the space available for writing
+			is the space to the read cursor */
+	    size_t write_space;
+	    if (control->read_cursor > cursor) {
+	    	write_space = cursor - control->read_cursor;
+	    } else {
+	    	write_space = SHMEM_MAX_BUF_LEN - cursor;
+	    }
+	    size_t to_write = (write_space < len) ? write_space : len;
+
+	    memcpy(&control->ring_buffer[cursor], &buffer[bytes_written], to_write);
+	    bytes_written += to_write;
+	    control->length += to_write;
+	    cursor = (cursor + to_write) % SHMEM_MAX_BUF_LEN;
+	    control->write_cursor = cursor;
+
+    	pthread_cond_signal(&control->read_cond);
     }
 
-    int cursor = control->write_cursor;
-    if (cursor + len > MAX_BUFFER_LEN) {
-        printf("I can't write past end of buffer!");
-        pthread_mutex_unlock(&control->mutex);
-        return SHMEM_ERR_BUFFER;
-    }
-    memcpy(&control->ring_buffer[cursor], buffer, len);
-    cursor += len;
-    control->write_cursor = cursor;
-    control->length += len;
-    pthread_cond_signal(&control->read_cond);
     pthread_mutex_unlock(&control->mutex);
     return SHMEM_OK;
 }
 
 int shmem_stream_control_read(shmem_control_t* control, char* buffer, size_t len) {
-    char* peek;
-    int ec;
-    if ((ec = shmem_stream_control_peek(control, &peek, len))) {
-        return ec;
-    }
-    memcpy(buffer, peek, len);
-    if ((ec = shmem_stream_control_advance(control, len))) {
-        return ec;
-    }
+    pthread_mutex_lock(&control->mutex);
+    
+    /* Read all bytes requested */
+    size_t bytes_read = 0;
+    while (bytes_read < len) {
+
+    	/* Wait until data is available */
+		while ((size_t)control->length == 0) {
+	        pthread_cond_wait(&control->read_cond, &control->mutex);
+
+	        if (!control->open) {
+	        	pthread_mutex_unlock(&control->mutex);
+	        	return SHMEM_ERR_CLOSED;
+	        }
+	    }
+	    size_t cursor = control->read_cursor;
+	    size_t read_space;
+	    if (cursor < control->write_cursor) {
+	    	read_space = control->write_cursor - cursor;
+	    } else {
+	    	read_space = SHMEM_MAX_BUF_LEN - cursor;
+	    }
+	    size_t to_read = (read_space < len) ? read_space : len;
+
+	    memcpy(&buffer[bytes_read], &control->ring_buffer[cursor], to_read);
+	    bytes_read += to_read;
+	    control->length -= to_read;
+	    cursor = (cursor + to_read) % SHMEM_MAX_BUF_LEN;
+	    control->read_cursor = cursor;
+
+	    pthread_cond_signal(&control->write_cond);
+	}
+    pthread_mutex_unlock(&control->mutex);
     return SHMEM_OK;
 }
 
@@ -260,7 +300,7 @@ int shmem_stream_control_peek(shmem_control_t* control, char** buffer, size_t le
         	return SHMEM_ERR_CLOSED;
         }
     }
-    if (len + control->read_cursor > MAX_BUFFER_LEN) {
+    if (len + control->read_cursor > SHMEM_MAX_BUF_LEN) {
         printf("Oops. Can't read past end of buffer yet. Implement an iovec\n");
         pthread_mutex_unlock(&control->mutex);
         return SHMEM_ERR_BUFFER;
@@ -273,8 +313,8 @@ int shmem_stream_control_peek(shmem_control_t* control, char** buffer, size_t le
 int shmem_stream_control_advance(shmem_control_t* control, size_t len) {
     pthread_mutex_lock(&control->mutex);
     size_t cursor = control->read_cursor + len;
-    if (cursor >= MAX_BUFFER_LEN) {
-        cursor -= MAX_BUFFER_LEN;
+    if (cursor >= SHMEM_MAX_BUF_LEN) {
+        cursor -= SHMEM_MAX_BUF_LEN;
     }
     if (cursor > (size_t)control->write_cursor) {
         printf("Oops. Can't advance past write cursor!\n");

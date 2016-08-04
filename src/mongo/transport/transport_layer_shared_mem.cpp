@@ -40,7 +40,11 @@ AtomicInt64 TransportLayerSharedMem::_connectionNumber;
 TransportLayerSharedMem::TransportLayerSharedMem(const TransportLayerSharedMem::Options& opts,
                                      std::shared_ptr<ServiceEntryPoint> sep)
     : _sep(sep), _running(false), _options(opts), _acceptor(opts.name) {
-    	LOG(0) << "Opening shared memory port on " << opts.name;
+		if (_options.name.length() == 0) {
+			_options.name = "127.0.0.1";
+		}
+    	LOG(0) << "Opening shared memory port on " << _options.name;
+
     }
 
 TransportLayerSharedMem::ShMemTicket::ShMemTicket(const Session& session, Date_t expiration, WorkHandle work)
@@ -99,9 +103,6 @@ Status TransportLayerSharedMem::start() {
         return {ErrorCodes::InternalError, "TransportLayerSharedMem is already running"};
     }
 
-	if (_options.name.length() == 0) {
-		return {ErrorCodes::BadValue, "Must specify name for shared memory file"};
-	}
 	_acceptor.listen();
 
 

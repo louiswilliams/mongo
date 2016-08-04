@@ -72,14 +72,14 @@ private:
 
 class SharedMemoryAcceptor {
 public:
-	SharedMemoryAcceptor(std::string name) : _name(name) {}
+	SharedMemoryAcceptor() {}
 
 	~SharedMemoryAcceptor() {
 		shutdown();
 	};
 
-	void listen() {
-		shmem_stream_listen(const_cast<char*>(_name.c_str()), &_acceptor);
+	void listen(std::string name) {
+		shmem_stream_listen(const_cast<char*>(name.c_str()), &_acceptor);
 	}
 
 	std::unique_ptr<SharedMemoryStream> accept() {
@@ -96,7 +96,6 @@ public:
 
 private:
 	shmem_acceptor_t* _acceptor;
-	std::string _name;
 };
 
 } //transport

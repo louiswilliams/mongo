@@ -9,7 +9,7 @@ int shmem_create(char* name, size_t len, int* fd, void** addr) {
 
     int shmem_fd = shm_open(name, O_CREAT | O_RDWR, S_IRWXU | S_IRWXG);
     if (shmem_fd < 0) {
-        printf("Error opening shared memory %s: %s\n", name, strerror(errno));
+        printf("Error creating shared memory %s: %s\n", name, strerror(errno));
         return SHMEM_ERR_OPEN;
     }
     *fd = shmem_fd;

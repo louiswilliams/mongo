@@ -120,12 +120,14 @@ Ticket TransportLayerSharedMem::sourceMessage(const Session& session,
 
         MSGHEADER::Value header;
         int headerLen = sizeof(MSGHEADER::Value);
-        stream->receive((char*)&header, headerLen);
+        if (!stream->receive((char*)&header, headerLen)) {
+	  return {ErrorCodes::HostUnreachable, "Unable to receive data from host"};
+	}
         int len = header.constView().getMessageLength();
 
         if (static_cast<size_t>(len) < sizeof(MSGHEADER::Value) ||
             static_cast<size_t>(len) > MaxMessageSizeBytes) {
-            LOG(0) << "recv(): message len " << len << " is invalid. "
+            LOG(0) << "TransportLayerSharedMem recv(): message len " << len << " is invalid. "
                    << "Min " << sizeof(MSGHEADER::Value) << " Max: " << MaxMessageSizeBytes;
             return {ErrorCodes::Overflow, "Message len is invalid"};
         }
@@ -137,7 +139,9 @@ Ticket TransportLayerSharedMem::sourceMessage(const Session& session,
         memcpy(md.view2ptr(), &header, headerLen);
         int left = len - headerLen;
 
-        stream->receive(md.data(), left);
+        if (!stream->receive(md.data(), left)) {
+	  return {ErrorCodes::HostUnreachable, "Unable to receive data from host"};
+	}
 
         message->setData(std::move(buf));
 
@@ -177,15 +181,13 @@ Ticket TransportLayerSharedMem::sinkMessage(const Session& session,
                                       const Message& message,
                                       Date_t expiration) {
     auto sinkCb = [&message](SharedMemoryStream* stream) -> Status {
-        try {
             invariant(!message.empty());
             auto buf = message.buf();
             if (buf) {
-                stream->send(buf, MsgData::ConstView(buf).getLen());
+                if (!stream->send(buf, MsgData::ConstView(buf).getLen())) {
+		  return {ErrorCodes::HostUnreachable, "Unable to send data to host"};
+		}
             }
-        } catch (const SocketException& e) {
-            return {ErrorCodes::HostUnreachable, e.what()};
-        }
         return Status::OK();
     };
 

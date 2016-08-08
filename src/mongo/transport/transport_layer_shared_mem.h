@@ -54,10 +54,12 @@ class TransportLayerSharedMem : public TransportLayer {
 
 public:
     
+    // Named shared memory file: ip + port
     struct Options {
-        std::string name;  // named segment to listen on
+        std::string ip;
+        int port;
 
-        Options() : name("") {}
+        Options() : ip(""), port(0) {}
     };
 
     TransportLayerSharedMem(const TransportLayerSharedMem::Options& opts,

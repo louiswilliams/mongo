@@ -152,7 +152,7 @@ void MessagingPortSharedMem::send(const std::vector<std::pair<char*, int>>& data
 }
 
 bool MessagingPortSharedMem::connect(SockAddr& farEnd) {
-    return _stream->connect(farEnd.getAddr());
+    return _stream->connect(farEnd.getAddr() + ":" + std::to_string(farEnd.getPort()));
 }
 
 void MessagingPortSharedMem::setX509SubjectName(const std::string& x509SubjectName) {

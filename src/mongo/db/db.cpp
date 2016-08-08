@@ -529,7 +529,8 @@ static ExitCode _initAndListen(int listenPort) {
     }
 
     transport::TransportLayerSharedMem::Options shmOptions;
-    shmOptions.name = serverGlobalParams.bind_ip;
+    shmOptions.ip = serverGlobalParams.bind_ip;
+    shmOptions.port = listenPort;
 
     // Create, start, and attach the TL
     auto shmTransportLayer = stdx::make_unique<transport::TransportLayerSharedMem>(

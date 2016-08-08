@@ -97,16 +97,17 @@ Status TransportLayerSharedMem::start() {
         return {ErrorCodes::InternalError, "TransportLayerSharedMem is already running"};
     }
 
-	if (_options.name.length() == 0) {
-		_options.name = "127.0.0.1";
+	if (_options.ip.length() == 0) {
+		_options.ip = "0.0.0.0";
 	}
+	std::string name = _options.ip + ":" + std::to_string(_options.port);
 
-	LOG(0) << "Opening shared memory port on " << _options.name;
-	_acceptor.listen(_options.name);
+	LOG(0) << "Opening shared memory port on " << name;
+	_acceptor.listen(name);
 
     _running.store(true);
 
-    LOG(0) << "Waiting for shared memory connections on " << _options.name;
+    LOG(0) << "Waiting for shared memory connections on " << name;
 
     _listenerThread = std::thread([this]() { initAndListen(); });
 

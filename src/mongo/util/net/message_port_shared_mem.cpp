@@ -76,12 +76,14 @@ bool MessagingPortSharedMem::recv(Message& message) {
 
     MSGHEADER::Value header;
     int headerLen = sizeof(MSGHEADER::Value);
-    _stream->receive((char*)&header, headerLen);
+    if (!_stream->receive((char*)&header, headerLen))
+	return false;
+
     int len = header.constView().getMessageLength();
 
     if (static_cast<size_t>(len) < sizeof(MSGHEADER::Value) ||
         static_cast<size_t>(len) > MaxMessageSizeBytes) {
-        LOG(0) << "recv(): message len " << len << " is invalid. "
+        LOG(0) << "MessagingPortSharedMem recv(): message len " << len << " is invalid. "
                << "Min " << sizeof(MSGHEADER::Value) << " Max: " << MaxMessageSizeBytes;
         return false;
     }

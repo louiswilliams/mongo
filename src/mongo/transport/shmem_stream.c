@@ -7,7 +7,8 @@ int shmem_create(char* name, size_t len, int* fd, void** addr) {
 
     int ec = 0;
 
-    int shmem_fd = shm_open(name, O_CREAT | O_RDWR, S_IRWXU | S_IRWXG);
+    shm_unlink(name);
+    int shmem_fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, S_IRWXU | S_IRWXG);
     if (shmem_fd < 0) {
         printf("Error creating shared memory %s: %s\n", name, strerror(errno));
         return SHMEM_ERR_OPEN;
@@ -222,6 +223,7 @@ int shmem_stream_control_write(shmem_control_t* control, const char* buffer, siz
 
             if (!control->open) {
 	        	pthread_mutex_unlock(&control->mutex);
+			printf("Connection has been closed\n");
 	        	return SHMEM_ERR_CLOSED;
 	        }
     	}
@@ -232,11 +234,11 @@ int shmem_stream_control_write(shmem_control_t* control, const char* buffer, siz
 			is the space to the read cursor */
 	    size_t write_space;
 	    if (control->read_cursor > cursor) {
-	    	write_space = cursor - control->read_cursor;
+	    	write_space = control->read_cursor - cursor;
 	    } else {
 	    	write_space = SHMEM_MAX_BUF_LEN - cursor;
 	    }
-	    size_t to_write = (write_space < len) ? write_space : len;
+	    size_t to_write = (write_space < (len - bytes_written)) ? write_space : (len - bytes_written);
 
 	    memcpy(&control->ring_buffer[cursor], &buffer[bytes_written], to_write);
 	    bytes_written += to_write;
@@ -264,6 +266,7 @@ int shmem_stream_control_read(shmem_control_t* control, char* buffer, size_t len
 
 	        if (!control->open) {
 	        	pthread_mutex_unlock(&control->mutex);
+			printf("Connection has been closed\n");
 	        	return SHMEM_ERR_CLOSED;
 	        }
 	    }
@@ -274,7 +277,7 @@ int shmem_stream_control_read(shmem_control_t* control, char* buffer, size_t len
 	    } else {
 	    	read_space = SHMEM_MAX_BUF_LEN - cursor;
 	    }
-	    size_t to_read = (read_space < len) ? read_space : len;
+	    size_t to_read = (read_space < (len - bytes_read)) ? read_space : (len - bytes_read);
 
 	    memcpy(&buffer[bytes_read], &control->ring_buffer[cursor], to_read);
 	    bytes_read += to_read;
@@ -348,10 +351,12 @@ int shmem_stream_close(shmem_stream_t* stream) {
 	pthread_mutex_lock(&stream->control->mutex);
 	stream->control->open = false;
 	pthread_cond_signal(&stream->control->read_cond);
+	pthread_cond_signal(&stream->control->write_cond);
 	pthread_mutex_unlock(&stream->control->mutex);
 
 	pthread_mutex_lock(&stream->dest_control->mutex);
 	stream->dest_control->open = false;
+	pthread_cond_signal(&stream->dest_control->read_cond);
 	pthread_cond_signal(&stream->dest_control->write_cond);
 	pthread_mutex_unlock(&stream->dest_control->mutex);
 

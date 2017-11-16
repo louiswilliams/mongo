@@ -284,9 +284,16 @@ void explodeScan(const QuerySolutionNode* node,
 
         // If the explosion is on a FetchNode, make a copy and add the 'isn' as a child.
         if (fetchNode) {
-            FetchNode* fetchChild = static_cast<FetchNode*>(fetchNode->clone());
-            fetchChild->children.push_back(child);
 
+            // Copy filter and sorts
+            FetchNode* fetchChild = new FetchNode();
+            if (fetchNode->filter.get()) {
+                fetchChild->filter = fetchNode->filter->shallowClone();
+            }
+            fetchChild->_sorts = fetchNode->_sorts;
+
+            // Add the 'child' IXSCAN as a child of the FETCH stage, and the FETCH stage to our result set.
+            fetchChild->children.push_back(child);
             explosionResult->push_back(fetchChild);
         } else {
             explosionResult->push_back(child);

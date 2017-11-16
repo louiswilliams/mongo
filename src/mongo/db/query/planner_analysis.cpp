@@ -121,9 +121,17 @@ bool structureOKForExplode(QuerySolutionNode* solnRoot, QuerySolutionNode** toRe
         }
     }
 
+    // If we have a STAGE_OR, we can explode when all children are IXSCANs, or when the FETCH's
+    // children are IXSCANs
     if (STAGE_OR == solnRoot->getType()) {
         for (size_t i = 0; i < solnRoot->children.size(); ++i) {
-            if (STAGE_IXSCAN != solnRoot->children[i]->getType()) {
+
+            auto child = solnRoot->children[i];
+            if (STAGE_FETCH == child->getType()) {
+                if (STAGE_IXSCAN != child->children[0]->getType()) {
+                    return false;
+                }
+            } else if (STAGE_IXSCAN != child->getType()) {
                 return false;
             }
         }

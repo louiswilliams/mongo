@@ -72,6 +72,33 @@ void getLeafNodes(QuerySolutionNode* root, vector<QuerySolutionNode*>* leafNodes
 }
 
 /**
+ * Walk the tree 'root' and output all nodes that can be considered the root of a leaf.
+ * This means that a FETCH node with an IXSCAN leaf will be returned, as well as a singular
+ * IXSCAN leaf without a FETCH as a parent.
+ */
+void getExplodableLeafNodes(QuerySolutionNode* root, vector<QuerySolutionNode*>* leafNodes) {
+    if (0 == root->children.size()) {
+        leafNodes->push_back(root);
+    } else {
+        for (size_t i = 0; i < root->children.size(); ++i) {
+            auto child = root->children[i];
+            // Add a leaf IXSCAN
+            if (STAGE_IXSCAN == child->getType() && child->children.size() == 0) {
+                leafNodes->push_back(child);
+
+            // Add a FETCH node that has a leaf IXSCAN
+            } else if (STAGE_FETCH == child->getType()) {
+                if (STAGE_IXSCAN == child->children[0]->getType()) {
+                    leafNodes->push_back(child);
+                }
+            } else {
+                getLeafNodes(root->children[i], leafNodes);
+            }
+        }
+    }
+}
+
+/**
  * Returns true if every interval in 'oil' is a point, false otherwise.
  */
 bool isUnionOfPoints(const OrderedIntervalList& oil) {
@@ -122,7 +149,7 @@ bool structureOKForExplode(QuerySolutionNode* solnRoot, QuerySolutionNode** toRe
     }
 
     // If we have a STAGE_OR, we can explode when all children are IXSCANs, or when the FETCH's
-    // children are IXSCANs
+    // children are IXSCANs. Only return if all leaf nodes are IXSCANs.
     if (STAGE_OR == solnRoot->getType()) {
         for (size_t i = 0; i < solnRoot->children.size(); ++i) {
 
@@ -191,9 +218,9 @@ void makeCartesianProduct(const IndexBounds& bounds,
 }
 
 /**
- * Take the provided index scan node 'isn'. Returns a list of index scans which are
- * logically equivalent to 'isn' if joined by a MergeSort through the out-parameter
- * 'explosionResult'. These index scan instances are owned by the caller.
+ * Take the provided 'node', either an IndexScanNode or FetchNode with a direct child that is an
+ * IndexScanNode. Returns a list of nodes which are logically equivalent to 'node' if joined
+ * by a MergeSort through the out-parameter 'explosionResult'. These nodes are owned by the caller.
  *
  * fieldsToExplode is a count of how many fields in the scan's bounds are the union of point
  * intervals.  This is computed beforehand and provided as a small optimization.
@@ -209,14 +236,26 @@ void makeCartesianProduct(const IndexBounds& bounds,
  * a:[[1,1]], b:[MinKey, MaxKey]
  * a:[[2,2]], b:[MinKey, MaxKey]
  */
-void explodeScan(const IndexScanNode* isn,
+void explodeScan(const QuerySolutionNode* node,
                  const BSONObj& sort,
                  size_t fieldsToExplode,
                  vector<QuerySolutionNode*>* explosionResult) {
-    // Turn the compact bounds in 'isn' into a bunch of points...
+    
+    const FetchNode* fetchNode = nullptr;
+    const IndexScanNode* isn;
+    // Get the 'isn' from either the FetchNode or IndexScanNode.
+    if (STAGE_FETCH == node->getType()) {
+        fetchNode = static_cast<const FetchNode*>(node);
+        isn = static_cast<const IndexScanNode*>(node->children[0]);
+    } else if (STAGE_IXSCAN == node->getType()) {
+        isn = static_cast<const IndexScanNode*>(node);
+    } else {
+        invariant(false);
+    }
     vector<PointPrefix> prefixForScans;
     makeCartesianProduct(isn->bounds, fieldsToExplode, &prefixForScans);
 
+    // Turn the compact bounds in 'isn' into a bunch of points...
     for (size_t i = 0; i < prefixForScans.size(); ++i) {
         const PointPrefix& prefix = prefixForScans[i];
         verify(prefix.size() == fieldsToExplode);
@@ -242,7 +281,16 @@ void explodeScan(const IndexScanNode* isn,
         for (size_t j = fieldsToExplode; j < isn->bounds.fields.size(); ++j) {
             child->bounds.fields[j] = isn->bounds.fields[j];
         }
-        explosionResult->push_back(child);
+
+        // If the explosion is on a FetchNode, make a copy and add the 'isn' as a child.
+        if (fetchNode) {
+            FetchNode* fetchChild = static_cast<FetchNode*>(fetchNode->clone());
+            fetchChild->children.push_back(child);
+
+            explosionResult->push_back(fetchChild);
+        } else {
+            explosionResult->push_back(child);
+        }
     }
 }
 
@@ -356,7 +404,7 @@ bool QueryPlannerAnalysis::explodeForSort(const CanonicalQuery& query,
         return false;
     }
 
-    getLeafNodes(*solnRoot, &leafNodes);
+    getExplodableLeafNodes(*solnRoot, &leafNodes);
 
     const BSONObj& desiredSort = query.getQueryRequest().getSort();
 
@@ -372,18 +420,21 @@ bool QueryPlannerAnalysis::explodeForSort(const CanonicalQuery& query,
     // upon explosion.
     for (size_t i = 0; i < leafNodes.size(); ++i) {
         // We can do this because structureOKForExplode is only true if the leaves are index
-        // scans.
-        IndexScanNode* isn = static_cast<IndexScanNode*>(leafNodes[i]);
+        // scansA
+        auto leaf = leafNodes[i];
+        IndexScanNode* isn;
+        if (STAGE_IXSCAN == leaf->getType()) { 
+            isn = static_cast<IndexScanNode*>(leaf);
+        } else if (STAGE_FETCH == leaf->getType()) {
+            isn = static_cast<IndexScanNode*>(leaf->children[0]);
+        } else {
+            invariant(false);
+        }
+        
         const IndexBounds& bounds = isn->bounds;
 
         // Not a point interval prefix, can't try to rewrite.
         if (bounds.isSimpleRange) {
-            return false;
-        }
-
-        if (isn->index.multikey && isn->index.multikeyPaths.empty()) {
-            // The index is multikey but has no path-level multikeyness metadata. In this case, the
-            // index can never provide a sort.
             return false;
         }
 
@@ -419,13 +470,7 @@ bool QueryPlannerAnalysis::explodeForSort(const CanonicalQuery& query,
         // the bounds.
         BSONObjBuilder resultingSortBob;
         while (kpIt.more()) {
-            auto elem = kpIt.next();
-            if (isn->multikeyFields.find(elem.fieldNameStringData()) != isn->multikeyFields.end()) {
-                // One of the indexed fields providing the sort is multikey. It is not correct for a
-                // field with multikey components to provide a sort, so bail out.
-                return false;
-            }
-            resultingSortBob.append(elem);
+            resultingSortBob.append(kpIt.next());
         }
 
         // See if it's the order we're looking for.
@@ -463,8 +508,7 @@ bool QueryPlannerAnalysis::explodeForSort(const CanonicalQuery& query,
     MergeSortNode* merge = new MergeSortNode();
     merge->sort = desiredSort;
     for (size_t i = 0; i < leafNodes.size(); ++i) {
-        IndexScanNode* isn = static_cast<IndexScanNode*>(leafNodes[i]);
-        explodeScan(isn, desiredSort, fieldsToExplode[i], &merge->children);
+        explodeScan(leafNodes[i], desiredSort, fieldsToExplode[i], &merge->children);
     }
 
     merge->computeProperties();

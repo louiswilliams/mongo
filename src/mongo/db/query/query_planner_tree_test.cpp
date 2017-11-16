@@ -1011,6 +1011,38 @@ TEST_F(QueryPlannerTest, ExplodeIxscanWithFilter) {
         "filter: {b: {$regex: 'foo', $options: 'i'}}}}]}}}}");
 }
 
+// SERVER-25782
+// Explode an IXSCAN with a MergeSort even if the clauses aren't covered, requiring a fetch.
+TEST_F(QueryPlannerTest, ExplodeOrForSortNotCovered) {
+    addIndex(BSON("a" << 1 << "x" << 1));
+    addIndex(BSON("b" << 1 << "x" << 1));
+
+    // Fetch unindexed field 'c'
+    runQuerySortProj(fromjson("{$or: [{a: {$in: [1,2]}, c: 1}, {b: {$in: [3,4]}, c: 2}]}"),
+                     BSON("x" << 1),
+                     BSONObj());
+
+    assertNumSolutions(2U);
+    assertSolutionExists(
+        "{sort: {pattern: {x: 1}, limit: 0, node: {sortKeyGen: {node: "
+        "{cscan: {dir: 1}}}}}}");
+    assertSolutionExists(
+        "{mergeSort: {nodes: "
+        "[{fetch: {filter: {c: 1}, node: {ixscan: {bounds: {a: [[1,1,true,true]], "
+        "x: [['MinKey','MaxKey',true,true]]},"
+        "pattern: {a:1, x:1}}}}},"
+        "{fetch: {filter: {c: 1}, node: {ixscan: {bounds: {a: [[2,2,true,true]], "
+        "x: [['MinKey','MaxKey',true,true]]},"
+        "pattern: {a:1, x:1}}}}},"
+        "{fetch: {filter: {c: 2}, node: {ixscan: {bounds: {b: [[3,3,true,true]], "
+        "x: [['MinKey','MaxKey',true,true]]},"
+        "pattern: {b:1, x:1}}}}},"
+        "{fetch: {filter: {c: 2}, node: {ixscan: {bounds: {b: [[4,4,true,true]], "
+        "x: [['MinKey','MaxKey',true,true]]},"
+        "pattern: {b:1, x:1}}}}}]}}");
+}
+
+
 TEST_F(QueryPlannerTest, InWithSortAndLimitTrailingField) {
     addIndex(BSON("a" << 1 << "b" << -1 << "c" << 1));
     runQuerySortProjSkipNToReturn(fromjson("{a: {$in: [1, 2]}, b: {$gte: 0}}"),

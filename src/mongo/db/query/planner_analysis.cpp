@@ -73,6 +73,32 @@ void getLeafNodes(QuerySolutionNode* root, vector<QuerySolutionNode*>* leafNodes
 }
 
 /**
+ * Walk the tree 'root' and output all nodes that can be considered the root of a leaf.
+ * This means that a FETCH node with an IXSCAN leaf will be returned, as well as a singular
+ * IXSCAN leaf without a FETCH as a parent.
+ */
+void getExplodableLeafNodes(QuerySolutionNode* root, vector<QuerySolutionNode*>* leafNodes) {
+    if (0 == root->children.size()) {
+        leafNodes->push_back(root);
+    } else {
+        for (size_t i = 0; i < root->children.size(); ++i) {
+            auto child = root->children[i];
+            if (STAGE_IXSCAN == child->getType() && child->children.size() == 0) {
+                // Add a leaf IXSCAN.
+                leafNodes->push_back(child);
+            } else if (STAGE_FETCH == child->getType()) {
+                // Add a FETCH node that has a leaf IXSCAN.
+                if (STAGE_IXSCAN == child->children[0]->getType()) {
+                    leafNodes->push_back(child);
+                }
+            } else {
+                getLeafNodes(root->children[i], leafNodes);
+            }
+        }
+    }
+}
+
+/**
  * Returns true if every interval in 'oil' is a point, false otherwise.
  */
 bool isUnionOfPoints(const OrderedIntervalList& oil) {
@@ -122,9 +148,17 @@ bool structureOKForExplode(QuerySolutionNode* solnRoot, QuerySolutionNode** toRe
         }
     }
 
+    // If we have a STAGE_OR, we can explode when all children are IXSCANs, or when the FETCH's
+    // children are IXSCANs. Only return if all leaf nodes are IXSCANs.
     if (STAGE_OR == solnRoot->getType()) {
         for (size_t i = 0; i < solnRoot->children.size(); ++i) {
-            if (STAGE_IXSCAN != solnRoot->children[i]->getType()) {
+
+            auto child = solnRoot->children[i];
+            if (STAGE_FETCH == child->getType()) {
+                if (STAGE_IXSCAN != child->children[0]->getType()) {
+                    return false;
+                }
+            } else if (STAGE_IXSCAN != child->getType()) {
                 return false;
             }
         }
@@ -184,9 +218,9 @@ void makeCartesianProduct(const IndexBounds& bounds,
 }
 
 /**
- * Take the provided index scan node 'isn'. Returns a list of index scans which are
- * logically equivalent to 'isn' if joined by a MergeSort through the out-parameter
- * 'explosionResult'. These index scan instances are owned by the caller.
+ * Take the provided 'node', either an IndexScanNode or FetchNode with a direct child that is an
+ * IndexScanNode. Returns a list of nodes which are logically equivalent to 'node' if joined
+ * by a MergeSort through the out-parameter 'explosionResult'. These nodes are owned by the caller.
  *
  * fieldsToExplode is a count of how many fields in the scan's bounds are the union of point
  * intervals.  This is computed beforehand and provided as a small optimization.
@@ -202,14 +236,26 @@ void makeCartesianProduct(const IndexBounds& bounds,
  * a:[[1,1]], b:[MinKey, MaxKey]
  * a:[[2,2]], b:[MinKey, MaxKey]
  */
-void explodeScan(const IndexScanNode* isn,
+void explodeScan(const QuerySolutionNode* node,
                  const BSONObj& sort,
                  size_t fieldsToExplode,
                  vector<QuerySolutionNode*>* explosionResult) {
-    // Turn the compact bounds in 'isn' into a bunch of points...
+
+    const FetchNode* fetchNode = nullptr;
+    const IndexScanNode* isn = nullptr;
+    // Get the 'isn' from either the FetchNode or IndexScanNode.
+    if (STAGE_FETCH == node->getType()) {
+        fetchNode = static_cast<const FetchNode*>(node);
+        isn = static_cast<const IndexScanNode*>(node->children[0]);
+    } else if (STAGE_IXSCAN == node->getType()) {
+        isn = static_cast<const IndexScanNode*>(node);
+    }
+    invariant(isn);
+
     vector<PointPrefix> prefixForScans;
     makeCartesianProduct(isn->bounds, fieldsToExplode, &prefixForScans);
 
+    // Turn the compact bounds in 'isn' into a bunch of points...
     for (size_t i = 0; i < prefixForScans.size(); ++i) {
         const PointPrefix& prefix = prefixForScans[i];
         verify(prefix.size() == fieldsToExplode);
@@ -234,7 +280,24 @@ void explodeScan(const IndexScanNode* isn,
         for (size_t j = fieldsToExplode; j < isn->bounds.fields.size(); ++j) {
             child->bounds.fields[j] = isn->bounds.fields[j];
         }
-        explosionResult->push_back(child);
+
+        // If the explosion is on a FetchNode, make a copy and add the 'isn' as a child.
+        if (fetchNode) {
+
+            // Copy filter and sorts
+            FetchNode* fetchChild = new FetchNode();
+            if (fetchNode->filter.get()) {
+                fetchChild->filter = fetchNode->filter->shallowClone();
+            }
+            fetchChild->_sorts = fetchNode->_sorts;
+
+            // Add the 'child' IXSCAN as a child of the FETCH stage, and the FETCH stage to the
+            // result set.
+            fetchChild->children.push_back(child);
+            explosionResult->push_back(fetchChild);
+        } else {
+            explosionResult->push_back(child);
+        }
     }
 }
 
@@ -550,7 +613,12 @@ bool QueryPlannerAnalysis::explodeForSort(const CanonicalQuery& query,
         return false;
     }
 
-    getLeafNodes(*solnRoot, &leafNodes);
+    // If we are replacing an OR, 'leaf' nodes can be FETCH stages, so use traverse differently.
+    if (STAGE_OR == toReplace->getType()) {
+        getExplodableLeafNodes(*solnRoot, &leafNodes);
+    } else {
+        getLeafNodes(*solnRoot, &leafNodes);
+    }
 
     const BSONObj& desiredSort = query.getQueryRequest().getSort();
 
@@ -567,7 +635,15 @@ bool QueryPlannerAnalysis::explodeForSort(const CanonicalQuery& query,
     for (size_t i = 0; i < leafNodes.size(); ++i) {
         // We can do this because structureOKForExplode is only true if the leaves are index
         // scans.
-        IndexScanNode* isn = static_cast<IndexScanNode*>(leafNodes[i]);
+        auto leaf = leafNodes[i];
+        IndexScanNode* isn = nullptr;
+        if (STAGE_IXSCAN == leaf->getType()) {
+            isn = static_cast<IndexScanNode*>(leaf);
+        } else if (STAGE_FETCH == leaf->getType()) {
+            isn = static_cast<IndexScanNode*>(leaf->children[0]);
+        }
+        invariant(isn);
+
         const IndexBounds& bounds = isn->bounds;
 
         // Not a point interval prefix, can't try to rewrite.
@@ -660,8 +736,7 @@ bool QueryPlannerAnalysis::explodeForSort(const CanonicalQuery& query,
     MergeSortNode* merge = new MergeSortNode();
     merge->sort = desiredSort;
     for (size_t i = 0; i < leafNodes.size(); ++i) {
-        IndexScanNode* isn = static_cast<IndexScanNode*>(leafNodes[i]);
-        explodeScan(isn, desiredSort, fieldsToExplode[i], &merge->children);
+        explodeScan(leafNodes[i], desiredSort, fieldsToExplode[i], &merge->children);
     }
 
     merge->computeProperties();

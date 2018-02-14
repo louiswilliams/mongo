@@ -38,6 +38,7 @@
 #include "mongo/base/error_codes.h"
 #include "mongo/db/global_settings.h"
 #include "mongo/db/repl/repl_settings.h"
+#include "mongo/db/server_parameters.h"
 #include "mongo/db/storage/journal_listener.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_kv_engine.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_util.h"
@@ -47,6 +48,29 @@
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
+
+AtomicInt32 kWTSessionCursorCacheSize(10000);
+
+class WTSessionCursorCacheSize
+    : public ExportedServerParameter<int, ServerParameterType::kStartupAndRuntime> {
+public:
+    WTSessionCursorCacheSize()
+        : ExportedServerParameter<int, ServerParameterType::kStartupAndRuntime>(
+              ServerParameterSet::getGlobal(),
+              "WTSessionCursorCacheSize",
+              &kWTSessionCursorCacheSize) {}
+
+    virtual Status validate(const int& potentialNewValue) {
+        if (potentialNewValue < 0) {
+            return Status(ErrorCodes::BadValue,
+                          str::stream() << "WTSessionCursorCacheSize must be great than or equal "
+                                        << "to 0, but attempted to set to: "
+                                        << potentialNewValue);
+        }
+
+        return Status::OK();
+    }
+} WTSessionCursorCacheSizeSetting;
 
 WiredTigerSession::WiredTigerSession(WT_CONNECTION* conn, uint64_t epoch, uint64_t cursorEpoch)
     : _epoch(epoch),
@@ -116,7 +140,8 @@ void WiredTigerSession::releaseCursor(uint64_t id, WT_CURSOR* cursor) {
     // across all of them (i.e., each cursor has 1/N chance of used for each operation).  We
     // would like to cache N cursors in that case, so any given cursor could go N**2 operations
     // in between use.
-    while (_cursorGen - _cursors.back()._gen > 10000) {
+    while (_cursorGen - _cursors.back()._gen >
+           static_cast<uint64_t>(kWTSessionCursorCacheSize.load())) {
         cursor = _cursors.back()._cursor;
         _cursors.pop_back();
         _cursorsCached--;

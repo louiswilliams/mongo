@@ -140,8 +140,9 @@ void WiredTigerSession::releaseCursor(uint64_t id, WT_CURSOR* cursor) {
     // across all of them (i.e., each cursor has 1/N chance of used for each operation).  We
     // would like to cache N cursors in that case, so any given cursor could go N**2 operations
     // in between use.
-    while (_cursorGen - _cursors.back()._gen >
-           static_cast<uint64_t>(kWTSessionCursorCacheSize.load())) {
+    while (!_cursors.empty() &&
+           _cursorGen - _cursors.back()._gen >
+               static_cast<uint64_t>(kWTSessionCursorCacheSize.load())) {
         cursor = _cursors.back()._cursor;
         _cursors.pop_back();
         _cursorsCached--;

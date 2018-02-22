@@ -69,6 +69,16 @@ public:
     virtual void beginUnitOfWork(OperationContext* opCtx) = 0;
     virtual void commitUnitOfWork() = 0;
     virtual void abortUnitOfWork() = 0;
+    /**
+     * Must be called after beginUnitOfWork and before calling either abortUnitOfWork or
+     * commitUnitOfWork. Transitions the current transaction (unit of work) to the
+     * "prepared" state. Must be overridden by storage engines that support prepared
+     * transactions.
+     */
+    virtual void prepareUnitOfWork(Timestamp timestamp) {
+        uasserted(ErrorCodes::PreparedTransactionsNotSupported,
+                  "This storage engine does not support prepared transactions");
+    }
 
     /**
      * Waits until all commits that happened before this call are durable. Returns true, unless the

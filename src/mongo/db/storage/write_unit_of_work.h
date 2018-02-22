@@ -44,6 +44,13 @@ public:
 
     static std::unique_ptr<WriteUnitOfWork> createForSnapshotResume(OperationContext* opCtx);
     void release();
+    /**
+     * The state must be kActiveUnitOfWork and the WUOW may not be nested and will throw
+     * in that case. Will transition the WriteUnitOfWork to the "prepared" state or throw
+     * PreparedTransactionsNotSupported. May throw WriteConflictException.
+     */
+    void prepare();
+
     void commit();
 
 private:

@@ -62,6 +62,7 @@ public:
     ~WiredTigerRecoveryUnit();
 
     void beginUnitOfWork(OperationContext* opCtx) override;
+    void prepareUnitOfWork(Timestamp timestamp) override;
     void commitUnitOfWork() override;
     void abortUnitOfWork() override;
 
@@ -145,6 +146,7 @@ private:
     bool _active;
     bool _isTimestamped = false;
     Timestamp _commitTimestamp;
+    Timestamp _prepareTimestamp;
     uint64_t _mySnapshotId;
     bool _readFromMajorityCommittedSnapshot = false;
     Timestamp _majorityCommittedSnapshot;

@@ -112,6 +112,19 @@ void WiredTigerRecoveryUnit::beginUnitOfWork(OperationContext* opCtx) {
     _inUnitOfWork = true;
 }
 
+void WiredTigerRecoveryUnit::prepareUnitOfWork(Timestamp timestamp) {
+    invariant(!_areWriteUnitOfWorksBanned);
+    invariant(!timestamp.isNull());
+    invariant(_inUnitOfWork);
+
+    WT_SESSION* session = _session->getSession();
+    _prepareTimestamp = timestamp;
+
+    // Prepare the transaction.
+    uassertStatusOK(
+        _sessionCache->snapshotManager().prepareTransaction(_prepareTimestamp, session));
+}
+
 void WiredTigerRecoveryUnit::commitUnitOfWork() {
     invariant(_inUnitOfWork);
     _inUnitOfWork = false;

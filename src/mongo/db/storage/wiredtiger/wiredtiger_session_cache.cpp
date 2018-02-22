@@ -49,28 +49,31 @@
 
 namespace mongo {
 
-AtomicInt32 kWTSessionCursorCacheSize(10000);
 
-class WTSessionCursorCacheSize
+AtomicInt32 kWiredTigerCursorCacheSize(10000);
+
+
+class WiredTigerCursorCacheSize
     : public ExportedServerParameter<int, ServerParameterType::kStartupAndRuntime> {
 public:
-    WTSessionCursorCacheSize()
+    WiredTigerCursorCacheSize()
         : ExportedServerParameter<int, ServerParameterType::kStartupAndRuntime>(
               ServerParameterSet::getGlobal(),
-              "WTSessionCursorCacheSize",
-              &kWTSessionCursorCacheSize) {}
+              "WiredTigerCursorCacheSize",
+              &kWiredTigerCursorCacheSize) {}
 
     virtual Status validate(const int& potentialNewValue) {
         if (potentialNewValue < 0) {
             return Status(ErrorCodes::BadValue,
-                          str::stream() << "WTSessionCursorCacheSize must be great than or equal "
-                                        << "to 0, but attempted to set to: "
-                                        << potentialNewValue);
+                          str::stream()
+                              << "WiredTigerCursorCacheSize must be greater than or equal "
+                              << "to 0, but attempted to set to: "
+                              << potentialNewValue);
         }
 
         return Status::OK();
     }
-} WTSessionCursorCacheSizeSetting;
+} WiredTigerCursorCacheSizeSetting;
 
 WiredTigerSession::WiredTigerSession(WT_CONNECTION* conn, uint64_t epoch, uint64_t cursorEpoch)
     : _epoch(epoch),
@@ -140,9 +143,8 @@ void WiredTigerSession::releaseCursor(uint64_t id, WT_CURSOR* cursor) {
     // across all of them (i.e., each cursor has 1/N chance of used for each operation).  We
     // would like to cache N cursors in that case, so any given cursor could go N**2 operations
     // in between use.
-    while (!_cursors.empty() &&
-           _cursorGen - _cursors.back()._gen >
-               static_cast<uint64_t>(kWTSessionCursorCacheSize.load())) {
+    uint64_t cursorCacheSize = static_cast<uint64_t>(kWiredTigerCursorCacheSize.load());
+    while (!_cursors.empty() && _cursorGen - _cursors.back()._gen > cursorCacheSize) {
         cursor = _cursors.back()._cursor;
         _cursors.pop_back();
         _cursorsCached--;

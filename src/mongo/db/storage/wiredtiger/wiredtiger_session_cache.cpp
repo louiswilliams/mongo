@@ -76,12 +76,7 @@ public:
 } WiredTigerCursorCacheSizeSetting;
 
 WiredTigerSession::WiredTigerSession(WT_CONNECTION* conn, uint64_t epoch, uint64_t cursorEpoch)
-    : _epoch(epoch),
-      _cursorEpoch(cursorEpoch),
-      _session(NULL),
-      _cursorGen(0),
-      _cursorsCached(0),
-      _cursorsOut(0) {
+    : _epoch(epoch), _cursorEpoch(cursorEpoch), _session(NULL), _cursorGen(0), _cursorsOut(0) {
     invariantWTOK(conn->open_session(conn, NULL, "isolation=snapshot", &_session));
 }
 
@@ -94,7 +89,6 @@ WiredTigerSession::WiredTigerSession(WT_CONNECTION* conn,
       _cache(cache),
       _session(NULL),
       _cursorGen(0),
-      _cursorsCached(0),
       _cursorsOut(0) {
     invariantWTOK(conn->open_session(conn, NULL, "isolation=snapshot", &_session));
 }
@@ -112,7 +106,6 @@ WT_CURSOR* WiredTigerSession::getCursor(const std::string& uri, uint64_t id, boo
             WT_CURSOR* c = i->_cursor;
             _cursors.erase(i);
             _cursorsOut++;
-            _cursorsCached--;
             return c;
         }
     }
@@ -136,7 +129,6 @@ void WiredTigerSession::releaseCursor(uint64_t id, WT_CURSOR* cursor) {
 
     // Cursors are pushed to the front of the list and removed from the back
     _cursors.push_front(WiredTigerCachedCursor(id, _cursorGen++, cursor));
-    _cursorsCached++;
 
     // "Old" is defined as not used in the last N**2 operations, if we have N cursors cached.
     // The reasoning here is to imagine a workload with N tables performing operations randomly
@@ -147,7 +139,6 @@ void WiredTigerSession::releaseCursor(uint64_t id, WT_CURSOR* cursor) {
     while (!_cursors.empty() && _cursorGen - _cursors.back()._gen > cursorCacheSize) {
         cursor = _cursors.back()._cursor;
         _cursors.pop_back();
-        _cursorsCached--;
         invariantWTOK(cursor->close(cursor));
     }
 }

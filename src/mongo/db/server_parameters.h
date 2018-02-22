@@ -277,9 +277,6 @@ template <>
 class is_safe_runtime_parameter_type<int> : public std::true_type {};
 
 template <>
-class is_safe_runtime_parameter_type<uint32_t> : public std::true_type {};
-
-template <>
 class is_safe_runtime_parameter_type<long long> : public std::true_type {};
 
 template <>

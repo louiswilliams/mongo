@@ -54,19 +54,19 @@ AtomicInt32 kWiredTigerCursorCacheSize(10000);
 
 
 class WiredTigerCursorCacheSize
-    : public ExportedServerParameter<int, ServerParameterType::kStartupAndRuntime> {
+    : public ExportedServerParameter<int32_t, ServerParameterType::kStartupAndRuntime> {
 public:
     WiredTigerCursorCacheSize()
-        : ExportedServerParameter<int, ServerParameterType::kStartupAndRuntime>(
+        : ExportedServerParameter<int32_t, ServerParameterType::kStartupAndRuntime>(
               ServerParameterSet::getGlobal(),
-              "WiredTigerCursorCacheSize",
+              "wiredTigerCursorCacheSize",
               &kWiredTigerCursorCacheSize) {}
 
-    virtual Status validate(const int& potentialNewValue) {
+    virtual Status validate(const int32_t& potentialNewValue) {
         if (potentialNewValue < 0) {
             return Status(ErrorCodes::BadValue,
                           str::stream()
-                              << "WiredTigerCursorCacheSize must be greater than or equal "
+                              << "wiredTigerCursorCacheSize must be greater than or equal "
                               << "to 0, but attempted to set to: "
                               << potentialNewValue);
         }
@@ -138,11 +138,6 @@ void WiredTigerSession::releaseCursor(uint64_t id, WT_CURSOR* cursor) {
     _cursors.push_front(WiredTigerCachedCursor(id, _cursorGen++, cursor));
     _cursorsCached++;
 
-    // "Old" is defined as not used in the last N**2 operations, if we have N cursors cached.
-    // The reasoning here is to imagine a workload with N tables performing operations randomly
-    // across all of them (i.e., each cursor has 1/N chance of used for each operation).  We
-    // would like to cache N cursors in that case, so any given cursor could go N**2 operations
-    // in between use.
     uint64_t cursorCacheSize = static_cast<uint64_t>(kWiredTigerCursorCacheSize.load());
     while (!_cursors.empty() && _cursorGen - _cursors.back()._gen > cursorCacheSize) {
         cursor = _cursors.back()._cursor;

@@ -54,15 +54,15 @@ AtomicInt32 kWiredTigerCursorCacheSize(10000);
 
 
 class WiredTigerCursorCacheSize
-    : public ExportedServerParameter<int32_t, ServerParameterType::kStartupAndRuntime> {
+    : public ExportedServerParameter<std::int32_t, ServerParameterType::kStartupAndRuntime> {
 public:
     WiredTigerCursorCacheSize()
-        : ExportedServerParameter<int32_t, ServerParameterType::kStartupAndRuntime>(
+        : ExportedServerParameter<std::int32_t, ServerParameterType::kStartupAndRuntime>(
               ServerParameterSet::getGlobal(),
               "wiredTigerCursorCacheSize",
               &kWiredTigerCursorCacheSize) {}
 
-    virtual Status validate(const int32_t& potentialNewValue) {
+    virtual Status validate(const std::int32_t& potentialNewValue) {
         if (potentialNewValue < 0) {
             return Status(ErrorCodes::BadValue,
                           str::stream()
@@ -138,7 +138,7 @@ void WiredTigerSession::releaseCursor(uint64_t id, WT_CURSOR* cursor) {
     _cursors.push_front(WiredTigerCachedCursor(id, _cursorGen++, cursor));
     _cursorsCached++;
 
-    uint64_t cursorCacheSize = static_cast<uint64_t>(kWiredTigerCursorCacheSize.load());
+    std::uint64_t cursorCacheSize = static_cast<std::uint64_t>(kWiredTigerCursorCacheSize.load());
     while (!_cursors.empty() && _cursorGen - _cursors.back()._gen > cursorCacheSize) {
         cursor = _cursors.back()._cursor;
         _cursors.pop_back();

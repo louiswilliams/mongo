@@ -31,6 +31,7 @@
 #endif
 
 #include "mongo/base/disallow_copying.h"
+#include "mongo/db/operation_context.h"
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/concurrency/mutex.h"
@@ -47,10 +48,24 @@ public:
 
     bool tryAcquire();
 
-    void waitForTicket();
+    /**
+     * Attempts to acquire a ticket. Blocks until a ticket is acquired or the OperationContext
+     * 'opCtx' is killed, throwing an AssertionException.
+     */
+    void waitForTicket(OperationContext* opCtx);
+    void waitForTicket() {
+        waitForTicket(nullptr);
+    }
 
-    bool waitForTicketUntil(Date_t until);
-
+    /**
+     * Attempts to acquire a ticket within a deadline, 'until'. Returns 'true' if a ticket is
+     * acquired and 'false' if the deadline is reached. Throws an AssertionException if the
+     * OperationContext 'opCtx' is killed.
+     */
+    bool waitForTicketUntil(OperationContext* opCtx, Date_t until);
+    bool waitForTicketUntil(Date_t until) {
+        return waitForTicketUntil(nullptr, until);
+    }
     void release();
 
     Status resize(int newSize);
@@ -62,6 +77,10 @@ public:
     int outof() const;
 
 private:
+    /**
+     * Takes a number in milliseconds and sets the appropriate values in a timespec structure.
+     */
+    void _tsFromMillis(const long long milliseconds, struct timespec& ts);
 #if defined(__linux__)
     mutable sem_t _sem;
 

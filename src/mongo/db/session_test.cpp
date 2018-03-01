@@ -590,6 +590,60 @@ TEST_F(SessionTest, StashAndUnstashResources) {
     opCtx()->getWriteUnitOfWork()->commit();
 }
 
+TEST_F(SessionTest, StashAndUnstashResourcesWithPrepare) {
+    const auto sessionId = makeLogicalSessionIdForTest();
+    const TxnNumber txnNum = 21;
+    opCtx()->setLogicalSessionId(sessionId);
+    opCtx()->setTxnNumber(txnNum);
+
+    Locker* originalLocker = opCtx()->lockState();
+    RecoveryUnit* originalRecoveryUnit = opCtx()->recoveryUnit();
+    ASSERT(originalLocker);
+    ASSERT(originalRecoveryUnit);
+
+    Session session(sessionId);
+    session.refreshFromStorageIfNeeded(opCtx());
+
+    session.beginOrContinueTxn(opCtx(), txnNum, boost::none);
+
+    repl::ReadConcernArgs readConcernArgs;
+    ASSERT_OK(readConcernArgs.initialize(BSON("find"
+                                              << "test"
+                                              << repl::ReadConcernArgs::kReadConcernFieldName
+                                              << BSON(repl::ReadConcernArgs::kLevelFieldName
+                                                      << "snapshot"))));
+    repl::ReadConcernArgs::get(opCtx()) = readConcernArgs;
+
+    // Perform initial unstash which sets up a WriteUnitOfWork.
+    session.unstashTransactionResources(opCtx());
+    ASSERT_EQUALS(originalLocker, opCtx()->lockState());
+    ASSERT_EQUALS(originalRecoveryUnit, opCtx()->recoveryUnit());
+    ASSERT(opCtx()->getWriteUnitOfWork());
+
+    // Take a lock. This is expected in order to stash resources.
+    Lock::GlobalRead lk(opCtx(), Date_t::now());
+    ASSERT(lk.isLocked());
+
+    opCtx()->getWriteUnitOfWork()->prepare();
+
+    // Stash resources. The original Locker and RecoveryUnit now belong to the stash.
+    opCtx()->setStashedCursor();
+    session.stashTransactionResources(opCtx());
+    ASSERT_NOT_EQUALS(originalLocker, opCtx()->lockState());
+    ASSERT_NOT_EQUALS(originalRecoveryUnit, opCtx()->recoveryUnit());
+    ASSERT(!opCtx()->getWriteUnitOfWork());
+
+    // Unstash the stashed resources. This restores the original Locker and RecoveryUnit to the
+    // OperationContext.
+    session.unstashTransactionResources(opCtx());
+    ASSERT_EQUALS(originalLocker, opCtx()->lockState());
+    ASSERT_EQUALS(originalRecoveryUnit, opCtx()->recoveryUnit());
+    ASSERT(opCtx()->getWriteUnitOfWork());
+
+    // Commit the WriteUnitOfWork. This allows us to release locks.
+    opCtx()->getWriteUnitOfWork()->commit();
+}
+
 TEST_F(SessionTest, CheckAutocommitOnlyAllowedAtBeginningOfTxn) {
     const auto sessionId = makeLogicalSessionIdForTest();
     Session session(sessionId);

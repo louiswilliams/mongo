@@ -107,23 +107,4 @@ void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* 
     uassertStatusOK(setTransactionReadTimestamp(Timestamp(allCommittedTimestamp), session));
 }
 
-Status WiredTigerSnapshotManager::prepareTransaction(Timestamp timestamp,
-                                                     WT_SESSION* session) const {
-    char readTSConfigString[18 /* prepare_timestamp= */ + (8 * 2) /* 8 hexadecimal characters */ +
-                            1 /* trailing null */];
-    auto size = std::snprintf(readTSConfigString,
-                              sizeof(readTSConfigString),
-                              "prepare_timestamp=%llx",
-                              timestamp.asULL());
-    if (size < 0) {
-        int e = errno;
-        error() << "error snprintf " << errnoWithDescription(e);
-        fassertFailedNoTrace(50713);
-    }
-    invariant(static_cast<std::size_t>(size) < sizeof(readTSConfigString));
-
-    return wtRCToStatus(session->prepare_transaction(session, readTSConfigString),
-                        "prepare_transaction");
-}
-
 }  // namespace mongo

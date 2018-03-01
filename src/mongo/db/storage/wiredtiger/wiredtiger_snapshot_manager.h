@@ -73,10 +73,6 @@ public:
     void beginTransactionOnOplog(WiredTigerOplogManager* oplogManager, WT_SESSION* session) const;
 
     /**
-     * Prepares a transcation for a timestamp.
-     */
-    Status prepareTransaction(Timestamp timestamp, WT_SESSION* session) const;
-    /**
      * Returns lowest SnapshotName that could possibly be used by a future call to
      * beginTransactionOnCommittedSnapshot, or boost::none if there is currently no committed
      * snapshot.

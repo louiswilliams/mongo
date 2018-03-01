@@ -117,12 +117,11 @@ void WiredTigerRecoveryUnit::prepareUnitOfWork(Timestamp timestamp) {
     invariant(!timestamp.isNull());
     invariant(_inUnitOfWork);
 
-    WT_SESSION* session = _session->getSession();
-    _prepareTimestamp = timestamp;
+    WT_SESSION* s = _session->getSession();
 
+    const std::string conf = "prepare_timestamp=" + integerToHex(timestamp.asULL());
     // Prepare the transaction.
-    uassertStatusOK(
-        _sessionCache->snapshotManager().prepareTransaction(_prepareTimestamp, session));
+    invariantWTOK(s->prepare_transaction(s, conf.c_str()));
 }
 
 void WiredTigerRecoveryUnit::commitUnitOfWork() {

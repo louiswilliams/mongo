@@ -26,6 +26,9 @@
  *    it in the license file.
  */
 
+#include "mongo/db/op_observer.h"
+
+#include "mongo/db/repl/oplog.h"
 #include "mongo/db/storage/write_unit_of_work.h"
 
 namespace mongo {
@@ -68,6 +71,7 @@ std::unique_ptr<WriteUnitOfWork> WriteUnitOfWork::createForSnapshotResume(Operat
     return wuow;
 }
 
+
 /**
  * Releases the OperationContext RecoveryUnit and Locker objects from management without
  * changing state. Allows for use of these objects beyond the WriteUnitOfWork lifespan.
@@ -86,6 +90,9 @@ void WriteUnitOfWork::commit() {
     invariant(!_released);
     invariant(_opCtx->_ruState == OperationContext::kActiveUnitOfWork);
     if (_toplevel) {
+        auto prepareTimestamp =
+            _opCtx->getServiceContext()->getOpObserver()->onTransactionPrepare(_opCtx);
+        _opCtx->recoveryUnit()->prepareUnitOfWork(_opCtx->recoveryUnit()->getCommitTimestamp());
         _opCtx->recoveryUnit()->commitUnitOfWork();
         _opCtx->_ruState = OperationContext::kNotInUnitOfWork;
     }

@@ -874,6 +874,10 @@ void OpObserverImpl::onTransactionCommit(OperationContext* opCtx) {
     onWriteOpCompleted(opCtx, cmdNss, session, {stmtId}, times.writeOpTime, times.wallClockTime);
 }
 
+repl::OpTime OpObserverImpl::onTransactionPrepare(OperationContext* opCtx) {
+    return repl::getNextOpTime(opCtx).opTime;
+}
+
 void OpObserverImpl::onTransactionAbort(OperationContext* opCtx) {
     invariant(opCtx->getTxnNumber());
 }

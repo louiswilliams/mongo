@@ -198,6 +198,16 @@ public:
             o->onTransactionCommit(opCtx);
     }
 
+    repl::OpTime onTransactionPrepare(OperationContext* opCtx) override {
+        ReservedTimes times{opCtx};
+        for (auto& observer : this->_observers) {
+            const auto time = observer->onTransactionPrepare(opCtx);
+            invariant(time.isNull());
+        }
+
+        return _getOpTimeToReturn(times.get().reservedOpTimes);
+    }
+
     void onTransactionAbort(OperationContext* opCtx) override {
         for (auto& o : _observers)
             o->onTransactionAbort(opCtx);

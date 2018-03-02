@@ -85,14 +85,17 @@ void WriteUnitOfWork::release() {
     _opCtx->_ruState = OperationContext::kNotInUnitOfWork;
 }
 
+void WriteUnitOfWork::prepare() {
+    auto prepareTimestamp =
+        getGlobalServiceContext()->getOpObserver()->onTransactionPrepare(_opCtx);
+    _opCtx->recoveryUnit()->prepareUnitOfWork(prepareTimestamp);
+}
+
 void WriteUnitOfWork::commit() {
     invariant(!_committed);
     invariant(!_released);
     invariant(_opCtx->_ruState == OperationContext::kActiveUnitOfWork);
     if (_toplevel) {
-        auto prepareTimestamp =
-            _opCtx->getServiceContext()->getOpObserver()->onTransactionPrepare(_opCtx);
-        _opCtx->recoveryUnit()->prepareUnitOfWork(_opCtx->recoveryUnit()->getCommitTimestamp());
         _opCtx->recoveryUnit()->commitUnitOfWork();
         _opCtx->_ruState = OperationContext::kNotInUnitOfWork;
     }

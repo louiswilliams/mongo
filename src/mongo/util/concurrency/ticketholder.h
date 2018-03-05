@@ -51,6 +51,7 @@ public:
     /**
      * Attempts to acquire a ticket. Blocks until a ticket is acquired or the OperationContext
      * 'opCtx' is killed, throwing an AssertionException.
+     * If 'opCtx' is not provided or equal to nullptr, the wait is not interruptible.
      */
     void waitForTicket(OperationContext* opCtx);
     void waitForTicket() {
@@ -61,6 +62,7 @@ public:
      * Attempts to acquire a ticket within a deadline, 'until'. Returns 'true' if a ticket is
      * acquired and 'false' if the deadline is reached. Throws an AssertionException if the
      * OperationContext 'opCtx' is killed.
+     * If 'opCtx' is not provided or equal to nullptr, the wait is not interruptible.
      */
     bool waitForTicketUntil(OperationContext* opCtx, Date_t until);
     bool waitForTicketUntil(Date_t until) {
@@ -77,10 +79,6 @@ public:
     int outof() const;
 
 private:
-    /**
-     * Takes a number in milliseconds and sets the appropriate values in a timespec structure.
-     */
-    void _tsFromMillis(const long long milliseconds, struct timespec& ts);
 #if defined(__linux__)
     mutable sem_t _sem;
 
@@ -143,4 +141,4 @@ public:
 private:
     TicketHolder* _holder;
 };
-}
+}  // namespace mongo

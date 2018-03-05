@@ -40,23 +40,40 @@ namespace mongo {
 
 #if defined(__linux__)
 namespace {
-void _failWithErrno(int err) {
+
+/**
+ * Accepts an errno code, prints its error message, and exits.
+ */
+void failWithErrno(int err) {
     severe() << "error in Ticketholder: " << errnoWithDescription(err);
     fassertFailed(28604);
 }
-void _check(int ret) {
+
+/*
+ * Checks the return value from a Linux semaphore function call, and fails with the set errno if the
+ * call was unsucessful.
+ */
+void check(int ret) {
     if (ret == 0)
         return;
-    _failWithErrno(errno);
-}
+    failWithErrno(errno);
 }
 
+/**
+ * Takes a Date_t deadline and sets the appropriate values in a timespec structure.
+ */
+void tsFromDate(const Date_t& deadline, struct timespec& ts) {
+    ts.tv_sec = deadline.toTimeT();
+    ts.tv_nsec = (deadline.toMillisSinceEpoch() % 1000) * 1'000'000;
+}
+}  // namespace
+
 TicketHolder::TicketHolder(int num) : _outof(num) {
-    _check(sem_init(&_sem, 0, num));
+    check(sem_init(&_sem, 0, num));
 }
 
 TicketHolder::~TicketHolder() {
-    _check(sem_destroy(&_sem));
+    check(sem_destroy(&_sem));
 }
 
 bool TicketHolder::tryAcquire() {
@@ -64,14 +81,9 @@ bool TicketHolder::tryAcquire() {
         if (errno == EAGAIN)
             return false;
         if (errno != EINTR)
-            _failWithErrno(errno);
+            failWithErrno(errno);
     }
     return true;
-}
-
-inline void TicketHolder::_tsFromMillis(const long long milliseconds, struct timespec& ts) {
-    ts.tv_sec = milliseconds / 1000;
-    ts.tv_nsec = (milliseconds % 1000) * (1000 * 1000);
 }
 
 void TicketHolder::waitForTicket(OperationContext* opCtx) {
@@ -79,27 +91,26 @@ void TicketHolder::waitForTicket(OperationContext* opCtx) {
 }
 
 bool TicketHolder::waitForTicketUntil(OperationContext* opCtx, Date_t until) {
-    const long intervalMs = 500;
-    const long long deadlineMs = until.toMillisSinceEpoch();
+    const Milliseconds intervalMs(500);
     struct timespec ts;
 
     // To support interrupting ticket acquisition while still benefiting from semaphores, we do a
     // timed wait on an interval to periodically check for interrupts.
     // The wait period interval is the smaller of the default interval and the provided
     // deadline.
-    long long waitMs = std::min(deadlineMs, Date_t::now().toMillisSinceEpoch() + intervalMs);
-    _tsFromMillis(waitMs, ts);
+    Date_t deadline = std::min(until, Date_t::now() + intervalMs);
+    tsFromDate(deadline, ts);
 
     while (0 != sem_timedwait(&_sem, &ts)) {
         if (errno == ETIMEDOUT) {
             // If we reached the deadline without being interrupted, we have completely timed out.
-            if (waitMs == deadlineMs)
+            if (deadline == until)
                 return false;
 
-            waitMs = std::min(deadlineMs, Date_t::now().toMillisSinceEpoch() + intervalMs);
-            _tsFromMillis(waitMs, ts);
+            deadline = std::min(until, Date_t::now() + intervalMs);
+            tsFromDate(deadline, ts);
         } else if (errno != EINTR) {
-            _failWithErrno(errno);
+            failWithErrno(errno);
         }
 
         // To correctly handle errors from sem_timedwait, we should check for interrupts last.
@@ -111,7 +122,7 @@ bool TicketHolder::waitForTicketUntil(OperationContext* opCtx, Date_t until) {
 }
 
 void TicketHolder::release() {
-    _check(sem_post(&_sem));
+    check(sem_post(&_sem));
 }
 
 Status TicketHolder::resize(int newSize) {
@@ -124,8 +135,7 @@ Status TicketHolder::resize(int newSize) {
     if (newSize > SEM_VALUE_MAX)
         return Status(ErrorCodes::BadValue,
                       str::stream() << "Maximum value for semaphore is " << SEM_VALUE_MAX
-                                    << "; given "
-                                    << newSize);
+                                    << "; given " << newSize);
 
     while (_outof.load() < newSize) {
         release();
@@ -143,7 +153,7 @@ Status TicketHolder::resize(int newSize) {
 
 int TicketHolder::available() const {
     int val = 0;
-    _check(sem_getvalue(&_sem, &val));
+    check(sem_getvalue(&_sem, &val));
     return val;
 }
 

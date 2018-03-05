@@ -98,6 +98,9 @@ public:
                        const NamespaceString& collectionName,
                        OptionalCollectionUUID uuid) override {}
     void onTransactionCommit(OperationContext* opCtx) override{};
+    repl::OpTime onTransactionPrepare(OperationContext* opCtx) override {
+        return {};
+    };
     void onTransactionAbort(OperationContext* opCtx) override{};
     void onReplicationRollback(OperationContext* opCtx,
                                const RollbackObserverInfo& rbInfo) override {}

@@ -88,7 +88,7 @@ void WriteUnitOfWork::release() {
 void WriteUnitOfWork::prepare() {
     auto prepareTimestamp =
         getGlobalServiceContext()->getOpObserver()->onTransactionPrepare(_opCtx);
-    _opCtx->recoveryUnit()->prepareUnitOfWork(prepareTimestamp);
+    _opCtx->recoveryUnit()->prepareUnitOfWork(prepareTimestamp.getTimestamp());
 }
 
 void WriteUnitOfWork::commit() {

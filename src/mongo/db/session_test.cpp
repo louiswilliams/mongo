@@ -552,11 +552,11 @@ TEST_F(SessionTest, StashAndUnstashResources) {
     session.beginOrContinueTxn(opCtx(), txnNum, boost::none);
 
     repl::ReadConcernArgs readConcernArgs;
-    ASSERT_OK(readConcernArgs.initialize(BSON("find"
-                                              << "test"
-                                              << repl::ReadConcernArgs::kReadConcernFieldName
-                                              << BSON(repl::ReadConcernArgs::kLevelFieldName
-                                                      << "snapshot"))));
+    ASSERT_OK(
+        readConcernArgs.initialize(BSON("find"
+                                        << "test" << repl::ReadConcernArgs::kReadConcernFieldName
+                                        << BSON(repl::ReadConcernArgs::kLevelFieldName
+                                                << "snapshot"))));
     repl::ReadConcernArgs::get(opCtx()) = readConcernArgs;
 
     // Perform initial unstash which sets up a WriteUnitOfWork.
@@ -607,11 +607,11 @@ TEST_F(SessionTest, StashAndUnstashResourcesWithPrepare) {
     session.beginOrContinueTxn(opCtx(), txnNum, boost::none);
 
     repl::ReadConcernArgs readConcernArgs;
-    ASSERT_OK(readConcernArgs.initialize(BSON("find"
-                                              << "test"
-                                              << repl::ReadConcernArgs::kReadConcernFieldName
-                                              << BSON(repl::ReadConcernArgs::kLevelFieldName
-                                                      << "snapshot"))));
+    ASSERT_OK(
+        readConcernArgs.initialize(BSON("find"
+                                        << "test" << repl::ReadConcernArgs::kReadConcernFieldName
+                                        << BSON(repl::ReadConcernArgs::kLevelFieldName
+                                                << "snapshot"))));
     repl::ReadConcernArgs::get(opCtx()) = readConcernArgs;
 
     // Perform initial unstash which sets up a WriteUnitOfWork.
@@ -623,8 +623,6 @@ TEST_F(SessionTest, StashAndUnstashResourcesWithPrepare) {
     // Take a lock. This is expected in order to stash resources.
     Lock::GlobalRead lk(opCtx(), Date_t::now());
     ASSERT(lk.isLocked());
-
-    opCtx()->getWriteUnitOfWork()->prepare();
 
     // Stash resources. The original Locker and RecoveryUnit now belong to the stash.
     opCtx()->setStashedCursor();
@@ -641,6 +639,7 @@ TEST_F(SessionTest, StashAndUnstashResourcesWithPrepare) {
     ASSERT(opCtx()->getWriteUnitOfWork());
 
     // Commit the WriteUnitOfWork. This allows us to release locks.
+    opCtx()->getWriteUnitOfWork()->prepare();
     opCtx()->getWriteUnitOfWork()->commit();
 }
 
@@ -699,5 +698,5 @@ TEST_F(SessionTest, RollbackClearsStoredStatements) {
     ASSERT_TRUE(session.transactionOperationsForTest().empty());
 }
 
-}  // anonymous
+}  // namespace
 }  // namespace mongo

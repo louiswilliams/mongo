@@ -273,6 +273,7 @@ void createIndexForApplyOps(OperationContext* opCtx,
  * which contain the new optimes along with their terms and newly calculated hash fields.
  */
 OplogSlot getNextOpTime(OperationContext* opCtx);
+OplogSlot getNextOpTimeNoPersist(OperationContext* opCtx);
 std::vector<OplogSlot> getNextOpTimes(OperationContext* opCtx, std::size_t count);
 
 }  // namespace repl

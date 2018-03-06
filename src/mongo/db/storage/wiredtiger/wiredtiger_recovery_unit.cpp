@@ -41,6 +41,7 @@
 #include "mongo/db/storage/wiredtiger/wiredtiger_util.h"
 #include "mongo/util/hex.h"
 #include "mongo/util/log.h"
+#include "mongo/util/stacktrace.h"
 
 namespace mongo {
 namespace {
@@ -117,21 +118,29 @@ void WiredTigerRecoveryUnit::prepareUnitOfWork(Timestamp timestamp) {
     invariant(!timestamp.isNull());
     invariant(_inUnitOfWork);
 
-    WT_SESSION* s = _session->getSession();
+    auto session = getSession();
+    WT_SESSION* s = session->getSession();
+
+    LOG(0) << "prepare, ts=" << timestamp << ", id=" << _mySnapshotId;
 
     const std::string conf = "prepare_timestamp=" + integerToHex(timestamp.asULL());
     // Prepare the transaction.
     invariantWTOK(s->prepare_transaction(s, conf.c_str()));
+
+    _isPrepared = true;
 }
 
 void WiredTigerRecoveryUnit::commitUnitOfWork() {
     invariant(_inUnitOfWork);
+    LOG(0) << "commit, ts=" << _commitTimestamp << ", id=" << _mySnapshotId;
     _inUnitOfWork = false;
     _commit();
 }
 
 void WiredTigerRecoveryUnit::abortUnitOfWork() {
     invariant(_inUnitOfWork);
+    LOG(0) << "abort"
+           << ", id=" << _mySnapshotId;
     _inUnitOfWork = false;
     _abort();
 }
@@ -209,7 +218,7 @@ void WiredTigerRecoveryUnit::_txnClose(bool commit) {
 
     int wtRet;
     if (commit) {
-        if (!_commitTimestamp.isNull()) {
+        if (!_commitTimestamp.isNull() && !_isPrepared) {
             const std::string conf = "commit_timestamp=" + integerToHex(_commitTimestamp.asULL());
             invariantWTOK(s->timestamp_transaction(s, conf.c_str()));
             _isTimestamped = true;
@@ -230,6 +239,7 @@ void WiredTigerRecoveryUnit::_txnClose(bool commit) {
     invariantWTOK(wtRet);
 
     _active = false;
+    _isPrepared = false;
     _mySnapshotId = nextSnapshotId.fetchAndAdd(1);
     _isOplogReader = false;
 }
@@ -298,6 +308,10 @@ void WiredTigerRecoveryUnit::_txnOpen() {
 
 
 Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
+    if (_isPrepared) {
+        return Status::OK();
+    }
+
     _ensureSession();
     LOG(3) << "WT set timestamp of future write operations to " << timestamp;
     WT_SESSION* session = _session->getSession();
@@ -310,6 +324,7 @@ Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
     // Starts the WT transaction associated with this session.
     getSession();
 
+    LOG(0) << "setTimestamp, ts=" << timestamp << ", id=" << _mySnapshotId;
     const std::string conf = "commit_timestamp=" + integerToHex(timestamp.asULL());
     auto rc = session->timestamp_transaction(session, conf.c_str());
     if (rc == 0) {

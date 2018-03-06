@@ -144,6 +144,7 @@ private:
     bool _areWriteUnitOfWorksBanned = false;
     bool _inUnitOfWork;
     bool _active;
+    bool _isPrepared = false;
     bool _isTimestamped = false;
     Timestamp _commitTimestamp;
     uint64_t _mySnapshotId;

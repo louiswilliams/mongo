@@ -63,6 +63,7 @@ namespace {
 
 // If enabled, causes loop in _doTxn() to hang after applying current operation.
 MONGO_FP_DECLARE(doTxnPauseBetweenOperations);
+MONGO_FP_DECLARE(usePrepareTransactionOnCommit);
 
 /**
  * Return true iff the doTxnCmd can be executed in a single WriteUnitOfWork.
@@ -317,6 +318,9 @@ Status doTxn(OperationContext* opCtx,
             uassertStatusOK(_doTxn(opCtx, dbName, doTxnCmd, &intermediateResult, &numApplied));
             auto opObserver = getGlobalServiceContext()->getOpObserver();
             invariant(opObserver);
+            MONGO_FAIL_POINT_BLOCK(usePrepareTransactionOnCommit, scopedFailPoint) {
+                wunit.prepare();
+            }
             opObserver->onTransactionCommit(opCtx);
             wunit.commit();
             result->appendElements(intermediateResult.obj());

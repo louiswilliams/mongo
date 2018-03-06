@@ -30,6 +30,7 @@
 
 #include "mongo/db/repl/oplog.h"
 #include "mongo/db/storage/write_unit_of_work.h"
+#include "mongo/util/fail_point_service.h"
 
 namespace mongo {
 
@@ -85,7 +86,17 @@ void WriteUnitOfWork::release() {
     _opCtx->_ruState = OperationContext::kNotInUnitOfWork;
 }
 
+/**
+ * The state must be kActiveUnitOfWork and the WUOW may not be nested and will throw
+ * in that case. Will transition the WriteUnitOfWork to the "prepared" state or throw
+ * PreparedTransactionsNotSupported. May throw WriteConflictException.
+ */
 void WriteUnitOfWork::prepare() {
+    invariant(!_committed);
+    invariant(_toplevel);
+    invariant(_opCtx->_ruState == OperationContext::kActiveUnitOfWork);
+    invariant(repl::ReplicationCoordinator::get(_opCtx)->isReplEnabled());
+
     auto prepareTimestamp =
         getGlobalServiceContext()->getOpObserver()->onTransactionPrepare(_opCtx);
     _opCtx->recoveryUnit()->prepareUnitOfWork(prepareTimestamp.getTimestamp());

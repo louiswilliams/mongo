@@ -142,7 +142,8 @@ void checkOplogInsert(Status result) {
 void _getNextOpTimes(OperationContext* opCtx,
                      Collection* oplog,
                      std::size_t count,
-                     OplogSlot* slotsOut) {
+                     OplogSlot* slotsOut,
+                     bool persist = true) {
     auto replCoord = ReplicationCoordinator::get(opCtx);
     long long term = OpTime::kUninitializedTerm;
 
@@ -161,7 +162,9 @@ void _getNextOpTimes(OperationContext* opCtx,
     lastSetTimestamp = ts;
     newTimestampNotifier.notify_all();
 
-    fassert(28560, oplog->getRecordStore()->oplogDiskLocRegister(opCtx, ts));
+    if (persist) {
+        fassert(28560, oplog->getRecordStore()->oplogDiskLocRegister(opCtx, ts));
+    }
 
     // Set hash if we're in replset mode, otherwise it remains 0 in master/slave.
     const bool needHash = (replCoord->getReplicationMode() == ReplicationCoordinator::modeReplSet);
@@ -643,6 +646,16 @@ OplogSlot getNextOpTime(OperationContext* opCtx) {
     invariant(_localOplogCollection);
     OplogSlot os;
     _getNextOpTimes(opCtx, _localOplogCollection, 1, &os);
+    return os;
+}
+
+OplogSlot getNextOpTimeNoPersist(OperationContext* opCtx) {
+    // The local oplog collection pointer must already be established by this point.
+    // We can't establish it here because that would require locking the local database, which would
+    // be a lock order violation.
+    invariant(_localOplogCollection);
+    OplogSlot os;
+    _getNextOpTimes(opCtx, _localOplogCollection, 1, &os, false);
     return os;
 }
 

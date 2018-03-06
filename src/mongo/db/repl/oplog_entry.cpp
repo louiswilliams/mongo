@@ -171,6 +171,14 @@ ReplOperation OplogEntry::makeDeleteOperation(const NamespaceString& nss,
     return op;
 }
 
+ReplOperation OplogEntry::makePrepareOperation(const NamespaceString& nss) {
+    ReplOperation op;
+    op.setOpType(OpTypeEnum::kNoop);
+    op.setNamespace(nss);
+    op.setObject(BSONObj());
+    return op;
+}
+
 StatusWith<OplogEntry> OplogEntry::parse(const BSONObj& object) {
     try {
         return OplogEntry(object);

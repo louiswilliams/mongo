@@ -25,8 +25,6 @@
 *    exception statement from all source files in the program, then also delete
 *    it in the license file.
 */
-#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kDefault
-
 #include "mongo/platform/basic.h"
 
 #include "mongo/db/op_observer_impl.h"
@@ -54,7 +52,6 @@
 #include "mongo/scripting/engine.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/fail_point_service.h"
-#include "mongo/util/log.h"
 
 namespace mongo {
 using repl::OplogEntry;
@@ -877,7 +874,14 @@ void OpObserverImpl::onTransactionCommit(OperationContext* opCtx) {
 }
 
 repl::OpTime OpObserverImpl::onTransactionPrepare(OperationContext* opCtx) {
+    invariant(opCtx->getTxnNumber());
+    Session* const session = OperationContextSession::get(opCtx);
+    invariant(session);
+    invariant(session->inMultiDocumentTransaction());
+
     auto& times = OpObserver::Times::get(opCtx).reservedOpTimes;
+    //    auto operation = OplogEntry::makePrepareOperation(NamespaceString{"test.$cmd"});
+    //    session->addTransactionOperation(opCtx, operation);
     auto opTime = repl::getNextOpTimeNoPersist(opCtx).opTime;
     times.push_back(opTime);
     return {};

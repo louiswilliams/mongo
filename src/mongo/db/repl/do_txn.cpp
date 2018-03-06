@@ -318,8 +318,10 @@ Status doTxn(OperationContext* opCtx,
             uassertStatusOK(_doTxn(opCtx, dbName, doTxnCmd, &intermediateResult, &numApplied));
             auto opObserver = getGlobalServiceContext()->getOpObserver();
             invariant(opObserver);
+            bool runOpObserver = true;
             MONGO_FAIL_POINT_BLOCK(usePrepareTransactionOnCommit, scopedFailPoint) {
                 wunit.prepare();
+                runOpObserver = false;
             }
             opObserver->onTransactionCommit(opCtx);
             wunit.commit();

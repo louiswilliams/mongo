@@ -28,7 +28,6 @@
 
 #include "mongo/db/op_observer.h"
 
-#include "mongo/db/repl/oplog.h"
 #include "mongo/db/storage/write_unit_of_work.h"
 #include "mongo/util/fail_point_service.h"
 

@@ -121,26 +121,21 @@ void WiredTigerRecoveryUnit::prepareUnitOfWork(Timestamp timestamp) {
     auto session = getSession();
     WT_SESSION* s = session->getSession();
 
-    LOG(0) << "prepare, ts=" << timestamp << ", id=" << _mySnapshotId;
-
     const std::string conf = "prepare_timestamp=" + integerToHex(timestamp.asULL());
     // Prepare the transaction.
     invariantWTOK(s->prepare_transaction(s, conf.c_str()));
 
-    _isPrepared = true;
+    _prepareTimestamp = timestamp;
 }
 
 void WiredTigerRecoveryUnit::commitUnitOfWork() {
     invariant(_inUnitOfWork);
-    LOG(0) << "commit, ts=" << _commitTimestamp << ", id=" << _mySnapshotId;
     _inUnitOfWork = false;
     _commit();
 }
 
 void WiredTigerRecoveryUnit::abortUnitOfWork() {
     invariant(_inUnitOfWork);
-    LOG(0) << "abort"
-           << ", id=" << _mySnapshotId;
     _inUnitOfWork = false;
     _abort();
 }
@@ -218,13 +213,15 @@ void WiredTigerRecoveryUnit::_txnClose(bool commit) {
 
     int wtRet;
     if (commit) {
-        if (!_commitTimestamp.isNull() && !_isPrepared) {
-            const std::string conf = "commit_timestamp=" + integerToHex(_commitTimestamp.asULL());
-            invariantWTOK(s->timestamp_transaction(s, conf.c_str()));
+        std::string conf;
+        Timestamp commitTimestamp =
+            (!_commitTimestamp.isNull()) ? _commitTimestamp : _prepareTimestamp;
+        if (!commitTimestamp.isNull()) {
+            conf = "commit_timestamp=" + integerToHex(commitTimestamp.asULL());
             _isTimestamped = true;
         }
 
-        wtRet = s->commit_transaction(s, NULL);
+        wtRet = s->commit_transaction(s, (conf.size() > 0) ? conf.c_str() : NULL);
         LOG(3) << "WT commit_transaction for snapshot id " << _mySnapshotId;
     } else {
         wtRet = s->rollback_transaction(s, NULL);
@@ -239,7 +236,7 @@ void WiredTigerRecoveryUnit::_txnClose(bool commit) {
     invariantWTOK(wtRet);
 
     _active = false;
-    _isPrepared = false;
+    _prepareTimestamp = Timestamp();
     _mySnapshotId = nextSnapshotId.fetchAndAdd(1);
     _isOplogReader = false;
 }
@@ -308,7 +305,8 @@ void WiredTigerRecoveryUnit::_txnOpen() {
 
 
 Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
-    if (_isPrepared) {
+    if (!_prepareTimestamp.isNull()) {
+        LOG(1) << "WT set timestamp of future write operations to " << timestamp;
         return Status::OK();
     }
 

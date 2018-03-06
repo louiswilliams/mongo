@@ -72,6 +72,7 @@ public:
     static ReplOperation makeDeleteOperation(const NamespaceString& nss,
                                              boost::optional<UUID> uuid,
                                              const BSONObj& docToDelete);
+    static ReplOperation makePrepareOperation(const NamespaceString& nss);
 
     static StatusWith<OplogEntry> parse(const BSONObj& object);
 

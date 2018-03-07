@@ -318,11 +318,6 @@ Status doTxn(OperationContext* opCtx,
             uassertStatusOK(_doTxn(opCtx, dbName, doTxnCmd, &intermediateResult, &numApplied));
             auto opObserver = getGlobalServiceContext()->getOpObserver();
             invariant(opObserver);
-            bool runOpObserver = true;
-            MONGO_FAIL_POINT_BLOCK(usePrepareTransactionOnCommit, scopedFailPoint) {
-                wunit.prepare();
-                runOpObserver = false;
-            }
             opObserver->onTransactionCommit(opCtx);
             wunit.commit();
             result->appendElements(intermediateResult.obj());
@@ -330,6 +325,9 @@ Status doTxn(OperationContext* opCtx,
 
         // Commit the global WUOW if the command succeeds.
         if (opCtx->getWriteUnitOfWork()) {
+            MONGO_FAIL_POINT_BLOCK(usePrepareTransactionOnCommit, scopedFailPoint) {
+                opCtx->getWriteUnitOfWork()->prepare();
+            }
             opCtx->getWriteUnitOfWork()->commit();
         }
     } catch (const DBException& ex) {

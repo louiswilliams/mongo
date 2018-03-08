@@ -199,13 +199,16 @@ public:
     }
 
     repl::OpTime onTransactionPrepare(OperationContext* opCtx) override {
-        ReservedTimes times{opCtx};
-        for (auto& observer : this->_observers) {
-            const auto time = observer->onTransactionPrepare(opCtx);
-            invariant(time.isNull());
-        }
 
-        return _getOpTimeToReturn(times.get().reservedOpTimes);
+        return repl::getNextOpTimeNoPersist(opCtx).opTime;
+
+        //        ReservedTimes times{opCtx};
+        //        for (auto& observer : this->_observers) {
+        //            const auto time = observer->onTransactionPrepare(opCtx);
+        //            invariant(time.isNull());
+        //        }
+        //
+        //        return _getOpTimeToReturn(times.get().reservedOpTimes);
     }
 
     void onTransactionAbort(OperationContext* opCtx) override {

@@ -448,7 +448,6 @@ OpTime logOp(OperationContext* opCtx,
                                oplogLink);
     const DocWriter* basePtr = &writer;
     auto timestamp = slot.opTime.getTimestamp();
-    printStackTrace();
     _logOpsInner(opCtx, nss, &basePtr, &timestamp, 1, oplog, slot.opTime);
     wuow.commit();
     return slot.opTime;

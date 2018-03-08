@@ -306,7 +306,6 @@ void WiredTigerRecoveryUnit::_txnOpen() {
 
 Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
     if (!_prepareTimestamp.isNull()) {
-        LOG(1) << "WT set timestamp of future write operations to " << timestamp;
         return Status::OK();
     }
 

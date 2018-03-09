@@ -1852,34 +1852,6 @@ public:
     }
 };
 
-/**
- * This tests verifies that preparing before committing works.
- */
-class PrepareAndCommitRecoveryUnit : public StorageTimestampTest {
-public:
-    void run() {
-        // Only run on 'wiredTiger'. No other storage engines to-date timestamp writes.
-        if (mongo::storageGlobalParams.engine != "wiredTiger") {
-            return;
-        }
-
-        NamespaceString nss("unittests.recoveryUnitTest");
-        reset(nss);
-
-        AutoGetCollection autoColl(_opCtx, nss, LockMode::MODE_X, LockMode::MODE_X);
-
-        auto recoveryUnit = _opCtx->recoveryUnit();
-        const LogicalTime insertTime = _clock->reserveTicks(1);
-
-        WriteUnitOfWork wunit(_opCtx);
-        insertDocument(autoColl.getCollection(), InsertStatement(BSON("_id" << 0)));
-
-        recoveryUnit->prepareUnitOfWork(Timestamp(Date_t::now()));
-        wunit.commit();
-        ASSERT_EQ(1, itCount(autoColl.getCollection()));
-    }
-};
-
 class AllStorageTimestampTests : public unittest::Suite {
 public:
     AllStorageTimestampTests() : unittest::Suite("StorageTimestampTests") {}
@@ -1908,7 +1880,6 @@ public:
         // Timestamp<SimulateBackground>
         add<TimestampIndexBuilds<false>>();
         add<TimestampIndexBuilds<true>>();
-        add<PrepareAndCommitRecoveryUnit>();
     }
 };
 

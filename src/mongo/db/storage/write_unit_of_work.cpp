@@ -29,7 +29,6 @@
 #include "mongo/db/op_observer.h"
 
 #include "mongo/db/storage/write_unit_of_work.h"
-#include "mongo/util/fail_point_service.h"
 
 namespace mongo {
 
@@ -90,15 +89,12 @@ void WriteUnitOfWork::release() {
  * in that case. Will transition the WriteUnitOfWork to the "prepared" state or throw
  * PreparedTransactionsNotSupported. May throw WriteConflictException.
  */
-void WriteUnitOfWork::prepare() {
+void WriteUnitOfWork::prepare(Timestamp t) {
     invariant(!_committed);
     invariant(_toplevel);
     invariant(_opCtx->_ruState == OperationContext::kActiveUnitOfWork);
-    invariant(repl::ReplicationCoordinator::get(_opCtx)->isReplEnabled());
 
-    auto prepareTimestamp =
-        getGlobalServiceContext()->getOpObserver()->onTransactionPrepare(_opCtx);
-    _opCtx->recoveryUnit()->prepareUnitOfWork(prepareTimestamp.getTimestamp());
+    _opCtx->recoveryUnit()->prepareUnitOfWork(t);
 }
 
 void WriteUnitOfWork::commit() {

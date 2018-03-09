@@ -879,11 +879,9 @@ repl::OpTime OpObserverImpl::onTransactionPrepare(OperationContext* opCtx) {
     invariant(session);
     invariant(session->inMultiDocumentTransaction());
 
-    //    auto& times = OpObserver::Times::get(opCtx).reservedOpTimes;
-    //    auto operation = OplogEntry::makePrepareOperation(NamespaceString{"test", "$cmd"});
-    //    session->addTransactionOperation(opCtx, operation);
-    //    auto opTime = repl::getNextOpTimeNoPersist(opCtx).opTime;
-    //    times.push_back(opTime);
+    auto& times = OpObserver::Times::get(opCtx).reservedOpTimes;
+    auto opTime = repl::getNextOpTimeNoPersist(opCtx).opTime;
+    times.push_back(opTime);
     return {};
 }
 

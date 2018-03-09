@@ -49,7 +49,7 @@ public:
      * in that case. Will transition the WriteUnitOfWork to the "prepared" state or throw
      * PreparedTransactionsNotSupported. May throw WriteConflictException.
      */
-    void prepare();
+    void prepare(Timestamp t);
 
     void commit();
 

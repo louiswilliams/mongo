@@ -121,6 +121,8 @@ void WiredTigerRecoveryUnit::prepareUnitOfWork(Timestamp timestamp) {
     auto session = getSession();
     WT_SESSION* s = session->getSession();
 
+    LOG(0) << "preparing transaction at time: " << timestamp;
+
     const std::string conf = "prepare_timestamp=" + integerToHex(timestamp.asULL());
     // Prepare the transaction.
     invariantWTOK(s->prepare_transaction(s, conf.c_str()));
@@ -305,10 +307,6 @@ void WiredTigerRecoveryUnit::_txnOpen() {
 
 
 Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
-    if (!_prepareTimestamp.isNull()) {
-        return Status::OK();
-    }
-
     _ensureSession();
     LOG(3) << "WT set timestamp of future write operations to " << timestamp;
     WT_SESSION* session = _session->getSession();
@@ -321,7 +319,6 @@ Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
     // Starts the WT transaction associated with this session.
     getSession();
 
-    LOG(0) << "setTimestamp, ts=" << timestamp << ", id=" << _mySnapshotId;
     const std::string conf = "commit_timestamp=" + integerToHex(timestamp.asULL());
     auto rc = session->timestamp_transaction(session, conf.c_str());
     if (rc == 0) {

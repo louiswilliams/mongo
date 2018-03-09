@@ -63,6 +63,7 @@ namespace {
 
 // If enabled, causes loop in _doTxn() to hang after applying current operation.
 MONGO_FP_DECLARE(doTxnPauseBetweenOperations);
+
 MONGO_FP_DECLARE(usePrepareTransactionOnCommit);
 
 /**
@@ -318,17 +319,32 @@ Status doTxn(OperationContext* opCtx,
             uassertStatusOK(_doTxn(opCtx, dbName, doTxnCmd, &intermediateResult, &numApplied));
             auto opObserver = getGlobalServiceContext()->getOpObserver();
             invariant(opObserver);
-            opObserver->onTransactionCommit(opCtx);
+
+            // If using the prepare failpoint, don't write any oplog entries.
+            // This is necessary because writes to a journalled collection like the oplog are not
+            // supported for prepared transaction.
+            if (!MONGO_FAIL_POINT(usePrepareTransactionOnCommit)) {
+                opObserver->onTransactionCommit(opCtx);
+            }
             wunit.commit();
             result->appendElements(intermediateResult.obj());
         });
 
         // Commit the global WUOW if the command succeeds.
         if (opCtx->getWriteUnitOfWork()) {
-            MONGO_FAIL_POINT_BLOCK(usePrepareTransactionOnCommit, scopedFailPoint) {
-                opCtx->getWriteUnitOfWork()->prepare();
+            // If the prepare failpoint is enabled, call prepare, but don't commit.
+            // Return an error so the top-level WUOW gets aborted by not committing.
+            if (MONGO_FAIL_POINT(usePrepareTransactionOnCommit)) {
+                auto prepareTimestamp =
+                    getGlobalServiceContext()->getOpObserver()->onTransactionPrepare(opCtx);
+                opCtx->getWriteUnitOfWork()->prepare(prepareTimestamp.getTimestamp());
+                return Status(
+                    ErrorCodes::FailPointEnabled,
+                    "Prepare failpoint enabled. Aborting transaction because the implementation is "
+                    "incomplete.");
+            } else {
+                opCtx->getWriteUnitOfWork()->commit();
             }
-            opCtx->getWriteUnitOfWork()->commit();
         }
     } catch (const DBException& ex) {
         BSONArrayBuilder ab;

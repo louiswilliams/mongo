@@ -67,6 +67,7 @@
 #include "mongo/db/s/shard_filtering_metadata_refresh.h"
 #include "mongo/db/s/sharded_connection_info.h"
 #include "mongo/db/s/sharding_state.h"
+#include "mongo/db/server_parameters.h"
 #include "mongo/db/service_entry_point_common.h"
 #include "mongo/db/session_catalog.h"
 #include "mongo/db/stats/counters.h"
@@ -95,6 +96,8 @@ namespace mongo {
 MONGO_FP_DECLARE(rsStopGetMore);
 MONGO_FP_DECLARE(respondWithNotPrimaryInCommandDispatch);
 MONGO_FP_DECLARE(skipCheckingForNotMasterInCommandDispatch);
+
+MONGO_EXPORT_SERVER_PARAMETER(allowSecondaryReadsDuringBatchApplication, bool, true);
 
 namespace {
 using logger::LogComponent;
@@ -720,6 +723,11 @@ void execCommandDatabase(OperationContext* opCtx,
         }
 
         behaviors.waitForReadConcern(opCtx, invocation.get(), request);
+        boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> noConflict;
+        if (
+            allowSecondaryReadsDuringBatchApplication.load()) {
+            noConflict.emplace(opCtx->lockState());
+        }
 
         retval = runCommandImpl(
             opCtx, invocation.get(), request, replyBuilder, startOperationTime, behaviors);

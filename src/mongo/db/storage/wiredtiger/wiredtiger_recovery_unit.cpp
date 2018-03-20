@@ -304,13 +304,14 @@ void WiredTigerRecoveryUnit::_txnOpen() {
     }
     WT_SESSION* session = _session->getSession();
 
+    auto ignorePrepare = _readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern;
     // '_readAtTimestamp' is available outside of a check for readConcern level 'snapshot' to
     // accommodate unit testing. Note that the order of this if/else chain below is important for
     // correctness. Also, note that we use the '_readAtTimestamp' to work around an oplog visibility
     // issue in cappedTruncateAfter by setting the timestamp to the maximum value.
     if (_readAtTimestamp != Timestamp::min()) {
-        auto status =
-            _sessionCache->snapshotManager().beginTransactionAtTimestamp(_readAtTimestamp, session);
+        auto status = _sessionCache->snapshotManager().beginTransactionAtTimestamp(
+            _readAtTimestamp, session, ignorePrepare);
         if (!status.isOK() && status.code() == ErrorCodes::BadValue) {
             uasserted(ErrorCodes::SnapshotTooOld,
                       str::stream() << "Read timestamp " << _readAtTimestamp.toString()
@@ -325,12 +326,15 @@ void WiredTigerRecoveryUnit::_txnOpen() {
     } else if (_isOplogReader) {
         _sessionCache->snapshotManager().beginTransactionOnOplog(
             _sessionCache->getKVEngine()->getOplogManager(), session);
+
+    } else if (_shouldReadAtLastAppliedTimestamp &&
+               _sessionCache->snapshotManager().getLocalSnapshot()) {
+        auto status = _sessionCache->snapshotManager().beginTransactionOnLocalSnapshot(
+            session, ignorePrepare);
+        uassertStatusOK(status);
     } else {
-        invariantWTOK(session->begin_transaction(
-            session,
-            _readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern
-                ? "ignore_prepare=true"
-                : nullptr));
+        invariantWTOK(
+            session->begin_transaction(session, ignorePrepare ? "ignore_prepare=true" : nullptr));
     }
 
     LOG(3) << "WT begin_transaction for snapshot id " << _mySnapshotId;

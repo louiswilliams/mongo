@@ -48,28 +48,56 @@
 namespace mongo {
 
 void WiredTigerSnapshotManager::setCommittedSnapshot(const Timestamp& timestamp) {
-    stdx::lock_guard<stdx::mutex> lock(_mutex);
+    stdx::lock_guard<stdx::mutex> lock(_committedSnapshotMutex);
 
     invariant(!_committedSnapshot || *_committedSnapshot <= timestamp);
     _committedSnapshot = timestamp;
 }
 
+void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
+    stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
+
+    log() << "setting local snapshot timestamp to " << timestamp.toString();
+
+    _localSnapshot = timestamp;
+}
+
+void WiredTigerSnapshotManager::setLocalSnapshotForward(const Timestamp& timestamp) {
+    stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
+
+    log() << "setting local snapshot timestamp forward to " << timestamp.toString();
+
+    if (!_localSnapshot || timestamp > *_localSnapshot) {
+        _localSnapshot = timestamp;
+    }
+}
+
+boost::optional<Timestamp> WiredTigerSnapshotManager::getLocalSnapshot() {
+    stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
+    return _localSnapshot;
+}
+
 void WiredTigerSnapshotManager::dropAllSnapshots() {
-    stdx::lock_guard<stdx::mutex> lock(_mutex);
+    stdx::lock_guard<stdx::mutex> lock(_committedSnapshotMutex);
     _committedSnapshot = boost::none;
 }
 
 boost::optional<Timestamp> WiredTigerSnapshotManager::getMinSnapshotForNextCommittedRead() const {
-    stdx::lock_guard<stdx::mutex> lock(_mutex);
+    stdx::lock_guard<stdx::mutex> lock(_committedSnapshotMutex);
     return _committedSnapshot;
 }
 
 Status WiredTigerSnapshotManager::beginTransactionAtTimestamp(Timestamp pointInTime,
-                                                              WT_SESSION* session) const {
+                                                              WT_SESSION* session,
+                                                              bool ignorePrepare) const {
     char readTSConfigString[15 /* read_timestamp= */ + (8 * 2) /* 8 hexadecimal characters */ +
+                            1 /* , */ + 15 /*  ignore_prepare= */ + 5 /* false */ +
                             1 /* trailing null */];
-    auto size = std::snprintf(
-        readTSConfigString, sizeof(readTSConfigString), "read_timestamp=%llx", pointInTime.asULL());
+    auto size = std::snprintf(readTSConfigString,
+                              sizeof(readTSConfigString),
+                              "read_timestamp=%llx,ignore_prepare=%s",
+                              pointInTime.asULL(),
+                              ignorePrepare ? "true" : "false");
     if (size < 0) {
         int e = errno;
         error() << "error snprintf " << errnoWithDescription(e);
@@ -82,20 +110,29 @@ Status WiredTigerSnapshotManager::beginTransactionAtTimestamp(Timestamp pointInT
 
 Timestamp WiredTigerSnapshotManager::beginTransactionOnCommittedSnapshot(
     WT_SESSION* session) const {
-    stdx::lock_guard<stdx::mutex> lock(_mutex);
+    stdx::lock_guard<stdx::mutex> lock(_committedSnapshotMutex);
 
     uassert(ErrorCodes::ReadConcernMajorityNotAvailableYet,
             "Committed view disappeared while running operation",
             _committedSnapshot);
 
-    auto status = beginTransactionAtTimestamp(_committedSnapshot.get(), session);
+    auto status =
+        beginTransactionAtTimestamp(_committedSnapshot.get(), session, false /* ignorePrepare*/);
     fassert(30635, status);
     return *_committedSnapshot;
 }
 
+Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* session,
+                                                                  bool ignorePrepare) const {
+    stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
+    invariant(_localSnapshot);
+
+    log() << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
+    return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
+}
+
 void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* oplogManager,
-                                                        WT_SESSION* session) const {
-    stdx::lock_guard<stdx::mutex> lock(_mutex);
+                                                        WT_SESSION* session) {
     auto allCommittedTimestamp = oplogManager->getOplogReadTimestamp();
     char readTSConfigString[15 /* read_timestamp= */ + (8 * 2) /* 16 hexadecimal digits */ +
                             1 /* trailing null */];

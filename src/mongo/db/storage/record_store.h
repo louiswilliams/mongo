@@ -640,10 +640,20 @@ public:
      * Waits for all writes that completed before this call to be visible to forward scans.
      * See the comment on RecordCursor for more details about the visibility rules.
      *
+     * This is a blocking call that will wait for an an oplog writer to finish.
+     *
      * It is only legal to call this on an oplog. It is illegal to call this inside a
      * WriteUnitOfWork.
      */
     virtual void waitForAllEarlierOplogWritesToBeVisible(OperationContext* opCtx) const = 0;
+
+    /**
+     * Returns 'true' if all oplog entries are visible, and false if they are not. When this
+     * returns false, a caller can potentially yield its locks.
+    */
+    virtual bool areEarlierOplogWritesVisible(OperationContext* opCtx) const {
+        return true;
+    };
 
     /**
      * Called after a repair operation is run with the recomputed numRecords and dataSize.

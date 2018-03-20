@@ -1525,6 +1525,18 @@ void WiredTigerRecordStore::waitForAllEarlierOplogWritesToBeVisible(OperationCon
     }
 }
 
+bool WiredTigerRecordStore::areEarlierOplogWritesVisible(OperationContext* opCtx) const {
+    // Make sure that callers do not hold an active snapshot so it will be able to see the oplog
+    // entries it waited for afterwards.
+    invariant(!_getRecoveryUnit(opCtx)->inActiveTxn());
+
+    auto oplogManager = _kvEngine->getOplogManager();
+    if (!oplogManager->isRunning()) {
+        return true;
+    }
+    return oplogManager->areEarlierOplogWritesVisible(this, opCtx);
+}
+
 boost::optional<RecordId> WiredTigerRecordStore::oplogStartHack(
     OperationContext* opCtx, const RecordId& startingPosition) const {
     if (!_isOplog)

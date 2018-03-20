@@ -146,6 +146,12 @@ public:
         return _readConcernLevel;
     }
 
+    void setShouldReadAtLastAppliedTimestamp(bool value) {
+        invariant(!value || _readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
+                  _readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern);
+        _shouldReadAtLastAppliedTimestamp = value;
+    }
+
     /**
      * Returns the Timestamp being used by this recovery unit or boost::none if not reading from
      * a point in time. Any point in time returned will reflect either:
@@ -339,6 +345,7 @@ protected:
     RecoveryUnit() {}
     repl::ReplicationCoordinator::Mode _replicationMode = repl::ReplicationCoordinator::modeNone;
     repl::ReadConcernLevel _readConcernLevel = repl::ReadConcernLevel::kLocalReadConcern;
+    bool _shouldReadAtLastAppliedTimestamp = false;
 };
 
 }  // namespace mongo

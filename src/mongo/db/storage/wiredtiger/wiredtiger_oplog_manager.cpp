@@ -99,8 +99,8 @@ void WiredTigerOplogManager::halt() {
     }
 }
 
-void WiredTigerOplogManager::waitForAllEarlierOplogWritesToBeVisible(
-    const WiredTigerRecordStore* oplogRecordStore, OperationContext* opCtx) const {
+bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
+    const WiredTigerRecordStore* oplogRecordStore, OperationContext* opCtx, bool wait) const {
     invariant(opCtx->lockState()->isNoop() || !opCtx->lockState()->inAWriteUnitOfWork());
 
     // In order to reliably detect rollback situations, we need to fetch the latestVisibleTimestamp
@@ -115,15 +115,18 @@ void WiredTigerOplogManager::waitForAllEarlierOplogWritesToBeVisible(
     if (!lastRecord) {
         LOG(2) << "Trying to query an empty oplog";
         opCtx->recoveryUnit()->abandonSnapshot();
-        return;
+        return true;
     }
     const auto waitingFor = lastRecord->id;
+
     // Close transaction before we wait.
     opCtx->recoveryUnit()->abandonSnapshot();
 
-    stdx::unique_lock<stdx::mutex> lk(_oplogVisibilityStateMutex);
-    opCtx->waitForConditionOrInterrupt(_opsBecameVisibleCV, lk, [&] {
+    // Returns whether or not the last oplog entry is visible in the record store.
+    auto checkFn = [&] {
         auto newLatestVisibleTimestamp = getOplogReadTimestamp();
+        log() << "oplog time: " << currentLatestVisibleTimestamp << ". waitingFor: " << waitingFor
+              << ". new latest: " << newLatestVisibleTimestamp;
         if (newLatestVisibleTimestamp < currentLatestVisibleTimestamp) {
             LOG(1) << "oplog latest visible timestamp went backwards";
             // If the visibility went backwards, this means a rollback occurred.
@@ -143,7 +146,26 @@ void WiredTigerOplogManager::waitForAllEarlierOplogWritesToBeVisible(
                    << _oplogMaxAtStartup;
         }
         return latestVisible >= waitingFor;
-    });
+    };
+
+    if (!wait) {
+        return checkFn();
+    }
+
+    stdx::unique_lock<stdx::mutex> lk(_oplogVisibilityStateMutex);
+    opCtx->waitForConditionOrInterrupt(_opsBecameVisibleCV, lk, checkFn);
+    return true;
+}
+
+bool WiredTigerOplogManager::areEarlierOplogWritesVisible(
+    const WiredTigerRecordStore* oplogRecordStore, OperationContext* opCtx) const {
+    return _areEarlierOplogWritesVisible(oplogRecordStore, opCtx, false /* wait */);
+};
+
+
+void WiredTigerOplogManager::waitForAllEarlierOplogWritesToBeVisible(
+    const WiredTigerRecordStore* oplogRecordStore, OperationContext* opCtx) const {
+    invariant(_areEarlierOplogWritesVisible(oplogRecordStore, opCtx, true /* wait */));
 }
 
 void WiredTigerOplogManager::triggerJournalFlush() {

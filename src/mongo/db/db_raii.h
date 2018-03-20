@@ -108,6 +108,7 @@ private:
     // This field is optional, because the code to wait for majority committed snapshot needs to
     // release locks in order to block waiting
     boost::optional<AutoGetCollection> _autoColl;
+    boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> _noConflict;
 };
 
 /**

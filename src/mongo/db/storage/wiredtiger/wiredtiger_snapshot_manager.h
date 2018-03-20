@@ -48,13 +48,23 @@ public:
     WiredTigerSnapshotManager() = default;
 
     void setCommittedSnapshot(const Timestamp& timestamp) final;
+    void setLocalSnapshot(const Timestamp& timestamp) final;
+    void setLocalSnapshotForward(const Timestamp& timestamp) final;
+    boost::optional<Timestamp> getLocalSnapshot() final;
     void dropAllSnapshots() final;
 
     //
     // WT-specific methods
     //
 
-    Status beginTransactionAtTimestamp(Timestamp pointInTime, WT_SESSION* session) const;
+    /**
+     * Stats a transation a specific read timestamp 'pointInTime'. Use 'ignorePrepare' to ignore
+     * prepared transactions. It should usually be undesirable to ignore prepared transactions
+     * unless reading with an 'available' readConcern.
+     */
+    Status beginTransactionAtTimestamp(Timestamp pointInTime,
+                                       WT_SESSION* session,
+                                       bool ignorePrepare) const;
 
     /**
      * Starts a transaction and returns the SnapshotName used.
@@ -64,9 +74,17 @@ public:
     Timestamp beginTransactionOnCommittedSnapshot(WT_SESSION* session) const;
 
     /**
+     * Starts a transaction on the last stable local timestamp, set by setLocalSnapshot.
+     *
+     * Invariants if no local snapshot has been set.
+     */
+    Status beginTransactionOnLocalSnapshot(WT_SESSION* session, bool ignorePrepare) const;
+
+
+    /**
      * Starts a transaction on the oplog using an appropriate timestamp for oplog visiblity.
      */
-    void beginTransactionOnOplog(WiredTigerOplogManager* oplogManager, WT_SESSION* session) const;
+    static void beginTransactionOnOplog(WiredTigerOplogManager* oplogManager, WT_SESSION* session);
 
     /**
      * Returns lowest SnapshotName that could possibly be used by a future call to
@@ -79,7 +97,12 @@ public:
     boost::optional<Timestamp> getMinSnapshotForNextCommittedRead() const;
 
 private:
-    mutable stdx::mutex _mutex;  // Guards _committedSnapshot.
+    // Snapshot to use for reads at a commit timestamp.
+    mutable stdx::mutex _committedSnapshotMutex;  // Guards _committedSnapshot.
     boost::optional<Timestamp> _committedSnapshot;
+
+    // Snapshot to use for reads at a local stable timestamp.
+    mutable stdx::mutex _localSnapshotMutex;  // Guards _localSnapshot.
+    boost::optional<Timestamp> _localSnapshot;
 };
 }

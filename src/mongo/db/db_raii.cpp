@@ -26,6 +26,8 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
+
 #include "mongo/platform/basic.h"
 
 #include "mongo/db/db_raii.h"
@@ -35,6 +37,7 @@
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/s/collection_sharding_state.h"
 #include "mongo/db/session_catalog.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 namespace {
@@ -78,28 +81,76 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                                                    const NamespaceStringOrUUID& nsOrUUID,
                                                    AutoGetCollection::ViewMode viewMode,
                                                    Date_t deadline) {
+
+    // By default, don't conflict with secondary batch application.
+    _noConflict.emplace(opCtx->lockState());
     const auto collectionLockMode = getLockModeForQuery(opCtx);
     _autoColl.emplace(opCtx, nsOrUUID, collectionLockMode, viewMode, deadline);
 
-    while (true) {
-        auto coll = _autoColl->getCollection();
-        if (!coll) {
-            return;
-        }
+    repl::ReplicationCoordinator* const replCoord = repl::ReplicationCoordinator::get(opCtx);
+    const auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
 
+    while (auto coll = _autoColl->getCollection()) {
+
+        const NamespaceString& nss = coll->ns();
+        // The following conditions must be met to read from the last applied timestamp (most recent
+        // batch boundary) to allow reads on secondaries in a consistent state.
+        // TODO: Refactor this into a single helper method.
+
+        // 1. Reading from last applied optime is only used for local and available readConcern
+        // levels. Majority and snapshot readConcern levels handle visiblity correctly, as the
+        // majority commit point is set at the same time as the last applied timestamp.
+        auto localOrAvailable = readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
+            readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern;
+
+        // 2. We must be a secondary. If we are not on a secondary, we would not be serving reads
+        // that conflict with applied batches of oplog entries.
+        auto isSecondary =
+            replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
+            replCoord->getMemberState().secondary();
+
+        // 3. We only need to read at batch boundaries when users read from replicated collections.
+        // Internal reads may need to see inconsistent states, and non-replicated collections do not
+        // rely on replication.
+        auto userReadingReplicatedCollection =
+            nss.isReplicated() && opCtx->getClient()->isFromUserConnection();
+
+        // Read at the last applied timestamp if the above conditions are met, and the noConflict
+        // block is set. If it is unset, we tried at least once to read at the last applied time,
+        // but pending catalog changes prevented us.
+        bool readAtLastAppliedTimestamp =
+            _noConflict && userReadingReplicatedCollection && isSecondary && localOrAvailable;
+
+        opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(readAtLastAppliedTimestamp);
+
+        // This is the timestamp of the most recent catalog changes to this collection. If this is
+        // greater than any point in time read timestamps, we should either wait or return an error.
         auto minSnapshot = coll->getMinimumVisibleSnapshot();
         if (!minSnapshot) {
             return;
         }
-        auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
-        if (!mySnapshot) {
-            return;
-        }
-        if (mySnapshot >= minSnapshot) {
+
+        // If we are reading from the lastAppliedTimestamp and it is up-to-date with any catalog
+        // changes, we can return.
+        auto lastAppliedTimestamp = replCoord->getMyLastAppliedOpTime().getTimestamp();
+        if (readAtLastAppliedTimestamp &&
+            (lastAppliedTimestamp.isNull() || lastAppliedTimestamp >= *minSnapshot)) {
             return;
         }
 
-        auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
+        // This can be se when readConcern is "snapshot" or "majority".
+        auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+
+        // If we do not have a point in time to conflict with minSnapshot, return.
+        if (!mySnapshot && !readAtLastAppliedTimestamp) {
+            return;
+        }
+
+        // Return if there are no conflicting catalog changes with mySnapshot.
+        if (mySnapshot && mySnapshot >= *minSnapshot) {
+            return;
+        }
+
         if (readConcernLevel == repl::ReadConcernLevel::kSnapshotReadConcern) {
             uasserted(ErrorCodes::SnapshotUnavailable,
                       str::stream()
@@ -109,14 +160,27 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                           << ". Collection minimum is "
                           << minSnapshot->toString());
         }
-        invariant(readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern);
+        invariant(readAtLastAppliedTimestamp ||
+                  readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern);
 
         // Yield locks in order to do the blocking call below
         _autoColl = boost::none;
 
-        repl::ReplicationCoordinator::get(opCtx)->waitUntilSnapshotCommitted(opCtx, *minSnapshot);
+        // If there are pending catalog changes, we should conflict with any in-progress batches and
+        // choose not read from the last applied timestamp. Index builds on secondaries can complete
+        // at future timestamps but before the lastAppliedTimestamp, and we never want to read at
+        // these inconsistent states.
+        if (readAtLastAppliedTimestamp) {
+            log() << "Tried reading from local snapshot time: " << lastAppliedTimestamp
+                  << " on nss: " << nss.ns() << ", but future catalog changes are pending at time"
+                  << *minSnapshot << ". Trying again without reading from the local snapshot";
+            _noConflict = boost::none;
+        }
 
-        uassertStatusOK(opCtx->recoveryUnit()->obtainMajorityCommittedSnapshot());
+        if (readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern) {
+            replCoord->waitUntilSnapshotCommitted(opCtx, *minSnapshot);
+            uassertStatusOK(opCtx->recoveryUnit()->obtainMajorityCommittedSnapshot());
+        }
 
         {
             stdx::lock_guard<Client> lk(*opCtx->getClient());

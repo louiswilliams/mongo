@@ -22,14 +22,15 @@
     // indexed
     // value, 'x'. The goal is that a reader on a secondary might find a case where the unique
     // index violatation is missed, and an index on x maps to two different records.
-    const nOps = 64;
-    const nIterations = 10;
-    const nReaders = 32;
+    const nOps = 16;
+    const nIterations = 50;
+    const nReaders = 16;
 
     // Do a bunch of reads using the 'x' index on the secondary.
     let readCmd = "db.getMongo().setSlaveOk();" + "for (let i = 0; i < " + nIterations +
         "; i++) { for (let x = 0; x < " + nOps + "; x++) {" + "assert.commandWorked(" +
-        "db.getSiblingDB('test').runCommand({find: '" + testCollName + "', filter: {x: x}}}));}}";
+        "db.getSiblingDB('test').runCommand({find: '" + testCollName +
+        "', filter: {x: x}, projection: {x: 1}}));}}";
     print("Read cmd: " + readCmd);
     // Do a bunch of reads on all values of x.
     let readers = [];
@@ -38,22 +39,24 @@
         print("reader " + i + " started");
     }
 
+    // Write the initial documents. Ensure they have been replicated.
+    for (let i = 0; i < nOps; i++) {
+        assert.commandWorked(testDB.runCommand(
+            {insert: testCollName, documents: [{_id: i, x: i}], writeConcern: {w: "majority"}}));
+    }
+
     // Generate applyOps operations that increment x on each _id backwards to avoid conficts.
     // When these updates get replicated to the secondary, they might get applied out of order
     // in different batches, which can cause unique key violations.
     for (let times = 0; times < nIterations; times++) {
-        // Reset the initial documents. Ensure they have been replicated.
-        assert.commandWorked(testDB.runCommand(
-            {delete: testCollName, deletes: [{q: {}, limit: 0}], writeConcern: {w: "majority"}}));
-        for (let i = 0; i < nOps; i++) {
-            assert.commandWorked(testDB.runCommand({
-                insert: testCollName,
-                documents: [{_id: i, x: i}],
-                writeConcern: {w: "majority"}
-            }));
-        }
-        // Do updates
         let ops = [];
+        // Reset documents.
+        for (let i = 0; i < nOps; i++) {
+            ops[i] = {op: "u", ns: testNs, o2: {_id: i}, o: {x: i}};
+        }
+        assert.commandWorked(testDB.runCommand({applyOps: ops}));
+        ops = [];
+        // Do updates
         for (let i = 0; i < nOps; i++) {
             // Do this nOps+1 times to do a complete cycle of every document to every value of x
             // and

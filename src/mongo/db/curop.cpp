@@ -537,6 +537,10 @@ string OpDebug::report(Client* client,
         s << " keysDeleted:" << keysDeleted;
     }
 
+    if (prepareReadConflicts > 0) {
+        s << " prepareReadConflicts:" << prepareReadConflicts;
+    }
+
     if (writeConflicts > 0) {
         s << " writeConflicts:" << writeConflicts;
     }
@@ -622,6 +626,10 @@ void OpDebug::append(const CurOp& curop,
 
     if (keysDeleted > 0) {
         b.appendNumber("keysDeleted", keysDeleted);
+    }
+
+    if (prepareReadConflicts > 0) {
+        b.appendNumber("prepareReadConflicts", prepareReadConflicts);
     }
 
     if (writeConflicts > 0) {

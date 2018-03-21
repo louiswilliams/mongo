@@ -37,6 +37,7 @@
 #include "mongo/bson/bsonobjbuilder.h"
 #include "mongo/db/server_options.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_kv_engine.h"
+#include "mongo/db/storage/wiredtiger/wiredtiger_prepare_conflict.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_session_cache.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_util.h"
 #include "mongo/util/hex.h"
@@ -70,8 +71,18 @@ WiredTigerRecoveryUnit::~WiredTigerRecoveryUnit() {
 
 void WiredTigerRecoveryUnit::_commit() {
     try {
+        bool notifyDone = !_prepareTimestamp.isNull();
         if (_session && _active) {
             _txnClose(true);
+        }
+
+        // In the case the prepare conflict failpoint is enabled, always notify waiters.
+        if (MONGO_FAIL_POINT(WTPrepareConflictForReads)) {
+            notifyDone = true;
+        }
+
+        if (notifyDone) {
+            _sessionCache->notifyPreparedUnitOfWorkHasCommittedOrAborted();
         }
 
         for (Changes::const_iterator it = _changes.begin(), end = _changes.end(); it != end; ++it) {
@@ -87,8 +98,18 @@ void WiredTigerRecoveryUnit::_commit() {
 
 void WiredTigerRecoveryUnit::_abort() {
     try {
+        bool notifyDone = !_prepareTimestamp.isNull();
         if (_session && _active) {
             _txnClose(false);
+        }
+
+        // In the case the prepare conflict failpoint is enabled, always notify waiters.
+        if (MONGO_FAIL_POINT(WTPrepareConflictForReads)) {
+            notifyDone = true;
+        }
+
+        if (notifyDone) {
+            _sessionCache->notifyPreparedUnitOfWorkHasCommittedOrAborted();
         }
 
         for (Changes::const_reverse_iterator it = _changes.rbegin(), end = _changes.rend();
@@ -110,6 +131,21 @@ void WiredTigerRecoveryUnit::beginUnitOfWork(OperationContext* opCtx) {
     invariant(!_areWriteUnitOfWorksBanned);
     invariant(!_inUnitOfWork);
     _inUnitOfWork = true;
+}
+
+void WiredTigerRecoveryUnit::prepareUnitOfWork() {
+    invariant(!_areWriteUnitOfWorksBanned);
+    invariant(_inUnitOfWork);
+    invariant(!_prepareTimestamp.isNull());
+
+    auto session = getSession();
+    WT_SESSION* s = session->getSession();
+
+    LOG(1) << "preparing transaction at time: " << _prepareTimestamp;
+
+    const std::string conf = "prepare_timestamp=" + integerToHex(_prepareTimestamp.asULL());
+    // Prepare the transaction.
+    invariantWTOK(s->prepare_transaction(s, conf.c_str()));
 }
 
 void WiredTigerRecoveryUnit::commitUnitOfWork() {
@@ -192,16 +228,21 @@ void WiredTigerRecoveryUnit::_txnClose(bool commit) {
 
     int wtRet;
     if (commit) {
+        // When committing a prepared transaction, a commit timestamp is required.
+        invariant(_prepareTimestamp.isNull() || !_commitTimestamp.isNull());
+        // Commit timestamps should greater than or equal to prepare timestamps.
+        invariant(_prepareTimestamp.isNull() || _commitTimestamp >= _prepareTimestamp);
+
         if (!_commitTimestamp.isNull()) {
             const std::string conf = "commit_timestamp=" + integerToHex(_commitTimestamp.asULL());
             invariantWTOK(s->timestamp_transaction(s, conf.c_str()));
             _isTimestamped = true;
         }
 
-        wtRet = s->commit_transaction(s, NULL);
+        wtRet = s->commit_transaction(s, nullptr);
         LOG(3) << "WT commit_transaction for snapshot id " << _mySnapshotId;
     } else {
-        wtRet = s->rollback_transaction(s, NULL);
+        wtRet = s->rollback_transaction(s, nullptr);
         invariant(!wtRet);
         LOG(3) << "WT rollback_transaction for snapshot id " << _mySnapshotId;
     }
@@ -218,6 +259,7 @@ void WiredTigerRecoveryUnit::_txnClose(bool commit) {
     invariantWTOK(wtRet);
 
     _active = false;
+    _prepareTimestamp = Timestamp();
     _mySnapshotId = nextSnapshotId.fetchAndAdd(1);
     _isOplogReader = false;
     _orderedCommit = true;  // Default value is true; we assume all writes are ordered.
@@ -299,6 +341,7 @@ Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
     LOG(3) << "WT set timestamp of future write operations to " << timestamp;
     WT_SESSION* session = _session->getSession();
     invariant(_inUnitOfWork);
+    invariant(_prepareTimestamp.isNull());
     invariant(_commitTimestamp.isNull(),
               str::stream() << "Commit timestamp set to " << _commitTimestamp.toString()
                             << " and trying to set WUOW timestamp to "
@@ -332,6 +375,14 @@ void WiredTigerRecoveryUnit::clearCommitTimestamp() {
     invariant(!_inUnitOfWork);
     invariant(!_commitTimestamp.isNull());
     _commitTimestamp = Timestamp();
+}
+
+void WiredTigerRecoveryUnit::setPrepareTimestamp(Timestamp timestamp) {
+    invariant(_inUnitOfWork);
+    invariant(_prepareTimestamp.isNull());
+    invariant(_commitTimestamp.isNull());
+
+    _prepareTimestamp = timestamp;
 }
 
 Status WiredTigerRecoveryUnit::setPointInTimeReadTimestamp(Timestamp timestamp) {

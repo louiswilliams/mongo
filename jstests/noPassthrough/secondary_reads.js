@@ -1,7 +1,7 @@
 (function() {
     "use strict";
 
-    let rst = new ReplSetTest({nodes: 2});
+    let rst = new ReplSetTest({nodes: 2, nodeOptions: {"verbose": 2}});
     rst.startSet();
     rst.initiate();
 
@@ -18,17 +18,18 @@
     assert.commandWorked(testDB.runCommand(
         {createIndexes: testCollName, indexes: [{key: {x: 1}, name: "x_1", unique: true}]}));
 
-    // We want to do applyOps with many different documents, each incrementing a uniquely indexed
+    // We want to do applyOps with many different documents, each incrementing a uniquely
+    // indexed
     // value, 'x'. The goal is that a reader on a secondary might find a case where the unique
     // index violatation is missed, and an index on x maps to two different records.
     const nOps = 64;
-    const nIterations = 100;
+    const nIterations = 10;
     const nReaders = 32;
 
     // Do a bunch of reads using the 'x' index on the secondary.
     let readCmd = "db.getMongo().setSlaveOk();" + "for (let i = 0; i < " + nIterations +
-        "; i++) {" + "assert.commandWorked(" + "db.getSiblingDB('test').runCommand({find: '" +
-        testCollName + "', filter: {x: {$gte: 0}}}));" + " print('done')}";
+        "; i++) { for (let x = 0; x < " + nOps + "; x++) {" + "assert.commandWorked(" +
+        "db.getSiblingDB('test').runCommand({find: '" + testCollName + "', filter: {x: x}}}));}}";
     print("Read cmd: " + readCmd);
     // Do a bunch of reads on all values of x.
     let readers = [];
@@ -42,20 +43,20 @@
     // in different batches, which can cause unique key violations.
     for (let times = 0; times < nIterations; times++) {
         // Reset the initial documents. Ensure they have been replicated.
-        testDB.runCommand({drop: testCollName});
-        assert.commandWorked(testDB.runCommand({create: testCollName}));
+        assert.commandWorked(testDB.runCommand(
+            {delete: testCollName, deletes: [{q: {}, limit: 0}], writeConcern: {w: "majority"}}));
         for (let i = 0; i < nOps; i++) {
-            testDB.runCommand({
-                update: testCollName,
-                updates: [{q: {_id: i}, u: {$set: {x: i}}}],
-                writeConcern: {w: "majority"},
-                upsert: true
-            });
+            assert.commandWorked(testDB.runCommand({
+                insert: testCollName,
+                documents: [{_id: i, x: i}],
+                writeConcern: {w: "majority"}
+            }));
         }
         // Do updates
         let ops = [];
         for (let i = 0; i < nOps; i++) {
-            // Do this nOps+1 times to do a complete cycle of every document to every value of x and
+            // Do this nOps+1 times to do a complete cycle of every document to every value of x
+            // and
             // back to its orignal value.
             let end = nOps - i - 1;  // start with the nth _id
             let nextX = end + 1;

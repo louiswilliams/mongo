@@ -1,7 +1,7 @@
 (function() {
     "use strict";
 
-    let rst = new ReplSetTest({nodes: 2, nodeOptions: {"verbose": 2}});
+    let rst = new ReplSetTest({nodes: 2});
     rst.startSet();
     rst.initiate();
 
@@ -18,10 +18,10 @@
     assert.commandWorked(testDB.runCommand(
         {createIndexes: testCollName, indexes: [{key: {x: 1}, name: "x_1", unique: true}]}));
 
-    // We want to do applyOps with many different documents, each incrementing a uniquely
-    // indexed
-    // value, 'x'. The goal is that a reader on a secondary might find a case where the unique
-    // index violatation is missed, and an index on x maps to two different records.
+    // We want to do applyOps with at last as many different documents as there are parallel batch
+    // writer threads (16). Each iteration increments and decrements a uniquely indexed value, 'x'.
+    // The goal is that a reader on a secondary might find a case where the unique index constraint
+    // is ignored, and an index on x maps to two different records.
     const nOps = 16;
     const nIterations = 50;
     const nReaders = 16;
@@ -32,7 +32,6 @@
         "db.getSiblingDB('test').runCommand({find: '" + testCollName +
         "', filter: {x: x}, projection: {x: 1}}));}}";
     print("Read cmd: " + readCmd);
-    // Do a bunch of reads on all values of x.
     let readers = [];
     for (let i = 0; i < nReaders; i++) {
         readers[i] = startParallelShell(readCmd, secondary.port);
@@ -41,31 +40,34 @@
 
     // Write the initial documents. Ensure they have been replicated.
     for (let i = 0; i < nOps; i++) {
-        assert.commandWorked(testDB.runCommand(
-            {insert: testCollName, documents: [{_id: i, x: i}], writeConcern: {w: "majority"}}));
+        assert.commandWorked(testDB.runCommand({
+            insert: testCollName,
+            documents: [{_id: i, x: i, iter: 0}],
+            writeConcern: {w: "majority"}
+        }));
     }
 
-    // Generate applyOps operations that increment x on each _id backwards to avoid conficts.
-    // When these updates get replicated to the secondary, they might get applied out of order
-    // in different batches, which can cause unique key violations.
-    for (let times = 0; times < nIterations; times++) {
+    // Cycle the value of x in the document {_id: i, x: i} between i and i+1 each iteration.
+    for (let iteration = 0; iteration < nIterations; iteration++) {
         let ops = [];
-        // Reset documents.
+        // Reset each document.
         for (let i = 0; i < nOps; i++) {
-            ops[i] = {op: "u", ns: testNs, o2: {_id: i}, o: {x: i}};
+            ops[i] = {op: "u", ns: testNs, o2: {_id: i}, o: {x: i, iter: iteration}};
         }
         assert.commandWorked(testDB.runCommand({applyOps: ops}));
         ops = [];
-        // Do updates
+
+        // Generate an applyOps command that increments x on each document backwards by _id to avoid
+        // conficts when applied in-order. When these updates get applied to the secondary, they may
+        // get applied out of order by different threads and temporarily violate unique index
+        // constraints.
         for (let i = 0; i < nOps; i++) {
-            // Do this nOps+1 times to do a complete cycle of every document to every value of x
-            // and
-            // back to its orignal value.
-            let end = nOps - i - 1;  // start with the nth _id
+            // Start at the end and increment x by 1.
+            let end = nOps - i - 1;
             let nextX = end + 1;
-            ops[i] = {op: "u", ns: testNs, o2: {_id: end}, o: {x: nextX}};
+            ops[i] = {op: "u", ns: testNs, o2: {_id: end}, o: {x: nextX, iter: iteration}};
         }
-        print('iteration ' + times);
+        print('iteration ' + iteration);
         assert.commandWorked(testDB.runCommand({applyOps: ops}));
     }
 
@@ -74,6 +76,5 @@
         readerWait();
         print("reader " + i + " done");
     }
-
     rst.stopSet();
 })();

@@ -1,3 +1,30 @@
+/**
+ * This test ensures readers on a secondary are unable to read from unique indexes that temporarily
+ * violate their uniqueness constraint. When oplog entries are applied in parallel batch writes,
+ * operations can be applied out-of-order, and reading at an inconsistent state is possible.
+ *
+ * For example, take two documents, { _id: 1, x: 1} and  { _id: 2, x: 2} with a unique index on 'x'.
+ * On the primary, two updates take place in this order:
+ *   { _id: 2, x: 3 }
+ *   { _id: 1, x: 2 }
+ * There is no uniqueness violation here because x: 3 happens before x: 2. If the updates had
+ * occured in the opposite order, a DuplicateKey error would be returned to the user.
+ *
+ * When these operations are applied on a secondary, they split up across one of 16 writer threads,
+ * hashed on the _id of the document. This guarantees that updates to the same document will occur
+ * in-order on the same thread.
+ *
+ * Take two parallel threads applying the same updates as before:
+ *      Thread 1            Thread 2
+ *   { _id: 1, x: 2 }
+ *                       { _id: 2, x: 3 }
+ *
+ * If a secondary reader were to access the index entry for x=2 after Thread 1 made its update but
+ * before Thread 2 made its update, they would find two entries for x=2, which is a violation of the
+ * uniqueness constraint. When applying operations in parallel like this, we temporarily ignore
+ * uniqueness violations on indexes, and require readers on secondaries to wait for the parallel
+ * batch insert to complete, at which point the state of the indexes will be consistent.
+ */
 (function() {
     "use strict";
 

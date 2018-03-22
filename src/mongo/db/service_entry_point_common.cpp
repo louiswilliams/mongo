@@ -731,8 +731,7 @@ void execCommandDatabase(OperationContext* opCtx,
 
         behaviors.waitForReadConcern(opCtx, invocation.get(), request);
         boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> noConflict;
-        if (
-            allowSecondaryReadsDuringBatchApplication.load()) {
+        if (allowSecondaryReadsDuringBatchApplication.load()) {
             noConflict.emplace(opCtx->lockState());
         }
 

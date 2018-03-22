@@ -96,7 +96,7 @@ MONGO_FP_DECLARE(rsStopGetMore);
 MONGO_FP_DECLARE(respondWithNotPrimaryInCommandDispatch);
 MONGO_FP_DECLARE(skipCheckingForNotMasterInCommandDispatch);
 
-MONGO_EXPORT_SERVER_PARAMETER(allowSecondaryReadsDuringBatchApplication, bool, true);
+MONGO_EXPORT_SERVER_PARAMETER(allowSecondaryReadsDuringBatchApplication, bool, false);
 
 namespace {
 using logger::LogComponent;

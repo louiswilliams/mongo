@@ -249,6 +249,13 @@ public:
     virtual void updateCommittedSnapshot(const OpTime& newCommitPoint) = 0;
 
     /**
+     * Updates the committed snapshot to the newCommitPoint, and deletes older snapshots.
+     *
+     * It is illegal to call with a newCommitPoint that does not name an existing snapshot.
+     */
+    virtual void updateLastStableLocalSnapshot(const OpTime& optime) = 0;
+
+    /**
      * Returns whether or not the SnapshotThread is active.
      */
     virtual bool snapshotsEnabled() const = 0;

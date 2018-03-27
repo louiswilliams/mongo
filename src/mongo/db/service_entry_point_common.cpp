@@ -97,8 +97,6 @@ MONGO_FP_DECLARE(rsStopGetMore);
 MONGO_FP_DECLARE(respondWithNotPrimaryInCommandDispatch);
 MONGO_FP_DECLARE(skipCheckingForNotMasterInCommandDispatch);
 
-MONGO_EXPORT_SERVER_PARAMETER(allowSecondaryReadsDuringBatchApplication, bool, false);
-
 namespace {
 using logger::LogComponent;
 
@@ -723,10 +721,6 @@ void execCommandDatabase(OperationContext* opCtx,
         }
 
         behaviors.waitForReadConcern(opCtx, invocation.get(), request);
-        boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> noConflict;
-        if (allowSecondaryReadsDuringBatchApplication.load()) {
-            noConflict.emplace(opCtx->lockState());
-        }
 
         retval = runCommandImpl(
             opCtx, invocation.get(), request, replyBuilder, startOperationTime, behaviors);

@@ -326,8 +326,12 @@ void WiredTigerRecoveryUnit::_txnOpen() {
         _sessionCache->snapshotManager().beginTransactionOnOplog(
             _sessionCache->getKVEngine()->getOplogManager(), session);
     } else {
+        bool isReadTransaction = _readConcernLevel.is_initialized();
+        auto ignorePrepare = (_readConcernLevel) &&
+            _readConcernLevel.get() == repl::ReadConcernLevel::kAvailableReadConcern;
+
         auto status = _sessionCache->snapshotManager().beginTransactionOnLastLocalSnapshot(
-            session, _readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern);
+            session, isReadTransaction, ignorePrepare);
     }
 
     LOG(3) << "WT begin_transaction for snapshot id " << _mySnapshotId;

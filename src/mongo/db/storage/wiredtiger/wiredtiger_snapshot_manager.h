@@ -72,7 +72,8 @@ public:
      * If setLastStableLocalSnapshot is set, then that timestamp will be used.
      */
     Status beginTransactionOnLastLocalSnapshot(WT_SESSION* session,
-                                               bool isAvailableReadConcern = false) const;
+                                               bool isReadOnlyTransaction,
+                                               bool ignorePrepare = false) const;
 
 
     /**

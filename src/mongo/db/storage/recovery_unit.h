@@ -143,7 +143,8 @@ public:
      * Returns the readConcern level of this recovery unit.
      */
     repl::ReadConcernLevel getReadConcernLevel() const {
-        return _readConcernLevel;
+        return (_readConcernLevel) ? _readConcernLevel.get()
+                                   : repl::ReadConcernLevel::kLocalReadConcern;
     }
 
     /**
@@ -338,7 +339,7 @@ public:
 protected:
     RecoveryUnit() {}
     repl::ReplicationCoordinator::Mode _replicationMode = repl::ReplicationCoordinator::modeNone;
-    repl::ReadConcernLevel _readConcernLevel = repl::ReadConcernLevel::kLocalReadConcern;
+    boost::optional<repl::ReadConcernLevel> _readConcernLevel;
 };
 
 }  // namespace mongo

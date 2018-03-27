@@ -891,6 +891,9 @@ void SyncTail::oplogApplication(OplogBuffer* oplogBuffer, ReplicationCoordinator
         // Update various things that care about our last applied optime. Tests rely on 2 happening
         // before 3 even though it isn't strictly necessary. The order of 1 doesn't matter.
 
+        // 0. Update the last stable local timestamp for reads on secondaries.
+        replCoord->setMyLastStableLocalOpTime(lastOpTimeInBatch);
+
         // 1. Update the global timestamp.
         setNewTimestamp(opCtx.getServiceContext(), lastOpTimeInBatch.getTimestamp());
 

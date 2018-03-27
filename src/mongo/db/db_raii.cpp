@@ -101,10 +101,15 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         auto lastAppliedTimestamp =
             repl::ReplicationCoordinator::get(opCtx)->getMyLastAppliedOpTime().getTimestamp();
 
-        invariant(lastAppliedTimestamp >= minSnapshot || !minSnapshot,
-                  str::stream() << "last applied: " << lastAppliedTimestamp.toString()
-                                << ", minSnapshot: "
-                                << minSnapshot->toString());
+        if (!lastAppliedTimestamp.isNull()) {
+            /*
+                        invariant(lastAppliedTimestamp >= minSnapshot || !minSnapshot,
+                                  str::stream() << "last applied: " <<
+               lastAppliedTimestamp.toString()
+                                                << ", minSnapshot: "
+                                                << minSnapshot->toString());
+                                                */
+        }
 
         if (!minSnapshot) {
             return;

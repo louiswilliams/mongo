@@ -57,6 +57,8 @@ void WiredTigerSnapshotManager::setCommittedSnapshot(const Timestamp& timestamp)
 void WiredTigerSnapshotManager::setLastStableLocalSnapshot(const Timestamp& timestamp) {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
 
+    LOG(1) << "setting last stable local timestamp to " << timestamp.toString();
+
     invariant(!_lastStableLocalTimestamp || *_lastStableLocalTimestamp <= timestamp);
     _lastStableLocalTimestamp = timestamp;
 }
@@ -100,17 +102,20 @@ Timestamp WiredTigerSnapshotManager::beginTransactionOnCommittedSnapshot(
     return *_committedSnapshot;
 }
 
-Status WiredTigerSnapshotManager::beginTransactionOnLastLocalSnapshot(
-    WT_SESSION* session, bool isAvailableReadConcern) const {
+Status WiredTigerSnapshotManager::beginTransactionOnLastLocalSnapshot(WT_SESSION* session,
+                                                                      bool isReadOnlyTransaction,
+                                                                      bool ignorePrepare) const {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
 
-    if (_lastStableLocalTimestamp) {
+    if (_lastStableLocalTimestamp && isReadOnlyTransaction) {
+        LOG(2) << "begin_transaction on last local snapshot "
+               << _lastStableLocalTimestamp.get().toString();
         auto status = beginTransactionAtTimestamp(_lastStableLocalTimestamp.get(), session);
         fassert(50761, status);
         return status;
     }
-    return wtRCToStatus(session->begin_transaction(
-        session, isAvailableReadConcern ? "ignore_prepare=true" : nullptr));
+    return wtRCToStatus(
+        session->begin_transaction(session, ignorePrepare ? "ignore_prepare=true" : nullptr));
 }
 
 void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* oplogManager,

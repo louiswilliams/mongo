@@ -29,7 +29,7 @@
     "use strict";
 
     const name = "secondaryReadsUniqueIndexes";
-    let rst = new ReplSetTest({name: name, nodes: 2});
+    let rst = new ReplSetTest({name: name, nodes: 2, nodeOptions: {verbose: ""}});
     let nodes = rst.startSet();
     rst.initiate({
         _id: name,
@@ -51,6 +51,8 @@
     assert.commandWorked(testDB.runCommand(
         {createIndexes: testCollName, indexes: [{key: {x: 1}, name: "x_1", unique: true}]}));
 
+    rst.awaitReplication();
+
     // We want to do updates with at least as many different documents as there are parallel batch
     // writer threads (16). Each iteration increments and decrements a uniquely indexed value, 'x'.
     // The goal is that a reader on a secondary might find a case where the unique index constraint
@@ -66,8 +68,12 @@
         db.getMongo().setSlaveOk();
         while (true) {
             for (let x = 0; x < ${nOps}; x++) {
-                assert.commandWorked(db.getSiblingDB('test').runCommand(
-                    {find: "${testCollName}", filter: {x: x}, projection: {x: 1}}));
+                assert.commandWorked(db.getSiblingDB('test').runCommand({
+                    find: "${testCollName}",
+                    filter: {x: x},
+                    projection: {x: 1},
+                    readConcern: {level: "local"}
+                }));
             }
         }`;
 

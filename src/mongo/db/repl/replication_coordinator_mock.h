@@ -117,6 +117,8 @@ public:
     virtual void setMyLastAppliedOpTimeForward(const OpTime& opTime, DataConsistency consistency);
     virtual void setMyLastDurableOpTimeForward(const OpTime& opTime);
 
+    virtual void setMyLastStableLocalOpTime(const OpTime& opTime);
+
     virtual void resetMyLastOpTimes();
 
     virtual void setMyHeartbeatMessage(const std::string& msg);

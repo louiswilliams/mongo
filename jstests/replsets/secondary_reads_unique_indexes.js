@@ -72,7 +72,7 @@
                     find: "${testCollName}",
                     filter: {x: x},
                     projection: {x: 1},
-                    readConcern: {level: "local"}
+                    readConcern: {level: "majority"}
                 }));
             }
         }`;

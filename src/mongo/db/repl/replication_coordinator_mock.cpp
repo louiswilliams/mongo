@@ -200,6 +200,8 @@ void ReplicationCoordinatorMock::setMyLastDurableOpTimeForward(const OpTime& opT
     }
 }
 
+void ReplicationCoordinatorMock::setMyLastStableLocalOpTime(const OpTime& opTime) {}
+
 void ReplicationCoordinatorMock::resetMyLastOpTimes() {
     _myLastDurableOpTime = OpTime();
 }

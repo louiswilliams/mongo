@@ -197,6 +197,10 @@ void ReplicationCoordinatorEmbedded::setMyLastAppliedOpTime(const OpTime&) {
 void ReplicationCoordinatorEmbedded::setMyLastDurableOpTime(const OpTime&) {
     UASSERT_NOT_IMPLEMENTED;
 }
+void ReplicationCoordinatorEmbedded::setMyLastStableLocalOpTime(const OpTime& opTime) {
+    UASSERT_NOT_IMPLEMENTED;
+}
+
 
 void ReplicationCoordinatorEmbedded::resetMyLastOpTimes() {
     UASSERT_NOT_IMPLEMENTED;

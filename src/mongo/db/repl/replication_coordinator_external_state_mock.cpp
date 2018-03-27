@@ -214,6 +214,8 @@ void ReplicationCoordinatorExternalStateMock::dropAllSnapshots() {}
 void ReplicationCoordinatorExternalStateMock::updateCommittedSnapshot(
     const OpTime& newCommitPoint) {}
 
+void ReplicationCoordinatorExternalStateMock::updateLastStableLocalSnapshot(const OpTime& optime) {}
+
 bool ReplicationCoordinatorExternalStateMock::snapshotsEnabled() const {
     return _areSnapshotsEnabled;
 }

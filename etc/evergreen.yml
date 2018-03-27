@@ -4998,7 +4998,6 @@ buildvariants:
   - name: jstestfuzz_concurrent
   - name: jstestfuzz_concurrent_replication
   - name: jstestfuzz_concurrent_sharded
-  - name: jstestfuzz_interrupt
   - name: jstestfuzz_replication
   - name: jstestfuzz_sharded
   - name: mongosTest
@@ -5252,7 +5251,6 @@ buildvariants:
   - name: jstestfuzz_concurrent
   - name: jstestfuzz_concurrent_replication
   - name: jstestfuzz_concurrent_sharded
-  - name: jstestfuzz_interrupt
   - name: jstestfuzz_replication
   - name: jstestfuzz_sharded
   - name: noPassthrough
@@ -6226,7 +6224,6 @@ buildvariants:
   - name: jstestfuzz_concurrent
   - name: jstestfuzz_concurrent_replication
   - name: jstestfuzz_concurrent_sharded
-  - name: jstestfuzz_interrupt
   - name: jstestfuzz_replication
   - name: jstestfuzz_sharded
   - name: replica_sets_auth
@@ -8995,7 +8992,6 @@ buildvariants:
   - name: jsCore_op_query
   - name: jsonSchema
   - name: jstestfuzz
-  - name: jstestfuzz_interrupt
   - name: noPassthrough
   - name: noPassthroughWithMongod
   - name: parallel

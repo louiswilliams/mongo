@@ -54,6 +54,13 @@ void WiredTigerSnapshotManager::setCommittedSnapshot(const Timestamp& timestamp)
     _committedSnapshot = timestamp;
 }
 
+void WiredTigerSnapshotManager::setLastStableLocalSnapshot(const Timestamp& timestamp) {
+    stdx::lock_guard<stdx::mutex> lock(_mutex);
+
+    invariant(!_lastStableLocalTimestamp || *_lastStableLocalTimestamp <= timestamp);
+    _lastStableLocalTimestamp = timestamp;
+}
+
 void WiredTigerSnapshotManager::dropAllSnapshots() {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
     _committedSnapshot = boost::none;
@@ -91,6 +98,19 @@ Timestamp WiredTigerSnapshotManager::beginTransactionOnCommittedSnapshot(
     auto status = beginTransactionAtTimestamp(_committedSnapshot.get(), session);
     fassert(30635, status);
     return *_committedSnapshot;
+}
+
+Status WiredTigerSnapshotManager::beginTransactionOnLastLocalSnapshot(
+    WT_SESSION* session, bool isAvailableReadConcern) const {
+    stdx::lock_guard<stdx::mutex> lock(_mutex);
+
+    if (_lastStableLocalTimestamp) {
+        auto status = beginTransactionAtTimestamp(_lastStableLocalTimestamp.get(), session);
+        fassert(50750, status);
+        return status;
+    }
+    return wtRCToStatus(session->begin_transaction(
+        session, isAvailableReadConcern ? "ignore_prepare=true" : nullptr));
 }
 
 void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* oplogManager,

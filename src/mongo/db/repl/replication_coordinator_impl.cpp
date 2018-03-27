@@ -1041,6 +1041,12 @@ void ReplicationCoordinatorImpl::setMyLastDurableOpTime(const OpTime& opTime) {
     _reportUpstream_inlock(std::move(lock));
 }
 
+
+void ReplicationCoordinatorImpl::setMyLastStableLocalOpTime(const OpTime& opTime) {
+    stdx::unique_lock<stdx::mutex> lock(_mutex);
+    _externalState->updateLastStableLocalSnapshot(opTime);
+}
+
 void ReplicationCoordinatorImpl::resetMyLastOpTimes() {
     stdx::unique_lock<stdx::mutex> lock(_mutex);
     _resetMyLastOpTimes_inlock();

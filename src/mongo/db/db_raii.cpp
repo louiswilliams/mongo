@@ -79,6 +79,14 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                                                    AutoGetCollection::ViewMode viewMode,
                                                    Date_t deadline) {
     const auto collectionLockMode = getLockModeForQuery(opCtx);
+
+    auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
+    boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> pbwmGuard;
+
+    if (readConcernLevel != repl::ReadConcernLevel::kSnapshotReadConcern) {
+        pbwmGuard.emplace(opCtx->lockState());
+    }
+
     _autoColl.emplace(opCtx, nsOrUUID, collectionLockMode, viewMode, deadline);
 
     while (true) {
@@ -88,10 +96,24 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         }
 
         auto minSnapshot = coll->getMinimumVisibleSnapshot();
+        auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+
+        auto lastAppliedTimestamp =
+            repl::ReplicationCoordinator::get(opCtx)->getMyLastAppliedOpTime().getTimestamp();
+        if (!lastAppliedTimestamp.isNull() && minSnapshot) {
+            if (lastAppliedTimestamp < minSnapshot) {
+                pbwmGuard.reset();
+            } else {
+                invariant(lastAppliedTimestamp >= minSnapshot,
+                          str::stream() << "last applied: " << lastAppliedTimestamp.toString()
+                                        << ", minSnapshot: "
+                                        << minSnapshot->toString());
+            }
+        }
+
         if (!minSnapshot) {
             return;
         }
-        auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
         if (!mySnapshot) {
             return;
         }
@@ -99,7 +121,6 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             return;
         }
 
-        auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
         if (readConcernLevel == repl::ReadConcernLevel::kSnapshotReadConcern) {
             uasserted(ErrorCodes::SnapshotUnavailable,
                       str::stream()

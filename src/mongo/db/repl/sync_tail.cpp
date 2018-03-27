@@ -1324,6 +1324,8 @@ StatusWith<OpTime> SyncTail::multiApply(OperationContext* opCtx, MultiApplier::O
                 "attempting to replicate ops while primary"};
     }
 
+    replCoord->setMyLastStableLocalOpTime(replCoord->getMyLastAppliedOpTime());
+
     std::vector<WorkerMultikeyPathInfo> multikeyVector(workerPool->getStats().numThreads);
     {
         // Each node records cumulative batch application stats for itself using this timer.

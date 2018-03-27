@@ -107,7 +107,7 @@
     for (let i = 0; i < nReaders; i++) {
         const ec = stopMongoProgramByPid(readers[i]);
         const expect = _isWindows() ? 1 : -15;
-        assert.eq(ec, expect, "Expected mongo shell to exit with code 0");
+        assert.eq(ec, expect, "Expected mongo shell to exit with code: " + expect);
         print("reader " + i + " done");
     }
     rst.stopSet();

@@ -94,6 +94,6 @@ public:
 private:
     mutable stdx::mutex _mutex;  // Guards _committedSnapshot.
     boost::optional<Timestamp> _committedSnapshot;
-    boost::optional<Timestamp> _localTimestamp;
+    boost::optional<Timestamp> _localSnapshot;
 };
 }

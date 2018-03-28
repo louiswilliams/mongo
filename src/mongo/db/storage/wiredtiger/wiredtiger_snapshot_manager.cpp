@@ -59,8 +59,8 @@ void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
 
     LOG(1) << "setting last stable local timestamp to " << timestamp.toString();
 
-    invariant(!_localTimestamp || *_localTimestamp <= timestamp);
-    _localTimestamp = timestamp;
+    invariant(!_localSnapshot || *_localSnapshot <= timestamp);
+    _localSnapshot = timestamp;
 }
 
 void WiredTigerSnapshotManager::dropAllSnapshots() {
@@ -107,9 +107,9 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
                                                                   bool ignorePrepare) const {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
 
-    if (_localTimestamp && isReadOnlyTransaction) {
-        LOG(2) << "begin_transaction on last local snapshot " << _localTimestamp.get().toString();
-        auto status = beginTransactionAtTimestamp(_localTimestamp.get(), session);
+    if (_localSnapshot && isReadOnlyTransaction) {
+        LOG(2) << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
+        auto status = beginTransactionAtTimestamp(_localSnapshot.get(), session);
         fassert(50761, status);
         return status;
     }

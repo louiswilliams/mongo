@@ -60,7 +60,7 @@ public:
     /**
      *  Sets the snapshot for the last stable timestamp for reading on secondaries.
      */
-    virtual void setLastStableLocalSnapshot(const Timestamp& timestamp) = 0;
+    virtual void setLocalSnapshot(const Timestamp& timestamp) = 0;
 
     /**
      * Drops all snapshots and clears the "committed" snapshot.

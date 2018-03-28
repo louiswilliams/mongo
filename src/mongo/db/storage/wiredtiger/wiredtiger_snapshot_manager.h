@@ -48,7 +48,7 @@ public:
     WiredTigerSnapshotManager() = default;
 
     void setCommittedSnapshot(const Timestamp& timestamp) final;
-    void setLastStableLocalSnapshot(const Timestamp& timestamp) final;
+    void setLocalSnapshot(const Timestamp& timestamp) final;
     void dropAllSnapshots() final;
 
     //
@@ -69,11 +69,11 @@ public:
      *
      * Throws if there is currently no last stable local snapshot.
      *
-     * If setLastStableLocalSnapshot is set, then that timestamp will be used.
+     * If setLocalSnapshot is set, then that timestamp will be used.
      */
-    Status beginTransactionOnLastLocalSnapshot(WT_SESSION* session,
-                                               bool isReadOnlyTransaction,
-                                               bool ignorePrepare = false) const;
+    Status beginTransactionOnLocalSnapshot(WT_SESSION* session,
+                                           bool isReadOnlyTransaction,
+                                           bool ignorePrepare = false) const;
 
 
     /**
@@ -94,6 +94,6 @@ public:
 private:
     mutable stdx::mutex _mutex;  // Guards _committedSnapshot.
     boost::optional<Timestamp> _committedSnapshot;
-    boost::optional<Timestamp> _lastStableLocalTimestamp;
+    boost::optional<Timestamp> _localTimestamp;
 };
 }

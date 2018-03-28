@@ -333,7 +333,6 @@ public:
      */
     virtual void setMyLastDurableOpTimeForward(const OpTime& opTime) = 0;
 
-    virtual void setMyLastStableLocalOpTime(const OpTime& opTime) = 0;
     /**
      * Same as above, but used during places we need to zero our last optime.
      */

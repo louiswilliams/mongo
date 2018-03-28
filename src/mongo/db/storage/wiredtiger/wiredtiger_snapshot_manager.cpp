@@ -54,13 +54,13 @@ void WiredTigerSnapshotManager::setCommittedSnapshot(const Timestamp& timestamp)
     _committedSnapshot = timestamp;
 }
 
-void WiredTigerSnapshotManager::setLastStableLocalSnapshot(const Timestamp& timestamp) {
+void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
 
     LOG(1) << "setting last stable local timestamp to " << timestamp.toString();
 
-    invariant(!_lastStableLocalTimestamp || *_lastStableLocalTimestamp <= timestamp);
-    _lastStableLocalTimestamp = timestamp;
+    invariant(!_localTimestamp || *_localTimestamp <= timestamp);
+    _localTimestamp = timestamp;
 }
 
 void WiredTigerSnapshotManager::dropAllSnapshots() {
@@ -102,15 +102,14 @@ Timestamp WiredTigerSnapshotManager::beginTransactionOnCommittedSnapshot(
     return *_committedSnapshot;
 }
 
-Status WiredTigerSnapshotManager::beginTransactionOnLastLocalSnapshot(WT_SESSION* session,
-                                                                      bool isReadOnlyTransaction,
-                                                                      bool ignorePrepare) const {
+Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* session,
+                                                                  bool isReadOnlyTransaction,
+                                                                  bool ignorePrepare) const {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
 
-    if (_lastStableLocalTimestamp && isReadOnlyTransaction) {
-        LOG(2) << "begin_transaction on last local snapshot "
-               << _lastStableLocalTimestamp.get().toString();
-        auto status = beginTransactionAtTimestamp(_lastStableLocalTimestamp.get(), session);
+    if (_localTimestamp && isReadOnlyTransaction) {
+        LOG(2) << "begin_transaction on last local snapshot " << _localTimestamp.get().toString();
+        auto status = beginTransactionAtTimestamp(_localTimestamp.get(), session);
         fassert(50761, status);
         return status;
     }

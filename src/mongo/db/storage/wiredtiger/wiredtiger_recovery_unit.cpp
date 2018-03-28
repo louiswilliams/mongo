@@ -330,7 +330,7 @@ void WiredTigerRecoveryUnit::_txnOpen() {
         auto ignorePrepare = (_readConcernLevel) &&
             _readConcernLevel.get() == repl::ReadConcernLevel::kAvailableReadConcern;
 
-        auto status = _sessionCache->snapshotManager().beginTransactionOnLastLocalSnapshot(
+        auto status = _sessionCache->snapshotManager().beginTransactionOnLocalSnapshot(
             session, isReadTransaction, ignorePrepare);
     }
 

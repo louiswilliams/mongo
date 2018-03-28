@@ -107,7 +107,6 @@ public:
 
     void setMyLastAppliedOpTimeForward(const repl::OpTime&, DataConsistency) override;
     void setMyLastDurableOpTimeForward(const repl::OpTime&) override;
-    void setMyLastStableLocalOpTime(const repl::OpTime& opTime) override;
 
     void resetMyLastOpTimes() override;
 

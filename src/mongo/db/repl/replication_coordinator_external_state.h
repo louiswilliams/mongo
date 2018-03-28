@@ -253,7 +253,7 @@ public:
      *
      * It is illegal to call with a newCommitPoint that does not name an existing snapshot.
      */
-    virtual void updateLastStableLocalSnapshot(const OpTime& optime) = 0;
+    virtual void updateLocalSnapshot(const OpTime& optime) = 0;
 
     /**
      * Returns whether or not the SnapshotThread is active.

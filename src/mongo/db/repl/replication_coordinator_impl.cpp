@@ -1035,18 +1035,13 @@ void ReplicationCoordinatorImpl::setMyLastAppliedOpTime(const OpTime& opTime) {
     // The optime passed to this function is required to represent a consistent database state.
     _setMyLastAppliedOpTime_inlock(opTime, false, DataConsistency::Consistent);
     _reportUpstream_inlock(std::move(lock));
+    _externalState->updateLocalSnapshot(opTime);
 }
 
 void ReplicationCoordinatorImpl::setMyLastDurableOpTime(const OpTime& opTime) {
     stdx::unique_lock<stdx::mutex> lock(_mutex);
     _setMyLastDurableOpTime_inlock(opTime, false);
     _reportUpstream_inlock(std::move(lock));
-}
-
-
-void ReplicationCoordinatorImpl::setMyLastStableLocalOpTime(const OpTime& opTime) {
-    stdx::unique_lock<stdx::mutex> lock(_mutex);
-    _externalState->updateLastStableLocalSnapshot(opTime);
 }
 
 void ReplicationCoordinatorImpl::resetMyLastOpTimes() {

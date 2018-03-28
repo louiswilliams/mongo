@@ -67,12 +67,16 @@
     let readCmd = `
         db.getMongo().setSlaveOk();
         while (true) {
+            let session = db.getSiblingDB('test').getMongo().startSession({causalConsistency: false });
+            let sessionDB = session.getDatabase('test');
+            let txnNumber = 0;
             for (let x = 0; x < ${nOps}; x++) {
-                assert.commandWorked(db.getSiblingDB('test').runCommand({
+                assert.commandWorked(sessionDB.runCommand({
                     find: "${testCollName}",
                     filter: {x: x},
                     projection: {x: 1},
-                    readConcern: {level: "local"}
+                    readConcern: {level: "snapshot"},
+                    txnNumber: NumberLong(txnNumber++)
                 }));
             }
         }`;

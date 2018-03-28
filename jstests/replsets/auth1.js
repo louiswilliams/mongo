@@ -51,7 +51,7 @@ load("jstests/replsets/rslib.js");
     MongoRunner.stopMongod(m);
 
     print("start up rs");
-    var rs = new ReplSetTest({"name": name, "nodes": 3});
+    var rs = new ReplSetTest({"name": name, "nodes": 3, nodeOptions: {vv: ""}});
 
     // The first node is started with the pre-populated data directory.
     print("start 0 with keyFile");

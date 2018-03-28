@@ -326,9 +326,8 @@ void WiredTigerRecoveryUnit::_txnOpen() {
         _sessionCache->snapshotManager().beginTransactionOnOplog(
             _sessionCache->getKVEngine()->getOplogManager(), session);
     } else {
-        bool isReadTransaction = _readConcernLevel.is_initialized();
-        auto ignorePrepare = (_readConcernLevel) &&
-            _readConcernLevel.get() == repl::ReadConcernLevel::kAvailableReadConcern;
+        bool isReadTransaction = _readConcernLevel != boost::none;
+        auto ignorePrepare = _readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern;
 
         auto status = _sessionCache->snapshotManager().beginTransactionOnLocalSnapshot(
             session, isReadTransaction, ignorePrepare);

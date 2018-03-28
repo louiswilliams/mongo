@@ -64,7 +64,7 @@
     // Do a bunch of reads using the 'x' index on the secondary.
     // No errors should be encountered on the secondary.
     let readers = [];
-    let readCmd = `
+    let readCmdSnapshot = `
         db.getMongo().setSlaveOk();
         while (true) {
             let session = db.getSiblingDB('test').getMongo().startSession({causalConsistency: false });
@@ -80,10 +80,23 @@
                 }));
             }
         }`;
+    let readCmdLocal = `
+        db.getMongo().setSlaveOk();
+        while (true) {
+            let testDB = db.getSiblingDB('test');
+            for (let x = 0; x < ${nOps}; x++) {
+                assert.commandWorked(testDB.runCommand({
+                    find: "${testCollName}",
+                    filter: {x: x},
+                    projection: {x: 1},
+                    readConcern: {level: "local"},
+                }));
+            }
+        }`;
 
     for (let i = 0; i < nReaders; i++) {
         readers[i] =
-            startMongoProgramNoConnect("mongo", "--port", secondary.port, "--eval", readCmd);
+            startMongoProgramNoConnect("mongo", "--port", secondary.port, "--eval", readCmdLocal);
         print("reader " + i + " started");
     }
 

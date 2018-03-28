@@ -57,7 +57,7 @@ void WiredTigerSnapshotManager::setCommittedSnapshot(const Timestamp& timestamp)
 void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
 
-    LOG(1) << "setting last stable local timestamp to " << timestamp.toString();
+    LOG(1) << "setting local snapshot timestamp to " << timestamp.toString();
 
     invariant(!_localSnapshot || *_localSnapshot <= timestamp);
     _localSnapshot = timestamp;

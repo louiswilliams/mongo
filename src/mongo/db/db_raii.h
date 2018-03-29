@@ -32,6 +32,7 @@
 
 #include "mongo/db/catalog_raii.h"
 #include "mongo/db/stats/top.h"
+#include "mongo/db/storage/snapshot_manager.h"
 #include "mongo/util/timer.h"
 
 namespace mongo {

@@ -78,22 +78,11 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                                                    const NamespaceStringOrUUID& nsOrUUID,
                                                    AutoGetCollection::ViewMode viewMode,
                                                    Date_t deadline) {
+    ShouldNotConflictWithSecondaryBatchApplicationBlock pbwmGuard(opCtx->lockState());
     const auto collectionLockMode = getLockModeForQuery(opCtx);
-
-    auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
-    boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> pbwmGuard;
-
-    if (readConcernLevel != repl::ReadConcernLevel::kSnapshotReadConcern) {
-        pbwmGuard.emplace(opCtx->lockState());
-    }
-
     _autoColl.emplace(opCtx, nsOrUUID, collectionLockMode, viewMode, deadline);
 
-    while (true) {
-        auto coll = _autoColl->getCollection();
-        if (!coll) {
-            return;
-        }
+    while (auto coll = _autoColl->getCollection()) {
 
         auto minSnapshot = coll->getMinimumVisibleSnapshot();
         auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
@@ -106,9 +95,8 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         }
 
         if (!lastAppliedTimestamp.isNull() && minSnapshot > lastAppliedTimestamp) {
-            auto manager =
-                opCtx->getServiceContext()->getGlobalStorageEngine()->getSnapshotManager();
-            if (manager) {
+            if (auto manager =
+                opCtx->getServiceContext()->getGlobalStorageEngine()->getSnapshotManager()) {
                 manager->setLocalSnapshotForward(minSnapshot.get());
             }
         }
@@ -120,6 +108,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             return;
         }
 
+        auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
         if (readConcernLevel == repl::ReadConcernLevel::kSnapshotReadConcern) {
             uasserted(ErrorCodes::SnapshotUnavailable,
                       str::stream()

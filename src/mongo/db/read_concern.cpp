@@ -213,7 +213,7 @@ Status waitForReadConcern(OperationContext* opCtx,
     // When reading local or available read concern on a member that isn't a primary, read from the
     // last applied local snapshot.
     if (replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
-        !replCoord->getMemberState().primary() &&
+        replCoord->getMemberState().secondary() &&
         (readConcernArgs.getLevel() == repl::ReadConcernLevel::kLocalReadConcern ||
          readConcernArgs.getLevel() == repl::ReadConcernLevel::kAvailableReadConcern)) {
         opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(true);

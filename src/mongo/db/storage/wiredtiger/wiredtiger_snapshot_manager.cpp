@@ -57,10 +57,15 @@ void WiredTigerSnapshotManager::setCommittedSnapshot(const Timestamp& timestamp)
 void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
 
-    LOG(1) << "setting local snapshot timestamp to " << timestamp.toString();
+    log() << "setting local snapshot timestamp to " << timestamp.toString();
 
     invariant(!_localSnapshot || *_localSnapshot <= timestamp);
     _localSnapshot = timestamp;
+}
+
+boost::optional<Timestamp> WiredTigerSnapshotManager::getLocalSnapshot() {
+    stdx::lock_guard<stdx::mutex> lock(_mutex);
+    return _localSnapshot;
 }
 
 void WiredTigerSnapshotManager::dropAllSnapshots() {
@@ -74,11 +79,16 @@ boost::optional<Timestamp> WiredTigerSnapshotManager::getMinSnapshotForNextCommi
 }
 
 Status WiredTigerSnapshotManager::beginTransactionAtTimestamp(Timestamp pointInTime,
-                                                              WT_SESSION* session) const {
+                                                              WT_SESSION* session,
+                                                              bool ignorePrepare) const {
     char readTSConfigString[15 /* read_timestamp= */ + (8 * 2) /* 8 hexadecimal characters */ +
+                            1 /* , */ + 15 /*  ignore_prepare= */ + 5 /* false */ +
                             1 /* trailing null */];
-    auto size = std::snprintf(
-        readTSConfigString, sizeof(readTSConfigString), "read_timestamp=%llx", pointInTime.asULL());
+    auto size = std::snprintf(readTSConfigString,
+                              sizeof(readTSConfigString),
+                              "read_timestamp=%llx,ignore_prepare=%s",
+                              pointInTime.asULL(),
+                              ignorePrepare ? "true" : "false");
     if (size < 0) {
         int e = errno;
         error() << "error snprintf " << errnoWithDescription(e);
@@ -97,24 +107,19 @@ Timestamp WiredTigerSnapshotManager::beginTransactionOnCommittedSnapshot(
             "Committed view disappeared while running operation",
             _committedSnapshot);
 
-    auto status = beginTransactionAtTimestamp(_committedSnapshot.get(), session);
+    auto status =
+        beginTransactionAtTimestamp(_committedSnapshot.get(), session, false /* ignorePrepare*/);
     fassert(30635, status);
     return *_committedSnapshot;
 }
 
 Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* session,
-                                                                  bool isReadOnlyTransaction,
                                                                   bool ignorePrepare) const {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
+    invariant(_localSnapshot);
 
-    if (_localSnapshot && isReadOnlyTransaction) {
-        LOG(2) << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
-        auto status = beginTransactionAtTimestamp(_localSnapshot.get(), session);
-        fassert(50761, status);
-        return status;
-    }
-    return wtRCToStatus(
-        session->begin_transaction(session, ignorePrepare ? "ignore_prepare=true" : nullptr));
+    log() << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
+    return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
 }
 
 void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* oplogManager,

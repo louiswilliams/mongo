@@ -49,13 +49,16 @@ public:
 
     void setCommittedSnapshot(const Timestamp& timestamp) final;
     void setLocalSnapshot(const Timestamp& timestamp) final;
+    boost::optional<Timestamp> getLocalSnapshot() final;
     void dropAllSnapshots() final;
 
     //
     // WT-specific methods
     //
 
-    Status beginTransactionAtTimestamp(Timestamp pointInTime, WT_SESSION* session) const;
+    Status beginTransactionAtTimestamp(Timestamp pointInTime,
+                                       WT_SESSION* session,
+                                       bool ignorePrepare) const;
 
     /**
      * Starts a transaction and returns the SnapshotName used.
@@ -65,15 +68,13 @@ public:
     Timestamp beginTransactionOnCommittedSnapshot(WT_SESSION* session) const;
 
     /**
-     * Starts a transaction on the last stable local timestamp and returns the Timestamp used.
+     * Starts a transaction on the last stable local timestamp,
      *
      * Throws if there is currently no last stable local snapshot.
      *
      * If setLocalSnapshot is set, then that timestamp will be used.
      */
-    Status beginTransactionOnLocalSnapshot(WT_SESSION* session,
-                                           bool isReadOnlyTransaction,
-                                           bool ignorePrepare = false) const;
+    Status beginTransactionOnLocalSnapshot(WT_SESSION* session, bool ignorePrepare) const;
 
 
     /**

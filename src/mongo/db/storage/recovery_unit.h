@@ -143,8 +143,13 @@ public:
      * Returns the readConcern level of this recovery unit.
      */
     repl::ReadConcernLevel getReadConcernLevel() const {
-        return (_readConcernLevel) ? _readConcernLevel.get()
-                                   : repl::ReadConcernLevel::kLocalReadConcern;
+        return _readConcernLevel;
+    }
+
+    void setShouldReadAtLastAppliedTimestamp(bool value) {
+        invariant(_readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
+                  _readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern);
+        _shouldReadAtLastAppliedTimestamp = value;
     }
 
     /**
@@ -339,7 +344,8 @@ public:
 protected:
     RecoveryUnit() {}
     repl::ReplicationCoordinator::Mode _replicationMode = repl::ReplicationCoordinator::modeNone;
-    boost::optional<repl::ReadConcernLevel> _readConcernLevel;
+    repl::ReadConcernLevel _readConcernLevel;
+    bool _shouldReadAtLastAppliedTimestamp = false;
 };
 
 }  // namespace mongo

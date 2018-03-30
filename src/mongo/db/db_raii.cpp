@@ -109,7 +109,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             auto manager =
                 opCtx->getServiceContext()->getGlobalStorageEngine()->getSnapshotManager();
             if (manager) {
-                manager->setLocalSnapshot(minSnapshot.get());
+                manager->setLocalSnapshotForward(minSnapshot.get());
             }
         }
 

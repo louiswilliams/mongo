@@ -49,6 +49,7 @@ public:
 
     void setCommittedSnapshot(const Timestamp& timestamp) final;
     void setLocalSnapshot(const Timestamp& timestamp) final;
+    void setLocalSnapshotForward(const Timestamp& timestamp) final;
     boost::optional<Timestamp> getLocalSnapshot() final;
     void dropAllSnapshots() final;
 

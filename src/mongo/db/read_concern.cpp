@@ -210,8 +210,9 @@ Status waitForReadConcern(OperationContext* opCtx,
     opCtx->recoveryUnit()->setReadConcernLevelAndReplicationMode(readConcernArgs.getLevel(),
                                                                  replCoord->getReplicationMode());
 
-    // When reading local or available read concern on a member that isn't a primary, read from the
-    // last applied local snapshot.
+    // When reading local or available read concern on a primary, read from the last applied local
+    // snapshot. If we are not on a secondary, there should not be servicing reads that conflict
+    // with applied batches of oplog entries.
     if (replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
         replCoord->getMemberState().secondary() &&
         (readConcernArgs.getLevel() == repl::ReadConcernLevel::kLocalReadConcern ||

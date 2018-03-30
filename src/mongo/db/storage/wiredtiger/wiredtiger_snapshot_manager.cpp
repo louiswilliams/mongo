@@ -59,8 +59,17 @@ void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
 
     log() << "setting local snapshot timestamp to " << timestamp.toString();
 
-    invariant(!_localSnapshot || *_localSnapshot <= timestamp);
     _localSnapshot = timestamp;
+}
+
+void WiredTigerSnapshotManager::setLocalSnapshotForward(const Timestamp& timestamp) {
+    stdx::lock_guard<stdx::mutex> lock(_mutex);
+
+    log() << "setting local snapshot timestamp forward to " << timestamp.toString();
+
+    if (!_localSnapshot || timestamp > *_localSnapshot) {
+        _localSnapshot = timestamp;
+    }
 }
 
 boost::optional<Timestamp> WiredTigerSnapshotManager::getLocalSnapshot() {

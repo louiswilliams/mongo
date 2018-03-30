@@ -6,7 +6,8 @@
  * assume that each individual phase will have data to work with, and therefore be tested.
  */
 var testName = "initialsync_with_write_load";
-var replTest = new ReplSetTest({name: testName, nodes: 3, oplogSize: 100});
+var replTest =
+    new ReplSetTest({name: testName, nodes: 3, oplogSize: 100, nodeOptions: {verbose: ""}});
 var nodes = replTest.nodeList();
 
 var conns = replTest.startSet();

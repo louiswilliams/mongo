@@ -27,7 +27,7 @@ function SecondaryReadsTest(name = "secondary_reads_test", replSet) {
         replSet.initiate(
             {_id: name, members: [{_id: 0, host: nodes[0]}, {_id: 1, host: nodes[1]}]});
         return replSet;
-    };
+    }
 
     this.startSecondaryReaders = function(nReaders, cmd) {
         let readCmd = `db.getMongo().setSlaveOk();

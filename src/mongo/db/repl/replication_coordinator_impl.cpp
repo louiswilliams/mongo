@@ -1018,7 +1018,6 @@ void ReplicationCoordinatorImpl::setMyLastAppliedOpTimeForward(const OpTime& opT
     stdx::unique_lock<stdx::mutex> lock(_mutex);
     if (opTime > _getMyLastAppliedOpTime_inlock()) {
         _setMyLastAppliedOpTime_inlock(opTime, false, consistency);
-        _externalState->updateLocalSnapshot(opTime);
         _reportUpstream_inlock(std::move(lock));
     }
 }
@@ -1035,7 +1034,6 @@ void ReplicationCoordinatorImpl::setMyLastAppliedOpTime(const OpTime& opTime) {
     stdx::unique_lock<stdx::mutex> lock(_mutex);
     // The optime passed to this function is required to represent a consistent database state.
     _setMyLastAppliedOpTime_inlock(opTime, false, DataConsistency::Consistent);
-    _externalState->updateLocalSnapshot(opTime);
     _reportUpstream_inlock(std::move(lock));
 }
 
@@ -1092,6 +1090,10 @@ void ReplicationCoordinatorImpl::_setMyLastAppliedOpTime_inlock(const OpTime& op
     if (opTime.isNull()) {
         return;
     }
+
+    // The local snapshot should be updated before setting the stable timestamp on the storage
+    // engine so that new transactions do not read on old timestamps.
+    _externalState->updateLocalSnapshot(opTime);
 
     // Add the new applied optime to the list of stable optime candidates and then set the last
     // stable optime. Stable optimes are used to determine the last optime that it is safe to revert
@@ -3309,8 +3311,6 @@ Timestamp ReplicationCoordinatorImpl::getMinimumVisibleSnapshot(OperationContext
 void ReplicationCoordinatorImpl::waitUntilSnapshotCommitted(OperationContext* opCtx,
                                                             const Timestamp& untilSnapshot) {
     stdx::unique_lock<stdx::mutex> lock(_mutex);
-
-    log() << "waiting for snapshot committed: " << untilSnapshot;
 
     while (!_currentCommittedSnapshot ||
            _currentCommittedSnapshot->getTimestamp() < untilSnapshot) {

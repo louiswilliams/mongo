@@ -128,14 +128,7 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
     invariant(_localSnapshot);
 
     log() << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
-    auto status = beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
-
-    // This error can occur when the oldest_timestamp advances past the read_timestamp. If that
-    // happens, throw a WriteConflictException to retry the operation.
-    if (status.code() == ErrorCodes::BadValue) {
-        throw WriteConflictException();
-    }
-    return status;
+    return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
 }
 
 void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* oplogManager,

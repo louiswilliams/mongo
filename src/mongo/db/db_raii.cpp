@@ -144,9 +144,14 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // Yield locks in order to do the blocking call below
         _autoColl = boost::none;
 
-        replCoord->waitUntilSnapshotCommitted(opCtx, *minSnapshot);
+        // TODO: Don't do this. Create a wait condition on the replication coordinator on the
+        // lastAppliedOptime.
+        if (readAtLastAppliedTimestamp) {
+            sleepmillis(50);
+        }
 
         if (readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern) {
+            replCoord->waitUntilSnapshotCommitted(opCtx, *minSnapshot);
             uassertStatusOK(opCtx->recoveryUnit()->obtainMajorityCommittedSnapshot());
         }
 

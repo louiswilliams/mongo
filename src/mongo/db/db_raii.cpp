@@ -116,9 +116,15 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             return;
         }
 
-        // When readConcern is "snapshot" or "majority" and a point and time timestamp has been set,
-        // return if there are no conflicting catalog changes.
+        // This can be se when readConcern is "snapshot" or "majority".
         auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+
+        // If we no not have a point in time to conflict with minSnapshot, return.
+        if (!mySnapshot && !readAtLastAppliedTimestamp) {
+            return;
+        }
+
+        // Return if there are no conflicting catalog changes with mySnapshot.
         if (mySnapshot && mySnapshot >= minSnapshot) {
             return;
         }
@@ -132,12 +138,8 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                           << ". Collection minimum is "
                           << minSnapshot->toString());
         }
-
-        // Any read concern that would not need to wait for the minSnapshot should return.
-        if (readConcernLevel != repl::ReadConcernLevel::kMajorityReadConcern &&
-            !readAtLastAppliedTimestamp) {
-            return;
-        }
+        invariant(readAtLastAppliedTimestamp ||
+                  readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern);
 
         // Yield locks in order to do the blocking call below
         _autoColl = boost::none;

@@ -88,10 +88,13 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
     // When reading local or available read concern on a primary, read from the last applied local
     // snapshot. If we are not on a secondary, we should not be servicing reads that conflict
     // with applied batches of oplog entries.
-    if (replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
-        replCoord->getMemberState().secondary() &&
-        (readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
-         readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern)) {
+    bool readAtLastAppliedTimestamp =
+        (replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
+         replCoord->getMemberState().secondary() &&
+         (readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
+          readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern));
+
+    if (readAtLastAppliedTimestamp) {
         opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(true);
     }
 
@@ -101,6 +104,14 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
 
         if (!minSnapshot) {
+            return;
+        }
+
+        // If there are pending catalog changes, we should wait later on for the minSnapshot time
+        // when reading from the lastAppliedTimestamp.
+        auto lastAppliedTimestamp = replCoord->getMyLastAppliedOpTime().getTimestamp();
+        if (readAtLastAppliedTimestamp &&
+            (lastAppliedTimestamp.isNull() || lastAppliedTimestamp >= minSnapshot)) {
             return;
         }
 
@@ -118,10 +129,9 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                           << minSnapshot->toString());
         }
 
-        auto lastAppliedTimestamp = replCoord->getMyLastAppliedOpTime().getTimestamp();
-
-        // If there are pending catalog changes, we should wait for the minSnapshot time.
-        if (lastAppliedTimestamp.isNull() || lastAppliedTimestamp > minSnapshot) {
+        // Any read concern that would not need to wait for a snapshot should return.
+        if (readConcernLevel != repl::ReadConcernLevel::kMajorityReadConcern &&
+            !readAtLastAppliedTimestamp) {
             return;
         }
 

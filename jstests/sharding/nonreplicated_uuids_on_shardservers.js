@@ -3,7 +3,7 @@
 (function() {
     "use strict";
     load("jstests/libs/check_uuids.js");
-    let st = new ShardingTest({shards: 1, rs: {nodes: 1}, mongos: 1, nodeOptions: {vv: ""}});
+    let st = new ShardingTest({shards: 1, rs: {nodes: 1}, mongos: 1, nodeOptions: {verbose: ""}});
     let mongos = st.s;
     let rs = st.rs0;
 

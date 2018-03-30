@@ -3310,6 +3310,8 @@ void ReplicationCoordinatorImpl::waitUntilSnapshotCommitted(OperationContext* op
                                                             const Timestamp& untilSnapshot) {
     stdx::unique_lock<stdx::mutex> lock(_mutex);
 
+    log() << "waiting for snapshot committed: " << untilSnapshot;
+
     while (!_currentCommittedSnapshot ||
            _currentCommittedSnapshot->getTimestamp() < untilSnapshot) {
         opCtx->waitForConditionOrInterrupt(_currentCommittedSnapshotCond, lock);

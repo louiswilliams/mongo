@@ -82,33 +82,32 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
     const auto collectionLockMode = getLockModeForQuery(opCtx);
     _autoColl.emplace(opCtx, nsOrUUID, collectionLockMode, viewMode, deadline);
 
+    repl::ReplicationCoordinator* const replCoord = repl::ReplicationCoordinator::get(opCtx);
+    auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
+
+    // When reading local or available read concern on a primary, read from the last applied local
+    // snapshot. If we are not on a secondary, we should not be servicing reads that conflict
+    // with applied batches of oplog entries.
+    if (replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
+        replCoord->getMemberState().secondary() &&
+        (readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
+         readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern)) {
+        opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(true);
+    }
+
     while (auto coll = _autoColl->getCollection()) {
 
         auto minSnapshot = coll->getMinimumVisibleSnapshot();
         auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
 
-        auto lastAppliedTimestamp =
-            repl::ReplicationCoordinator::get(opCtx)->getMyLastAppliedOpTime().getTimestamp();
-
         if (!minSnapshot) {
             return;
         }
 
-        if (!lastAppliedTimestamp.isNull() && minSnapshot > lastAppliedTimestamp) {
-            if (auto manager =
-                opCtx->getServiceContext()->getGlobalStorageEngine()->getSnapshotManager()) {
-                manager->setLocalSnapshotForward(minSnapshot.get());
-            }
-        }
-
-        if (!mySnapshot) {
-            return;
-        }
-        if (mySnapshot >= minSnapshot) {
+        if (mySnapshot && mySnapshot >= minSnapshot) {
             return;
         }
 
-        auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
         if (readConcernLevel == repl::ReadConcernLevel::kSnapshotReadConcern) {
             uasserted(ErrorCodes::SnapshotUnavailable,
                       str::stream()
@@ -118,14 +117,22 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                           << ". Collection minimum is "
                           << minSnapshot->toString());
         }
-        invariant(readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern);
+
+        auto lastAppliedTimestamp = replCoord->getMyLastAppliedOpTime().getTimestamp();
+
+        // If there are pending catalog changes, we should wait for the minSnapshot time.
+        if (lastAppliedTimestamp.isNull() || lastAppliedTimestamp > minSnapshot) {
+            return;
+        }
 
         // Yield locks in order to do the blocking call below
         _autoColl = boost::none;
 
-        repl::ReplicationCoordinator::get(opCtx)->waitUntilSnapshotCommitted(opCtx, *minSnapshot);
+        replCoord->waitUntilSnapshotCommitted(opCtx, *minSnapshot);
 
-        uassertStatusOK(opCtx->recoveryUnit()->obtainMajorityCommittedSnapshot());
+        if (readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern) {
+            uassertStatusOK(opCtx->recoveryUnit()->obtainMajorityCommittedSnapshot());
+        }
 
         {
             stdx::lock_guard<Client> lk(*opCtx->getClient());

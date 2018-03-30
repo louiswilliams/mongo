@@ -85,9 +85,9 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
     repl::ReplicationCoordinator* const replCoord = repl::ReplicationCoordinator::get(opCtx);
     auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
 
-    // When reading local or available read concern on a primary, read from the last applied local
-    // snapshot. If we are not on a secondary, we should not be servicing reads that conflict
-    // with applied batches of oplog entries.
+    // When reading local or available read concern on a secondary, read from the last applied local
+    // snapshot (the previous batch boundary). If we are not on a secondary, we should not be
+    // serving reads that conflict with applied batches of oplog entries.
     bool readAtLastAppliedTimestamp =
         (replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
          replCoord->getMemberState().secondary() &&
@@ -100,21 +100,25 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
 
     while (auto coll = _autoColl->getCollection()) {
 
+        // This is the timestamp of the most recent catalog changes to this collection. If this is
+        // greater than any point in time read timestamps, we should either wait or return an error.
         auto minSnapshot = coll->getMinimumVisibleSnapshot();
-        auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
-
         if (!minSnapshot) {
             return;
         }
 
-        // If there are pending catalog changes, we should wait later on for the minSnapshot time
-        // when reading from the lastAppliedTimestamp.
+        // If we are reading from the lastAppliedTimestamp and it is up-to-date with any catalog
+        // changes, we can return. Otherwise, we should wait later on for the minSnapshot commit
+        // point.
         auto lastAppliedTimestamp = replCoord->getMyLastAppliedOpTime().getTimestamp();
         if (readAtLastAppliedTimestamp &&
             (lastAppliedTimestamp.isNull() || lastAppliedTimestamp >= minSnapshot)) {
             return;
         }
 
+        // When readConcern is "snapshot" or "majority" and a point and time timestamp has been set,
+        // return if there are no conflicting catalog changes.
+        auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
         if (mySnapshot && mySnapshot >= minSnapshot) {
             return;
         }
@@ -129,7 +133,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                           << minSnapshot->toString());
         }
 
-        // Any read concern that would not need to wait for a snapshot should return.
+        // Any read concern that would not need to wait for the minSnapshot should return.
         if (readConcernLevel != repl::ReadConcernLevel::kMajorityReadConcern &&
             !readAtLastAppliedTimestamp) {
             return;

@@ -102,7 +102,7 @@ public:
           _highestInserted(highestInserted),
           _countInserted(countInserted) {}
 
-    void commit() final {
+    void commit(Timestamp ts) final {
         invariant(_bytesInserted >= 0);
         invariant(_highestInserted.isNormal());
 
@@ -126,7 +126,7 @@ class WiredTigerRecordStore::OplogStones::TruncateChange final : public Recovery
 public:
     TruncateChange(OplogStones* oplogStones) : _oplogStones(oplogStones) {}
 
-    void commit() final {
+    void commit(Timestamp ts) final {
         _oplogStones->_currentRecords.store(0);
         _oplogStones->_currentBytes.store(0);
 
@@ -1574,7 +1574,7 @@ WiredTigerRecoveryUnit* WiredTigerRecordStore::_getRecoveryUnit(OperationContext
 class WiredTigerRecordStore::NumRecordsChange : public RecoveryUnit::Change {
 public:
     NumRecordsChange(WiredTigerRecordStore* rs, int64_t diff) : _rs(rs), _diff(diff) {}
-    virtual void commit() {}
+    virtual void commit(Timestamp ts) {}
     virtual void rollback() {
         _rs->_numRecords.fetchAndAdd(-_diff);
     }
@@ -1593,7 +1593,7 @@ void WiredTigerRecordStore::_changeNumRecords(OperationContext* opCtx, int64_t d
 class WiredTigerRecordStore::DataSizeChange : public RecoveryUnit::Change {
 public:
     DataSizeChange(WiredTigerRecordStore* rs, int64_t amount) : _rs(rs), _amount(amount) {}
-    virtual void commit() {}
+    virtual void commit(Timestamp ts) {}
     virtual void rollback() {
         _rs->_increaseDataSize(NULL, -_amount);
     }

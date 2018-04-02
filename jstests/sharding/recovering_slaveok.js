@@ -15,8 +15,13 @@ TestData.skipCheckingUUIDsConsistentAcrossCluster = true;
     'use strict';
     load("jstests/replsets/rslib.js");
 
-    var shardTest =
-        new ShardingTest({name: "recovering_slaveok", shards: 2, mongos: 2, other: {rs: true}});
+    var shardTest = new ShardingTest({
+        name: "recovering_slaveok",
+        shards: 2,
+        mongos: 2,
+        nodeOptions: {verbose: ""},
+        other: {rs: true}
+    });
 
     var mongos = shardTest.s0;
     var mongosSOK = shardTest.s1;

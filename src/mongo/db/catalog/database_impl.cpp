@@ -110,7 +110,7 @@ public:
     AddCollectionChange(OperationContext* opCtx, DatabaseImpl* db, StringData ns)
         : _opCtx(opCtx), _db(db), _ns(ns.toString()) {}
 
-    virtual void commit() {
+    virtual void commit(Timestamp ts) {
         CollectionMap::const_iterator it = _db->_collections.find(_ns);
 
         if (it == _db->_collections.end())
@@ -142,7 +142,7 @@ public:
     // Takes ownership of coll (but not db).
     RemoveCollectionChange(DatabaseImpl* db, Collection* coll) : _db(db), _coll(coll) {}
 
-    virtual void commit() {
+    virtual void commit(Timestamp ts) {
         delete _coll;
     }
 

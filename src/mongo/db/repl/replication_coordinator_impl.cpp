@@ -3291,15 +3291,25 @@ Timestamp ReplicationCoordinatorImpl::getMinimumVisibleSnapshot(OperationContext
     Timestamp reservedName;
     if (getReplicationMode() == Mode::modeReplSet) {
         invariant(opCtx->lockState()->isLocked());
-        if (getMemberState().primary() || opCtx->recoveryUnit()->getCommitTimestamp().isNull()) {
+        auto commitTimestamp = opCtx->recoveryUnit()->getCommitTimestamp();
+        auto clusterTime = LogicalClock::get(getServiceContext())->getClusterTime().asTimestamp();
+        auto lastApplied = getMyLastAppliedOpTime().getTimestamp();
+        if (getMemberState().primary()) {
             // Use the current optime on the node, for primary nodes. Additionally, completion of
             // background index builds on secondaries will not have a `commit time` and must also
             // use the current optime.
-            reservedName = LogicalClock::get(getServiceContext())->getClusterTime().asTimestamp();
-        } else {
+            log() << "using reserved time: clusterTime (primary)";
+            reservedName = clusterTime;
+        } else if (!commitTimestamp.isNull()) {
+
+            // Use the last applied opTime on a secondary that has no commitTimestamp set.
+            log() << "using reserved time: commitTimestamp";
+            reservedName = commitTimestamp;
+        } else if (!lastApplied.isNull()) {
             // This function is only called when applying command operations on secondaries.
             // We ask the RecoveryUnit what timestamp it will assign to this write.
-            reservedName = opCtx->recoveryUnit()->getCommitTimestamp();
+            log() << "using reserved time: lastApplied";
+            reservedName = lastApplied;
         }
     } else {
         // All snapshots are the same for a standalone node.

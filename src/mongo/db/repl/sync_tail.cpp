@@ -670,6 +670,28 @@ void tryToGoLiveAsASecondary(OperationContext* opCtx,
         return;
     }
 
+    // Update the minimum snapshot time on all collections to the last applied time. This allows
+    // secondary readers to see catalog changes the the secondary may have done before it was aware
+    // of the last applied opTime.
+    //     std::vector<std::string> dbNames;
+    //     const auto storageEngine = opCtx->getServiceContext()->getGlobalStorageEngine();
+    //     storageEngine->listDatabases(&dbNames);
+    //     for (auto dbName : dbNames) {
+    //         Database* db = dbHolder().openDb(opCtx, dbName);
+    //         std::list<std::string> collectionNames;
+    //         db->getDatabaseCatalogEntry()->getCollectionNamespaces(&collectionNames);
+    //
+    //         for (const auto& collectionName : collectionNames) {
+    //             Collection* coll = db->getCollection(opCtx, collectionName);
+    //             if (!coll)
+    //                 continue;
+    //
+    //             log() << "re-setting minimum visible snapshot for " << coll->ns();
+    //
+    //             coll->setMinimumVisibleSnapshotWithIndexes(opCtx, lastApplied.getTimestamp());
+    //         }
+    //     }
+
     // Execute the transition to SECONDARY.
     auto status = replCoord->setFollowerMode(MemberState::RS_SECONDARY);
     if (!status.isOK()) {

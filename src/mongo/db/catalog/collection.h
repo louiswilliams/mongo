@@ -322,6 +322,8 @@ public:
         virtual boost::optional<Timestamp> getMinimumVisibleSnapshot() = 0;
 
         virtual void setMinimumVisibleSnapshot(Timestamp name) = 0;
+        virtual void setMinimumVisibleSnapshotWithIndexes(OperationContext* opCtx,
+                                                          Timestamp name) = 0;
 
         virtual bool haveCappedWaiters() = 0;
 
@@ -718,6 +720,11 @@ public:
 
     inline void setMinimumVisibleSnapshot(const Timestamp name) {
         return this->_impl().setMinimumVisibleSnapshot(name);
+    }
+
+    inline void setMinimumVisibleSnapshotWithIndexes(OperationContext* opCtx,
+                                                     const Timestamp name) {
+        return this->_impl().setMinimumVisibleSnapshotWithIndexes(opCtx, name);
     }
 
     inline bool haveCappedWaiters() {

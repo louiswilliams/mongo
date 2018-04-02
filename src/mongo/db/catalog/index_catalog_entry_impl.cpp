@@ -186,7 +186,7 @@ class IndexCatalogEntryImpl::SetHeadChange : public RecoveryUnit::Change {
 public:
     SetHeadChange(IndexCatalogEntryImpl* ice, RecordId oldHead) : _ice(ice), _oldHead(oldHead) {}
 
-    virtual void commit() {}
+    virtual void commit(Timestamp ts) {}
     virtual void rollback() {
         _ice->_head = _oldHead;
     }

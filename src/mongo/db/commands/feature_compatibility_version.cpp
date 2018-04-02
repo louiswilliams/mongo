@@ -155,7 +155,7 @@ void FeatureCompatibilityVersion::onInsertOrUpdate(OperationContext* opCtx, cons
 
     // On commit, update the server parameters, and close any connections with a wire version that
     // is below the minimum.
-    opCtx->recoveryUnit()->onCommit([opCtx, newVersion]() {
+    opCtx->recoveryUnit()->onCommit([opCtx, newVersion] {
         serverGlobalParams.featureCompatibility.setVersion(newVersion);
         updateMinWireVersion();
 

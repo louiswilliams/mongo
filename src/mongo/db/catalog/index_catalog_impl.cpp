@@ -60,6 +60,7 @@
 #include "mongo/db/query/collation/collation_spec.h"
 #include "mongo/db/query/collation/collator_factory_interface.h"
 #include "mongo/db/query/internal_plans.h"
+#include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/server_options.h"
@@ -476,18 +477,29 @@ void IndexCatalogImpl::IndexBuildBlock::success() {
     OperationContext* opCtx = _opCtx;
     LOG(2) << "marking index " << _indexName << " as ready in snapshot id "
            << opCtx->recoveryUnit()->getSnapshotId();
-    _opCtx->recoveryUnit()->onCommit([opCtx, entry, collection] {
+    _opCtx->recoveryUnit()->onTimestamppedCommit([opCtx, entry, collection](Timestamp opTime) {
         // Note: this runs after the WUOW commits but before we release our X lock on the
         // collection. This means that any snapshot created after this must include the full index,
         // and no one can try to read this index before we set the visibility.
         auto replCoord = repl::ReplicationCoordinator::get(opCtx);
         auto snapshotName = replCoord->getMinimumVisibleSnapshot(opCtx);
-        entry->setMinimumVisibleSnapshot(snapshotName);
 
+        // If we have an opTime, we are on a primary and should use that.
+        Timestamp minVisible;
+        if (opTime.isNull()) {
+            minVisible = snapshotName;
+            log() << "setting minimum valid snapshot (with minValid) for " << collection->ns()
+                  << " to " << minVisible;
+        } else {
+            minVisible = opTime;
+            log() << "setting minimum valid snapshot (with opTime) for " << collection->ns()
+                  << " to " << minVisible;
+        }
         // TODO remove this once SERVER-20439 is implemented. It is a stopgap solution for
         // SERVER-20260 to make sure that reads with majority readConcern level can see indexes that
         // are created with w:majority by making the readers block.
-        collection->setMinimumVisibleSnapshot(snapshotName);
+        entry->setMinimumVisibleSnapshot(minVisible);
+        collection->setMinimumVisibleSnapshot(minVisible);
     });
 
     entry->setIsReady(true);
@@ -979,7 +991,7 @@ public:
                       IndexCatalogEntry* entry)
         : _opCtx(opCtx), _collection(collection), _entries(entries), _entry(entry) {}
 
-    void commit() final {
+    void commit(Timestamp ts) final {
         // Ban reading from this collection on committed reads on snapshots before now.
         auto replCoord = repl::ReplicationCoordinator::get(_opCtx);
         auto snapshotName = replCoord->getMinimumVisibleSnapshot(_opCtx);

@@ -158,6 +158,7 @@ private:
     // Commits are assumed ordered.  Unordered commits are assumed to always need to reserve a
     // new optime, and thus always call oplogDiskLocRegister() on the record store.
     bool _orderedCommit = true;
+    Timestamp _oplogTimestamp;
     Timestamp _commitTimestamp;
     Timestamp _prepareTimestamp;
     uint64_t _mySnapshotId;

@@ -361,6 +361,8 @@ public:
         _minVisibleSnapshot = name;
     }
 
+    void setMinimumVisibleSnapshotWithIndexes(OperationContext* opCtx, Timestamp name) final;
+
     bool haveCappedWaiters() final;
 
     /**

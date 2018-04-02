@@ -237,7 +237,7 @@ public:
         virtual ~Change() {}
 
         virtual void rollback() = 0;
-        virtual void commit() = 0;
+        virtual void commit(Timestamp ts) = 0;
     };
 
     /**
@@ -264,7 +264,7 @@ public:
             void rollback() final {
                 _callback();
             }
-            void commit() final {}
+            void commit(Timestamp) final {}
 
         private:
             Callback _callback;
@@ -284,7 +284,7 @@ public:
         public:
             OnCommitChange(Callback&& callback) : _callback(std::move(callback)) {}
             void rollback() final {}
-            void commit() final {
+            void commit(Timestamp) final {
                 _callback();
             }
 
@@ -293,6 +293,23 @@ public:
         };
 
         registerChange(new OnCommitChange(std::move(callback)));
+    }
+
+    template <typename Callback>
+    void onTimestamppedCommit(Callback callback) {
+        class OnTimestampedCommitChange final : public Change {
+        public:
+            OnTimestampedCommitChange(Callback&& callback) : _callback(std::move(callback)) {}
+            void rollback() final {}
+            void commit(Timestamp ts) override final {
+                _callback(ts);
+            }
+
+        private:
+            Callback _callback;
+        };
+
+        registerChange(new OnTimestampedCommitChange(std::move(callback)));
     }
 
     //

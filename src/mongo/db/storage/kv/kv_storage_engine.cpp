@@ -60,7 +60,7 @@ public:
     RemoveDBChange(KVStorageEngine* engine, StringData db, KVDatabaseCatalogEntryBase* entry)
         : _engine(engine), _db(db.toString()), _entry(entry) {}
 
-    virtual void commit() {
+    virtual void commit(Timestamp ts) {
         delete _entry;
     }
 

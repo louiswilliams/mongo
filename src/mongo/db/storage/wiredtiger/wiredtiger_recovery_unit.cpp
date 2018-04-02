@@ -92,7 +92,7 @@ void WiredTigerRecoveryUnit::_commit() {
         }
 
         for (Changes::const_iterator it = _changes.begin(), end = _changes.end(); it != end; ++it) {
-            (*it)->commit();
+            (*it)->commit(_oplogTimestamp);
         }
         _changes.clear();
 
@@ -344,7 +344,7 @@ void WiredTigerRecoveryUnit::_txnOpen() {
 
 Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
     _ensureSession();
-    LOG(3) << "WT set timestamp of future write operations to " << timestamp;
+    log() << "WT set timestamp of future write operations to " << timestamp;
     WT_SESSION* session = _session->getSession();
     invariant(_inUnitOfWork);
     invariant(_prepareTimestamp.isNull());
@@ -360,6 +360,7 @@ Status WiredTigerRecoveryUnit::setTimestamp(Timestamp timestamp) {
     auto rc = session->timestamp_transaction(session, conf.c_str());
     if (rc == 0) {
         _isTimestamped = true;
+        _oplogTimestamp = timestamp;
     }
     return wtRCToStatus(rc, "timestamp_transaction");
 }
@@ -370,6 +371,7 @@ void WiredTigerRecoveryUnit::setCommitTimestamp(Timestamp timestamp) {
               str::stream() << "Commit timestamp set to " << _commitTimestamp.toString()
                             << " and trying to set it to "
                             << timestamp.toString());
+    log() << "WT set commit timestamp of future write operations to " << timestamp;
     _commitTimestamp = timestamp;
 }
 

@@ -113,16 +113,13 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         auto userReadingReplicatedCollection =
             nss.isReplicated() && opCtx->getClient()->isFromUserConnection();
 
-        // Only use the local snapshot if we don't have the PBWM lock. This can happen if we are
-        // reading outside of a batch or when we explicitly deny it.
-        bool hasPbwmLock =
-            opCtx->lockState()->isLockHeldForMode(resourceIdParallelBatchWriterMode, MODE_IS);
         // Read at the last applied timestamp if the above conditions are met.
         bool readAtLastAppliedTimestamp =
-            !hasPbwmLock && userReadingReplicatedCollection && isSecondary && localOrAvailable;
+            userReadingReplicatedCollection && isSecondary && localOrAvailable;
 
         if (readAtLastAppliedTimestamp) {
             opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(true);
+            log() << "reading at last applied timestamp for collection: " << nss;
         }
 
         // This is the timestamp of the most recent catalog changes to this collection. If this is

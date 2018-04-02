@@ -486,7 +486,7 @@ private:
         IndexChange(IndexSet* data, const IndexKeyEntry& entry, bool insert)
             : _data(data), _entry(entry), _insert(insert) {}
 
-        virtual void commit() {}
+        virtual void commit(Timestamp ts) {}
         virtual void rollback() {
             if (_insert)
                 _data->erase(_entry);

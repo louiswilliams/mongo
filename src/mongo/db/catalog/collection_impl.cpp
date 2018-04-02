@@ -511,6 +511,18 @@ Status CollectionImpl::_insertDocuments(OperationContext* opCtx,
     return status;
 }
 
+void CollectionImpl::setMinimumVisibleSnapshotWithIndexes(OperationContext* opCtx,
+                                                          Timestamp timestamp) {
+    setMinimumVisibleSnapshot(timestamp);
+
+    auto it = _indexCatalog.getIndexIterator(opCtx, false);
+    while (it.more()) {
+        IndexDescriptor* descriptor = it.next();
+        it.catalogEntry(descriptor)->setMinimumVisibleSnapshot(timestamp);
+    }
+}
+
+
 bool CollectionImpl::haveCappedWaiters() {
     // Waiters keep a shared_ptr to '_cappedNotifier', so there are waiters if this CollectionImpl's
     // shared_ptr is not unique (use_count > 1).

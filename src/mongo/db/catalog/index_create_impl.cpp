@@ -136,7 +136,7 @@ class MultiIndexBlockImpl::SetNeedToCleanupOnRollback : public RecoveryUnit::Cha
 public:
     explicit SetNeedToCleanupOnRollback(MultiIndexBlockImpl* indexer) : _indexer(indexer) {}
 
-    virtual void commit() {}
+    virtual void commit(Timestamp ts) {}
     virtual void rollback() {
         _indexer->_needToCleanup = true;
     }
@@ -154,7 +154,7 @@ class MultiIndexBlockImpl::CleanupIndexesVectorOnRollback : public RecoveryUnit:
 public:
     explicit CleanupIndexesVectorOnRollback(MultiIndexBlockImpl* indexer) : _indexer(indexer) {}
 
-    virtual void commit() {}
+    virtual void commit(Timestamp ts) {}
     virtual void rollback() {
         _indexer->_indexes.clear();
     }
@@ -559,6 +559,7 @@ void MultiIndexBlockImpl::commit() {
     }
 
     if (requiresCommitTimestamp) {
+        log() << "timstamping index build: " << _collection->ns();
         fassert(50701,
                 _opCtx->recoveryUnit()->setTimestamp(
                     LogicalClock::get(_opCtx)->getClusterTime().asTimestamp()));

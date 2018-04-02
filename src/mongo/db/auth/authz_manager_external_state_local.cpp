@@ -538,7 +538,7 @@ public:
           _isO2Set(o2 ? true : false),
           _o2(_isO2Set ? o2->getOwned() : BSONObj()) {}
 
-    virtual void commit() {
+    virtual void commit(Timestamp ts) {
         stdx::lock_guard<stdx::mutex> lk(_externalState->_roleGraphMutex);
         Status status = _externalState->_roleGraph.handleLogOp(
             _opCtx, _op.c_str(), _nss, _o, _isO2Set ? &_o2 : NULL);

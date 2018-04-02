@@ -95,7 +95,7 @@ public:
             }
         }
 
-        void lock(LockMode mode);
+        void lock(LockMode mode, Date_t deadline = Date_t::max());
         void unlock();
 
         bool isLocked() const {

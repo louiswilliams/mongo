@@ -26,6 +26,8 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
+
 #include "mongo/platform/basic.h"
 
 #include "mongo/db/db_raii.h"
@@ -35,6 +37,7 @@
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/s/collection_sharding_state.h"
 #include "mongo/db/session_catalog.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 namespace {
@@ -85,20 +88,42 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
     repl::ReplicationCoordinator* const replCoord = repl::ReplicationCoordinator::get(opCtx);
     auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
 
-    // When reading local or available read concern on a secondary, read from the last applied local
-    // snapshot (the previous batch boundary). If we are not on a secondary, we should not be
-    // serving reads that conflict with applied batches of oplog entries.
-    bool readAtLastAppliedTimestamp =
-        (replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
-         replCoord->getMemberState().secondary() &&
-         (readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
-          readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern));
-
-    if (readAtLastAppliedTimestamp) {
-        opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(true);
-    }
-
     while (auto coll = _autoColl->getCollection()) {
+
+        const NamespaceString& nss = coll->ns();
+        // The following conditions must be met to read from the last applied timestamp (most recent
+        // batch boundary) to allow reads on secondaries in a consistent state.
+        // TODO: Refactor this into a single helper method.
+
+        // 1. Reading from last applied optime is only used for local and available readConcern
+        // levels. Majority and snapshot readConcern levels handle visiblity correctly, as the
+        // majority commit point is set at the same time as the last applied timestamp.
+        auto localOrAvailable = readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
+            readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern;
+
+        // 2. We must be a secondary. If we are not on a secondary, we would not be serving reads
+        // that conflict with applied batches of oplog entries.
+        auto isSecondary =
+            replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
+            replCoord->getMemberState().secondary();
+
+        // 3. We only need to read at batch boundaries when users read from replicated collections.
+        // Internal reads may need to see inconsistent states, and non-replicated collections do not
+        // rely on replication.
+        auto userReadingReplicatedCollection =
+            nss.isReplicated() && opCtx->getClient()->isFromUserConnection();
+
+        // Only use the local snapshot if we don't have the PBWM lock. This can happen if we are
+        // reading outside of a batch or when we explicitly deny it.
+        bool hasPbwmLock =
+            opCtx->lockState()->isLockHeldForMode(resourceIdParallelBatchWriterMode, MODE_IS);
+        // Read at the last applied timestamp if the above conditions are met.
+        bool readAtLastAppliedTimestamp =
+            !hasPbwmLock && userReadingReplicatedCollection && isSecondary && localOrAvailable;
+
+        if (readAtLastAppliedTimestamp) {
+            opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(true);
+        }
 
         // This is the timestamp of the most recent catalog changes to this collection. If this is
         // greater than any point in time read timestamps, we should either wait or return an error.
@@ -147,6 +172,8 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // TODO: Don't do this. Create a wait condition on the replication coordinator on the
         // lastAppliedOptime.
         if (readAtLastAppliedTimestamp) {
+            log() << "waiting for local snapshot time: " << *minSnapshot << " on nss: " << nss.ns()
+                  << ", current timestamp: " << lastAppliedTimestamp;
             sleepmillis(50);
         }
 

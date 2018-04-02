@@ -1092,7 +1092,7 @@ void ReplicationCoordinatorImpl::_setMyLastAppliedOpTime_inlock(const OpTime& op
     }
 
     // The local snapshot should be updated before setting the stable timestamp on the storage
-    // engine so that new transactions do not read on old timestamps.
+    // engine so that new transactions do not read at old timestamps.
     _externalState->updateLocalSnapshot(opTime);
 
     // Add the new applied optime to the list of stable optime candidates and then set the last

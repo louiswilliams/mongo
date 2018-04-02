@@ -164,6 +164,8 @@ Lock::GlobalLock::GlobalLock(GlobalLock&& otherLock)
 void Lock::GlobalLock::_enqueue(LockMode lockMode, Date_t deadline) {
     if (_opCtx->lockState()->shouldConflictWithSecondaryBatchApplication()) {
         _pbwm.lock(MODE_IS);
+    } else {
+        _pbwm.lock(MODE_IS, Date_t::now());
     }
 
     _result = _opCtx->lockState()->lockGlobalBegin(_opCtx, lockMode, deadline);
@@ -174,7 +176,7 @@ void Lock::GlobalLock::waitForLockUntil(Date_t deadline) {
         _result = _opCtx->lockState()->lockGlobalComplete(_opCtx, deadline);
     }
 
-    if (_result != LOCK_OK && _opCtx->lockState()->shouldConflictWithSecondaryBatchApplication()) {
+    if (_result != LOCK_OK && _pbwm.isLocked()) {
         _pbwm.unlock();
     }
 
@@ -308,10 +310,10 @@ Lock::ParallelBatchWriterMode::ParallelBatchWriterMode(Locker* lockState)
     : _pbwm(lockState, resourceIdParallelBatchWriterMode, MODE_X),
       _shouldNotConflictBlock(lockState) {}
 
-void Lock::ResourceLock::lock(LockMode mode) {
+void Lock::ResourceLock::lock(LockMode mode, Date_t deadline) {
     invariant(_result == LOCK_INVALID);
-    _result = _locker->lock(_rid, mode);
-    invariant(_result == LOCK_OK);
+    _result = _locker->lock(_rid, mode, deadline);
+    invariant(_result == LOCK_OK || deadline != Date_t::max());
 }
 
 void Lock::ResourceLock::unlock() {
@@ -320,5 +322,4 @@ void Lock::ResourceLock::unlock() {
         _result = LOCK_INVALID;
     }
 }
-
 }  // namespace mongo

@@ -57,7 +57,7 @@ void WiredTigerSnapshotManager::setCommittedSnapshot(const Timestamp& timestamp)
 void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
 
-    log() << "setting local snapshot timestamp to " << timestamp.toString();
+    LOG(4) << "setting local snapshot timestamp to " << timestamp.toString();
 
     _localSnapshot = timestamp;
 }
@@ -65,7 +65,7 @@ void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
 void WiredTigerSnapshotManager::setLocalSnapshotForward(const Timestamp& timestamp) {
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
 
-    log() << "setting local snapshot timestamp forward to " << timestamp.toString();
+    LOG(4) << "setting local snapshot timestamp forward to " << timestamp.toString();
 
     if (!_localSnapshot || timestamp > *_localSnapshot) {
         _localSnapshot = timestamp;
@@ -127,7 +127,7 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
     invariant(_localSnapshot);
 
-    log() << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
+    LOG(4) << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
     return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
 }
 

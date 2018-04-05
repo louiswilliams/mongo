@@ -115,12 +115,17 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
                 // storage engine snapshot while waiting. Otherwise, we will end up reading from
                 // the snapshot where the oplog entries are not yet visible even after the wait.
                 getOpCtx()->recoveryUnit()->abandonSnapshot();
-                auto visible =
-                    _params.collection->getRecordStore()->areEarlierOplogWritesVisible(getOpCtx());
-                if (!visible) {
-                    log() << "Yielding because last oplog entry is not visible yet";
-                    return PlanStage::NEED_YIELD;
-                }
+                _params.collection->getRecordStore()->waitForAllEarlierOplogWritesToBeVisible(
+                    getOpCtx());
+
+                //                auto visible =
+                //                    _params.collection->getRecordStore()->areEarlierOplogWritesVisible(getOpCtx());
+                //                if (!visible) {
+                //                    log() << "Yielding oplog collection scan because last oplog
+                //                    entry is not "
+                //                             "visible yet";
+                //                    return PlanStage::NEED_YIELD;
+                //                }
             }
 
             _cursor = _params.collection->getCursor(getOpCtx(), forward);

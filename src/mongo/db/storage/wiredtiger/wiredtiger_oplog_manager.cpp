@@ -119,14 +119,9 @@ bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
     }
     const auto waitingFor = lastRecord->id;
 
-    // Close transaction before we wait.
-    opCtx->recoveryUnit()->abandonSnapshot();
-
     // Returns whether or not the last oplog entry is visible in the record store.
     auto checkFn = [&] {
         auto newLatestVisibleTimestamp = getOplogReadTimestamp();
-        log() << "oplog time: " << currentLatestVisibleTimestamp << ". waitingFor: " << waitingFor
-              << ". new latest: " << newLatestVisibleTimestamp;
         if (newLatestVisibleTimestamp < currentLatestVisibleTimestamp) {
             LOG(1) << "oplog latest visible timestamp went backwards";
             // If the visibility went backwards, this means a rollback occurred.
@@ -148,12 +143,32 @@ bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
         return latestVisible >= waitingFor;
     };
 
-    if (!wait) {
-        return checkFn();
+    // Close transaction before we wait.
+    opCtx->recoveryUnit()->abandonSnapshot();
+
+    // Check once while holding locks. The is to reduce the overhead of releasing and reacquiring
+    // locks if the oplog is already visible. Return if it's visible and we were supposed to wait.
+    // Just return the result if we aren't waiting.
+    auto visible = checkFn();
+    if (!wait || (wait && visible)) {
+        return visible;
     }
 
-    stdx::unique_lock<stdx::mutex> lk(_oplogVisibilityStateMutex);
-    opCtx->waitForConditionOrInterrupt(_opsBecameVisibleCV, lk, checkFn);
+    log() << "Yielding locks to wait for oplog to become visible";
+
+    // We checked once and the oplog was no visible, so we should release our locks before waiting.
+    Locker::LockSnapshot snapshot;
+    auto savedState = opCtx->lockState()->saveLockStateAndUnlock(&snapshot);
+
+    {
+        stdx::unique_lock<stdx::mutex> lk(_oplogVisibilityStateMutex);
+        opCtx->waitForConditionOrInterrupt(_opsBecameVisibleCV, lk, checkFn);
+    }
+
+    if (savedState) {
+        UninterruptibleLockGuard noInterrupt(opCtx->lockState());
+        opCtx->lockState()->restoreLockState(snapshot);
+    }
     return true;
 }
 

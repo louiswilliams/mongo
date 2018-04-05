@@ -112,14 +112,14 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // 3. We only need to read at batch boundaries when users read from replicated collections.
         // Internal reads may need to see inconsistent states, and non-replicated collections do not
         // rely on replication.
-        auto userReadingReplicatedCollection =
-            nss.isReplicated() && opCtx->getClient()->isFromUserConnection();
+        auto userReadingReplicatedCollectionOrOplog =
+            (nss.isOplog() || nss.isReplicated()) && opCtx->getClient()->isFromUserConnection();
 
         // Read at the last applied timestamp if the above conditions are met, and the noConflict
         // block is set. If it is unset, we tried at least once to read at the last applied time,
         // but pending catalog changes prevented us.
-        bool readAtLastAppliedTimestamp =
-            _noConflict && userReadingReplicatedCollection && isSecondary && localOrAvailable;
+        bool readAtLastAppliedTimestamp = _noConflict && userReadingReplicatedCollectionOrOplog &&
+            isSecondary && localOrAvailable;
 
         opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(readAtLastAppliedTimestamp);
 

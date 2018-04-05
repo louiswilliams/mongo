@@ -159,6 +159,9 @@ bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
     // We checked once and the oplog was no visible, so we should release our locks before waiting.
     Locker::LockSnapshot snapshot;
     auto savedState = opCtx->lockState()->saveLockStateAndUnlock(&snapshot);
+    if (!savedState) {
+        log() << "Could not yield locks. Global lock is either held recursively or not at all.";
+    }
 
     {
         stdx::unique_lock<stdx::mutex> lk(_oplogVisibilityStateMutex);

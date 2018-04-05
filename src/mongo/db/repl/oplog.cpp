@@ -1504,7 +1504,8 @@ Status applyCommand_inlock(OperationContext* opCtx,
         return {ErrorCodes::InvalidNamespace, "invalid ns: " + std::string(nss.ns())};
     }
     {
-        Database* db = dbHolder().get(opCtx, nss.ns());
+        AutoGetDb autoDb(opCtx, nss.db(), MODE_IS);
+        Database* db = autoDb.getDb();
         if (db && !db->getCollection(opCtx, nss) && db->getViewCatalog()->lookup(opCtx, nss.ns())) {
             return {ErrorCodes::CommandNotSupportedOnView,
                     str::stream() << "applyOps not supported on view:" << nss.ns()};
@@ -1530,7 +1531,7 @@ Status applyCommand_inlock(OperationContext* opCtx,
 
     // Applying commands in repl is done under Global W-lock, so it is safe to not
     // perform the current DB checks after reacquiring the lock.
-    invariant(opCtx->lockState()->isW());
+    //    invariant(opCtx->lockState()->isW());
 
     // Parse optime from oplog entry unless we are applying this command in standalone or on a
     // primary (replicated writes enabled).
@@ -1584,6 +1585,7 @@ Status applyCommand_inlock(OperationContext* opCtx,
         try {
             // If 'writeTime' is not null, any writes in this scope will be given 'writeTime' as
             // their timestamp at commit.
+            Lock::GlobalWrite globalWriteLock(opCtx);
             TimestampBlock tsBlock(opCtx, writeTime);
             status = curOpToApply.applyFunc(opCtx, nss.ns().c_str(), fieldUI, o, opTime, mode);
         } catch (...) {

@@ -382,7 +382,6 @@ Status SyncTail::syncApply(OperationContext* opCtx,
         return writeConflictRetry(opCtx, "syncApply_command", nss.ns(), [&] {
             // a command may need a global write lock. so we will conservatively go
             // ahead and grab one here. suboptimal. :-(
-            Lock::GlobalWrite globalWriteLock(opCtx);
 
             // special case apply for commands to avoid implicit database creation
             Status status = applyCommand_inlock(opCtx, op, oplogApplicationMode);

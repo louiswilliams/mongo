@@ -61,7 +61,8 @@
     let readCmdSnapshot = `
         db.getMongo().setSlaveOk();
         while (true) {
-            let session = db.getSiblingDB('test').getMongo().startSession({causalConsistency: false });
+            let session = db.getSiblingDB('test').getMongo().startSession({
+                causalConsistency: false });
             let sessionDB = session.getDatabase('test');
             let txnNumber = 0;
             for (let x = 0; x < ${nOps}; x++) {

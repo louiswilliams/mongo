@@ -138,7 +138,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             return;
         }
 
-        // This can be se when readConcern is "snapshot" or "majority".
+        // This can be set when readConcern is "snapshot" or "majority".
         auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
 
         // If we do not have a point in time to conflict with minSnapshot, return.
@@ -164,12 +164,16 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                   readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern);
 
         // Yield locks in order to do the blocking call below
+        // This should only be called if we are doing a snapshot read (at the last applied time or
+        // majority commit point) and we should wait.
         _autoColl = boost::none;
 
         // If there are pending catalog changes, we should conflict with any in-progress batches and
-        // choose not read from the last applied timestamp. Index builds on secondaries can complete
-        // at future timestamps but before the lastAppliedTimestamp, and we never want to read at
-        // these inconsistent states.
+        // choose not to read explicitly from the last applied timestamp. Index builds on
+        // secondaries can complete at timestamps later than the lastAppliedTimestamp during initial
+        // sync. After initial sync finishes, readers could block indefinitely waiting for the
+        // lastAppliedTimestamp to move forward indefinitely. Instead we force the reader take the
+        // PBWM lock and retry.
         if (readAtLastAppliedTimestamp) {
             log() << "Tried reading from local snapshot time: " << lastAppliedTimestamp
                   << " on nss: " << nss.ns() << ", but future catalog changes are pending at time"

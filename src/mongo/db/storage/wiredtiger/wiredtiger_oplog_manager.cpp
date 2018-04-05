@@ -156,11 +156,15 @@ bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
 
     log() << "Yielding locks to wait for oplog to become visible";
 
-    // We checked once and the oplog was no visible, so we should release our locks before waiting.
+    auto yield = false;
     Locker::LockSnapshot snapshot;
-    auto savedState = opCtx->lockState()->saveLockStateAndUnlock(&snapshot);
-    if (!savedState) {
-        log() << "Could not yield locks. Global lock is either held recursively or not at all.";
+    if (yield) {
+        // We checked once and the oplog was no visible, so we should release our locks before
+        // waiting.
+        yield = opCtx->lockState()->saveLockStateAndUnlock(&snapshot);
+        if (!yield) {
+            log() << "Could not yield locks. Global lock is either held recursively or not at all.";
+        }
     }
 
     {
@@ -168,7 +172,7 @@ bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
         opCtx->waitForConditionOrInterrupt(_opsBecameVisibleCV, lk, checkFn);
     }
 
-    if (savedState) {
+    if (yield) {
         UninterruptibleLockGuard noInterrupt(opCtx->lockState());
         opCtx->lockState()->restoreLockState(snapshot);
     }

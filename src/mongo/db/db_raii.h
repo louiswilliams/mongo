@@ -105,10 +105,14 @@ public:
     }
 
 private:
+    // If this field is set, the reader will not take the ParallelBatchWriterMode lock and conflict
+    // with seconary batch application. This stays in scope with the _autoColl so that locks are
+    // taken and released in the right order.
+    boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> _noConflict;
+
     // This field is optional, because the code to wait for majority committed snapshot needs to
     // release locks in order to block waiting
     boost::optional<AutoGetCollection> _autoColl;
-    boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> _noConflict;
 };
 
 /**

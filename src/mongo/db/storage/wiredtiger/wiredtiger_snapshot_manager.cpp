@@ -127,7 +127,7 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
     invariant(_localSnapshot);
 
-    LOG(4) << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
+    LOG(0) << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
     return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
 }
 
@@ -147,6 +147,7 @@ void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* 
     }
     invariant(static_cast<std::size_t>(size) < sizeof(readTSConfigString));
 
+    LOG(0) << "begin_transaction on oplog read timestamp " << allCommittedTimestamp;
     int status = session->begin_transaction(session, readTSConfigString);
 
     // If begin_transaction returns EINVAL, we will assume it is due to the oldest_timestamp

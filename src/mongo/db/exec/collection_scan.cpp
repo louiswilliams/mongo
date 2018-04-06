@@ -115,8 +115,13 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
                 // storage engine snapshot while waiting. Otherwise, we will end up reading from
                 // the snapshot where the oplog entries are not yet visible even after the wait.
                 getOpCtx()->recoveryUnit()->abandonSnapshot();
-                _params.collection->getRecordStore()->waitForAllEarlierOplogWritesToBeVisible(
-                    getOpCtx());
+
+                // We only need to wait if reading from the primary. When reading the oplog on a
+                // secondary, we are already reading at the most visible oplog entry.
+                if (_params.isPrimaryReader) {
+                    _params.collection->getRecordStore()->waitForAllEarlierOplogWritesToBeVisible(
+                        getOpCtx());
+                }
             }
 
             _cursor = _params.collection->getCursor(getOpCtx(), forward);

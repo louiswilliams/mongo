@@ -113,7 +113,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // Internal reads may need to see inconsistent states, and non-replicated collections do not
         // rely on replication.
         auto userReadingReplicatedCollectionOrOplog =
-            (nss.isOplog() || nss.isReplicated()) && opCtx->getClient()->isFromUserConnection();
+            (nss.isReplicated()) && opCtx->getClient()->isFromUserConnection();
 
         // Read at the last applied timestamp if the above conditions are met, and the noConflict
         // block is set. If it is unset, we tried at least once to read at the last applied time,

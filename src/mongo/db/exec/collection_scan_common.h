@@ -63,6 +63,8 @@ struct CollectionScanParams {
     // across a sharded cluster.
     bool shouldTrackLatestOplogTimestamp = false;
 
+    bool isPrimaryReader = true;
+
     // Once the first matching document is found, assume that all documents after it must match.
     // This is useful for oplog queries where we know we will see records ordered by the ts field.
     bool stopApplyingFilterAfterFirstMatch = false;

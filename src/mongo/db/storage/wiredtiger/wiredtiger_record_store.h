@@ -223,7 +223,6 @@ public:
 
 
     void waitForAllEarlierOplogWritesToBeVisible(OperationContext* opCtx) const override;
-    bool areEarlierOplogWritesVisible(OperationContext* opCtx) const override;
 
     Status updateCappedSize(OperationContext* opCtx, long long cappedSize) final;
 

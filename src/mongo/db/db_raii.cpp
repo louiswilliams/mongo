@@ -83,7 +83,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                                                    Date_t deadline) {
 
     // By default, don't conflict with secondary batch application.
-    if (!nsOrUUID.nss()->isOplog()) {
+    if (nsOrUUID.nss() && nsOrUUID.nss()->isOplog()) {
         _noConflict.emplace(opCtx->lockState());
     }
     const auto collectionLockMode = getLockModeForQuery(opCtx);

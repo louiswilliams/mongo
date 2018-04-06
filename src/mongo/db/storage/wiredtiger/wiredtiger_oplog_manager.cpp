@@ -99,8 +99,8 @@ void WiredTigerOplogManager::halt() {
     }
 }
 
-bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
-    const WiredTigerRecordStore* oplogRecordStore, OperationContext* opCtx, bool wait) const {
+void WiredTigerOplogManager::waitForAllEarlierOplogWritesToBeVisible(
+    const WiredTigerRecordStore* oplogRecordStore, OperationContext* opCtx) const {
     invariant(opCtx->lockState()->isNoop() || !opCtx->lockState()->inAWriteUnitOfWork());
 
     // In order to reliably detect rollback situations, we need to fetch the latestVisibleTimestamp
@@ -115,12 +115,14 @@ bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
     if (!lastRecord) {
         LOG(2) << "Trying to query an empty oplog";
         opCtx->recoveryUnit()->abandonSnapshot();
-        return true;
+        return;
     }
     const auto waitingFor = lastRecord->id;
+    // Close transaction before we wait.
+    opCtx->recoveryUnit()->abandonSnapshot();
 
-    // Returns whether or not the last oplog entry is visible in the record store.
-    auto checkFn = [&] {
+    stdx::unique_lock<stdx::mutex> lk(_oplogVisibilityStateMutex);
+    opCtx->waitForConditionOrInterrupt(_opsBecameVisibleCV, lk, [&] {
         auto newLatestVisibleTimestamp = getOplogReadTimestamp();
         if (newLatestVisibleTimestamp < currentLatestVisibleTimestamp) {
             LOG(1) << "oplog latest visible timestamp went backwards";
@@ -141,53 +143,7 @@ bool WiredTigerOplogManager::_areEarlierOplogWritesVisible(
                    << _oplogMaxAtStartup;
         }
         return latestVisible >= waitingFor;
-    };
-
-    // Close transaction before we wait.
-    opCtx->recoveryUnit()->abandonSnapshot();
-
-    // Check once while holding locks. The is to reduce the overhead of releasing and reacquiring
-    // locks if the oplog is already visible. Return if it's visible and we were supposed to wait.
-    // Just return the result if we aren't waiting.
-    auto visible = checkFn();
-    if (!wait || (wait && visible)) {
-        return visible;
-    }
-
-    log() << "Yielding locks to wait for oplog to become visible";
-
-    auto yield = false;
-    Locker::LockSnapshot snapshot;
-    if (yield) {
-        // We checked once and the oplog was no visible, so we should release our locks before
-        // waiting.
-        yield = opCtx->lockState()->saveLockStateAndUnlock(&snapshot);
-        if (!yield) {
-            log() << "Could not yield locks. Global lock is either held recursively or not at all.";
-        }
-    }
-
-    {
-        stdx::unique_lock<stdx::mutex> lk(_oplogVisibilityStateMutex);
-        opCtx->waitForConditionOrInterrupt(_opsBecameVisibleCV, lk, checkFn);
-    }
-
-    if (yield) {
-        UninterruptibleLockGuard noInterrupt(opCtx->lockState());
-        opCtx->lockState()->restoreLockState(snapshot);
-    }
-    return true;
-}
-
-bool WiredTigerOplogManager::areEarlierOplogWritesVisible(
-    const WiredTigerRecordStore* oplogRecordStore, OperationContext* opCtx) const {
-    return _areEarlierOplogWritesVisible(oplogRecordStore, opCtx, false /* wait */);
-};
-
-
-void WiredTigerOplogManager::waitForAllEarlierOplogWritesToBeVisible(
-    const WiredTigerRecordStore* oplogRecordStore, OperationContext* opCtx) const {
-    invariant(_areEarlierOplogWritesVisible(oplogRecordStore, opCtx, true /* wait */));
+    });
 }
 
 void WiredTigerOplogManager::triggerJournalFlush() {

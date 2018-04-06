@@ -73,8 +73,6 @@ public:
     // Triggers the oplogJournal thread to update its oplog read timestamp, by flushing the journal.
     void triggerJournalFlush();
 
-    bool areEarlierOplogWritesVisible(const WiredTigerRecordStore* oplogRecordStore,
-                                      OperationContext* opCtx) const;
     // Waits until all committed writes at this point to become visible (that is, no holes exist in
     // the oplog.)
     void waitForAllEarlierOplogWritesToBeVisible(const WiredTigerRecordStore* oplogRecordStore,
@@ -91,10 +89,6 @@ private:
     void _setOplogReadTimestamp(WithLock, uint64_t newTimestamp);
 
     uint64_t _fetchAllCommittedValue(WT_CONNECTION* conn);
-
-    bool _areEarlierOplogWritesVisible(const WiredTigerRecordStore* oplogRecordStore,
-                                       OperationContext* opCtx,
-                                       bool waitForVisible) const;
 
     stdx::thread _oplogJournalThread;
     mutable stdx::mutex _oplogVisibilityStateMutex;

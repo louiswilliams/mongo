@@ -117,15 +117,6 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
                 getOpCtx()->recoveryUnit()->abandonSnapshot();
                 _params.collection->getRecordStore()->waitForAllEarlierOplogWritesToBeVisible(
                     getOpCtx());
-
-                //                auto visible =
-                //                    _params.collection->getRecordStore()->areEarlierOplogWritesVisible(getOpCtx());
-                //                if (!visible) {
-                //                    log() << "Yielding oplog collection scan because last oplog
-                //                    entry is not "
-                //                             "visible yet";
-                //                    return PlanStage::NEED_YIELD;
-                //                }
             }
 
             _cursor = _params.collection->getCursor(getOpCtx(), forward);

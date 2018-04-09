@@ -127,7 +127,7 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
     invariant(_localSnapshot);
 
-    LOG(0) << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
+    LOG(2) << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
     return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
 }
 
@@ -146,8 +146,6 @@ void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* 
         fassertFailedNoTrace(40663);
     }
     invariant(static_cast<std::size_t>(size) < sizeof(readTSConfigString));
-
-    LOG(0) << "begin_transaction on oplog read timestamp " << allCommittedTimestamp;
     int status = session->begin_transaction(session, readTSConfigString);
 
     invariantWTOK(status);

@@ -63,6 +63,9 @@ struct CollectionScanParams {
     // across a sharded cluster.
     bool shouldTrackLatestOplogTimestamp = false;
 
+    // Indicates if we are doing a collection scan on a primary. This is used to indicate whether or
+    // not to do a blocking wait for oplog visibility while holding locks. There is no waiting when
+    // set to 'false' on a secondary.
     bool isPrimaryReader = true;
 
     // Once the first matching document is found, assume that all documents after it must match.

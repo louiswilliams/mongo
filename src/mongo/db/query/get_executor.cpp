@@ -617,7 +617,12 @@ StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> getOplogStartHack(
     params.tailable = cq->getQueryRequest().isTailable();
     params.shouldTrackLatestOplogTimestamp =
         plannerOptions & QueryPlannerParams::TRACK_LATEST_OPLOG_TS;
-    params.isPrimaryReader = repl::ReplicationCoordinator::get(opCtx)->getMemberState().primary();
+
+    // If we are on a primary or standalone we should wait for oplog writes to be visible.
+    const repl::ReplicationCoordinator* replCoord = repl::ReplicationCoordinator::get(opCtx);
+    params.waitForOplogVisibility =
+        replCoord->getReplicationMode() != repl::ReplicationCoordinator::modeReplSet ||
+        replCoord->getMemberState().primary();
 
     // If the query is just a lower bound on "ts", we know that every document in the collection
     // after the first matching one must also match. To avoid wasting time running the match

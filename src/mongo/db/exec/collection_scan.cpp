@@ -118,7 +118,7 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
 
                 // We only need to wait if reading from the primary. When reading the oplog on a
                 // secondary, we are already reading at the most visible oplog entry.
-                if (_params.isPrimaryReader) {
+                if (_params.waitForOplogVisibility) {
                     _params.collection->getRecordStore()->waitForAllEarlierOplogWritesToBeVisible(
                         getOpCtx());
                 }

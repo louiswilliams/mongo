@@ -33,7 +33,6 @@
 
 #include <cstring>
 
-#include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_kv_engine.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_oplog_manager.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_util.h"
@@ -252,36 +251,6 @@ void WiredTigerOplogManager::_setOplogReadTimestamp(WithLock, uint64_t newTimest
 
 uint64_t WiredTigerOplogManager::fetchAllCommittedValue(OperationContext* opCtx) {
     return _fetchAllCommittedValue(WiredTigerRecoveryUnit::get(opCtx)->getSessionCache()->conn());
-}
-
-void WiredTigerOplogManager::beginTransactionOnOplog(WT_SESSION* session) const {
-    stdx::lock_guard<stdx::mutex> lk(_oplogVisibilityStateMutex);
-
-    auto allCommittedTimestamp = _oplogReadTimestamp.load();
-    char readTSConfigString[15 /* read_timestamp= */ + (8 * 2) /* 16 hexadecimal digits */ +
-                            1 /* trailing null */];
-    auto size = std::snprintf(readTSConfigString,
-                              sizeof(readTSConfigString),
-                              "read_timestamp=%llx",
-                              static_cast<unsigned long long>(allCommittedTimestamp));
-    if (size < 0) {
-        int e = errno;
-        error() << "error snprintf " << errnoWithDescription(e);
-        fassertFailedNoTrace(50765);
-    }
-    invariant(static_cast<std::size_t>(size) < sizeof(readTSConfigString));
-
-    LOG(0) << "begin_transaction on oplog read timestamp " << allCommittedTimestamp;
-    int status = session->begin_transaction(session, readTSConfigString);
-
-    // If begin_transaction returns EINVAL, we will assume it is due to the oldest_timestamp
-    // racing ahead of the read_timestamp.  Rather than synchronizing for this rare case, throw a
-    // WriteConflictException which will presumably be retried.
-    if (status == EINVAL) {
-        throw WriteConflictException();
-    }
-
-    invariantWTOK(status);
 }
 
 uint64_t WiredTigerOplogManager::_fetchAllCommittedValue(WT_CONNECTION* conn) {

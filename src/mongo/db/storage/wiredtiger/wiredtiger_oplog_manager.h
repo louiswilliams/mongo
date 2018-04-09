@@ -82,8 +82,6 @@ public:
     // all committed timestamp are committed.
     uint64_t fetchAllCommittedValue(OperationContext* opCtx);
 
-    void beginTransactionOnOplog(WT_SESSION* session) const;
-
 private:
     void _oplogJournalThreadLoop(WiredTigerSessionCache* sessionCache,
                                  WiredTigerRecordStore* oplogRecordStore) noexcept;

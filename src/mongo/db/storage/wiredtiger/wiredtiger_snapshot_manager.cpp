@@ -131,4 +131,26 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
     return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
 }
 
+void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* oplogManager,
+                                                        WT_SESSION* session) const {
+    auto allCommittedTimestamp = oplogManager->getOplogReadTimestamp();
+    char readTSConfigString[15 /* read_timestamp= */ + (8 * 2) /* 16 hexadecimal digits */ +
+                            21 /* ,round_to_oldest=true */ + 1 /* trailing null */];
+    auto size = std::snprintf(readTSConfigString,
+                              sizeof(readTSConfigString),
+                              "read_timestamp=%llx,round_to_oldest=true",
+                              static_cast<unsigned long long>(allCommittedTimestamp));
+    if (size < 0) {
+        int e = errno;
+        error() << "error snprintf " << errnoWithDescription(e);
+        fassertFailedNoTrace(40663);
+    }
+    invariant(static_cast<std::size_t>(size) < sizeof(readTSConfigString));
+
+    LOG(0) << "begin_transaction on oplog read timestamp " << allCommittedTimestamp;
+    int status = session->begin_transaction(session, readTSConfigString);
+
+    invariantWTOK(status);
+}
+
 }  // namespace mongo

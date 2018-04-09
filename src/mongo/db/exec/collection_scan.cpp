@@ -103,27 +103,6 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
         if (needToMakeCursor) {
             const bool forward = _params.direction == CollectionScanParams::FORWARD;
 
-            if (forward && !_params.tailable && _params.collection->ns().isOplog()) {
-                // Forward, non-tailable scans from the oplog need to wait until all oplog entries
-                // before the read begins to be visible. This isn't needed for reverse scans because
-                // we only hide oplog entries from forward scans, and it isn't necessary for tailing
-                // cursors because they ignore EOF and will eventually see all writes. Forward,
-                // non-tailable scans are the only case where a meaningful EOF will be seen that
-                // might not include writes that finished before the read started. This also must be
-                // done before we create the cursor as that is when we establish the endpoint for
-                // the cursor. Also call abandonSnapshot to make sure that we are using a fresh
-                // storage engine snapshot while waiting. Otherwise, we will end up reading from
-                // the snapshot where the oplog entries are not yet visible even after the wait.
-                getOpCtx()->recoveryUnit()->abandonSnapshot();
-
-                // We only need to wait if reading from the primary. When reading the oplog on a
-                // secondary, we are already reading at the most visible oplog entry.
-                if (_params.waitForOplogVisibility) {
-                    _params.collection->getRecordStore()->waitForAllEarlierOplogWritesToBeVisible(
-                        getOpCtx());
-                }
-            }
-
             _cursor = _params.collection->getCursor(getOpCtx(), forward);
 
             if (!_lastSeenId.isNull()) {

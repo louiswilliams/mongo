@@ -803,7 +803,7 @@ void ReplicationCoordinatorExternalStateImpl::updateCommittedSnapshot(
 void ReplicationCoordinatorExternalStateImpl::updateLocalSnapshot(const OpTime& optime) {
     auto manager = _service->getGlobalStorageEngine()->getSnapshotManager();
     if (manager) {
-        manager->setLocalSnapshotForward(optime.getTimestamp());
+        manager->setLocalSnapshot(optime.getTimestamp());
     }
 }
 

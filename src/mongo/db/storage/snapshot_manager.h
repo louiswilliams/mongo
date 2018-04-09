@@ -61,11 +61,6 @@ public:
      *  Sets the snapshot for the last stable timestamp for reading on secondaries.
      */
     virtual void setLocalSnapshot(const Timestamp& timestamp) = 0;
-    /**
-     *  Sets the snapshot for the last stable timestamp for reading on secondaries, but only
-     *  forward in time. Setting to an older timestamp is a noop.
-     */
-    virtual void setLocalSnapshotForward(const Timestamp& timestamp) = 0;
 
     /**
      * Returns the local snapshot timestamp.

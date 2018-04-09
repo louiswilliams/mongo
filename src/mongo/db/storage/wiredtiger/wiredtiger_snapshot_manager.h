@@ -84,7 +84,7 @@ public:
     /**
      * Starts a transaction on the oplog using an appropriate timestamp for oplog visiblity.
      */
-    static void beginTransactionOnOplog(WiredTigerOplogManager* oplogManager, WT_SESSION* session);
+    void beginTransactionOnOplog(WiredTigerOplogManager* oplogManager, WT_SESSION* session) const;
 
     /**
      * Returns lowest SnapshotName that could possibly be used by a future call to
@@ -97,6 +97,8 @@ public:
     boost::optional<Timestamp> getMinSnapshotForNextCommittedRead() const;
 
 private:
+    mutable stdx::mutex _oplogMutex;  // protects begin_transaction calls
+
     // Snapshot to use for reads at a commit timestamp.
     mutable stdx::mutex _committedSnapshotMutex;  // Guards _committedSnapshot.
     boost::optional<Timestamp> _committedSnapshot;

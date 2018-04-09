@@ -132,7 +132,9 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
 }
 
 void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* oplogManager,
-                                                        WT_SESSION* session) {
+                                                        WT_SESSION* session) const {
+    stdx::lock_guard<stdx::mutex> lock(_oplogMutex);
+
     auto allCommittedTimestamp = oplogManager->getOplogReadTimestamp();
     char readTSConfigString[15 /* read_timestamp= */ + (8 * 2) /* 16 hexadecimal digits */ +
                             1 /* trailing null */];

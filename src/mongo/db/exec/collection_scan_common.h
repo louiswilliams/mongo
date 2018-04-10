@@ -71,7 +71,7 @@ struct CollectionScanParams {
     size_t maxScan = 0;
 
     // Whether or not to wait for oplog visibility on oplog collection scans.
-    bool shouldWaitForOplogVisibility = true;
+    bool shouldWaitForOplogVisibility = false;
 };
 
 }  // namespace mongo

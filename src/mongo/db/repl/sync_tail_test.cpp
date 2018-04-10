@@ -61,6 +61,7 @@
 #include "mongo/db/service_context.h"
 #include "mongo/db/service_context_d_test_fixture.h"
 #include "mongo/db/session_catalog.h"
+#include "mongo/stdx/future.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/unittest/death_test.h"
 #include "mongo/unittest/unittest.h"
@@ -1514,6 +1515,66 @@ TEST_F(SyncTailTest, DropDatabaseSucceedsInRecovering) {
 
     auto op = makeCommandOplogEntry(nextOpTime(), ns, BSON("dropDatabase" << 1));
     ASSERT_OK(runOpSteadyState(op));
+}
+
+TEST_F(SyncTailTest, AutoGetCollectionForReadDuringSecondaryBatchApplication) {
+
+    auto ns = NamespaceString("foo.my_collection");
+    ::mongo::repl::createCollection(_opCtx.get(), ns, CollectionOptions());
+
+    ASSERT_OK(
+        ReplicationCoordinator::get(_opCtx.get())->setFollowerMode(MemberState::RS_SECONDARY));
+
+    // Returns true when the batch has started, meaning the applier is holding the PBWM lock. Will
+    // return failse if the lock was not held.
+    Promise<bool> inBatchPromise;
+
+    // Attempt to read when in the middle of a batch.
+    auto task = stdx::packaged_task<bool()>([&] {
+        Client::initThread(getThreadName());
+        auto readOp = cc().makeOperationContext();
+
+        // Wait for the batch to start.
+        if (!inBatchPromise.getFuture().get()) {
+            return false;
+        }
+        AutoGetCollectionForRead autoColl(readOp.get(), ns);
+        return !readOp->lockState()->isLockHeldForMode(resourceIdParallelBatchWriterMode, MODE_IS);
+    });
+    auto taskFuture = task.get_future();
+    stdx::thread taskThread{std::move(task)};
+
+    // This apply operation function will block until the reader has tried acquiring a collection
+    // lock.
+    auto applyOperationFn = [&](OperationContext* opCtx,
+                                MultiApplier::OperationPtrs* operationsToApply,
+                                SyncTail* st,
+                                WorkerMultikeyPathInfo*) -> Status {
+        if (!_opCtx->lockState()->isLockHeldForMode(resourceIdParallelBatchWriterMode, MODE_X)) {
+            // Signal the reader to give up.
+            inBatchPromise.emplaceValue(false);
+            return {ErrorCodes::BadValue, "PBWM lock was not held in MODE_X as expected"};
+        }
+
+        // Signals the reader to acquire a collection read lock.
+        inBatchPromise.emplaceValue(true);
+
+        // Block while holding the PBWM lock until the reader is done.
+        if (!taskFuture.get()) {
+            return {ErrorCodes::BadValue, "Client reader was holding PBWM lock in MODE_IS"};
+        }
+        return Status::OK();
+    };
+
+    // Make a simple insert operation.
+    auto insertOp = makeInsertDocumentOplogEntry(nextOpTime(), ns, BSON("_id" << 1));
+
+    // Apply the operation.
+    auto writerPool = SyncTail::makeWriterPool(1);
+    SyncTail syncTail(nullptr, applyOperationFn, writerPool.get());
+    auto lastOpTime = unittest::assertGet(syncTail.multiApply(_opCtx.get(), {insertOp}));
+    ASSERT_EQ(insertOp.getOpTime(), lastOpTime);
+    taskThread.join();
 }
 
 class SyncTailTxnTableTest : public SyncTailTest {

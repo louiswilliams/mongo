@@ -113,7 +113,7 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
     invariant(_localSnapshot);
 
-    LOG(3) << "begin_transaction on local snapshot " << _localSnapshot.get().toString();
+    LOG(0) << "begin_transaction on local snapshot " << _localSnapshot.get().toString();
     return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
 }
 

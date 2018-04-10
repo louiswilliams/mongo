@@ -1517,9 +1517,9 @@ TEST_F(SyncTailTest, DropDatabaseSucceedsInRecovering) {
     ASSERT_OK(runOpSteadyState(op));
 }
 
-TEST_F(SyncTailTest, AutoGetCollectionForReadDuringSecondaryBatchApplication) {
+TEST_F(SyncTailTest, SecondaryReadsDuringBatchApplicationAreAllowed) {
 
-    auto ns = NamespaceString("foo.my_collection");
+    NamespaceString ns("local." + _agent.getSuiteName() + "_" + _agent.getTestName());
     ::mongo::repl::createCollection(_opCtx.get(), ns, CollectionOptions());
 
     ASSERT_OK(
@@ -1576,6 +1576,30 @@ TEST_F(SyncTailTest, AutoGetCollectionForReadDuringSecondaryBatchApplication) {
     ASSERT_EQ(insertOp.getOpTime(), lastOpTime);
     taskThread.join();
 }
+
+TEST_F(SyncTailTest, SecondaryReadsDuringBatchApplicationReadAtLastAppliedTimestamp) {
+    BSONObj emptyDoc;
+    SyncTailWithLocalDocumentFetcher syncTail(emptyDoc);
+    NamespaceString nss("local." + _agent.getSuiteName() + "_" + _agent.getTestName());
+    auto doc1 = BSON("_id" << 1);
+    auto doc2 = BSON("_id" << 2);
+    auto doc3 = BSON("_id" << 3);
+    auto op0 = makeCreateCollectionOplogEntry({Timestamp(Seconds(1), 0), 1LL}, nss);
+    auto op1 = makeInsertDocumentOplogEntry({Timestamp(Seconds(2), 0), 1LL}, nss, doc1);
+    auto op2 = makeInsertDocumentOplogEntry({Timestamp(Seconds(3), 0), 1LL}, nss, doc2);
+    auto op3 = makeInsertDocumentOplogEntry({Timestamp(Seconds(4), 0), 1LL}, nss, doc3);
+    MultiApplier::OperationPtrs ops = {&op0, &op1, &op2, &op3};
+    WorkerMultikeyPathInfo pathInfo;
+    ASSERT_OK(multiInitialSyncApply(_opCtx.get(), &ops, &syncTail, &pathInfo));
+    ASSERT_EQUALS(syncTail.numFetched, 0U);
+
+    OplogInterfaceLocal collectionReader(_opCtx.get(), nss.ns());
+    auto iter = collectionReader.makeIterator();
+    ASSERT_BSONOBJ_EQ(doc3, unittest::assertGet(iter->next()).first);
+    ASSERT_BSONOBJ_EQ(doc1, unittest::assertGet(iter->next()).first);
+    ASSERT_EQUALS(ErrorCodes::CollectionIsEmpty, iter->next().getStatus());
+}
+
 
 class SyncTailTxnTableTest : public SyncTailTest {
 public:

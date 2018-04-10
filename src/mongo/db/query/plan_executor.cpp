@@ -442,8 +442,14 @@ bool PlanExecutor::shouldWaitForInserts() {
 void PlanExecutor::waitForOplogVisibilityIfNeeded() {
 
     // Is this an oplog collection scan?
-    auto collectionScan = getStageByType(_root.get(), STAGE_COLLSCAN);
+    auto collectionScan =
+        static_cast<const CollectionScan*>(getStageByType(_root.get(), STAGE_COLLSCAN));
     if (!collectionScan || !_nss.isOplog()) {
+        return;
+    }
+
+    // Don't wait if a cursor is already open.
+    if (collectionScan->hasCursor()) {
         return;
     }
 

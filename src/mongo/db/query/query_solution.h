@@ -307,7 +307,7 @@ struct CollectionScanNode : public QuerySolutionNode {
     int maxScan;
 
     // Whether or not to wait for oplog visibility on oplog collection scans.
-    bool shouldWaitForOplogVisibility;
+    bool shouldWaitForOplogVisibility = false;
 };
 
 struct AndHashNode : public QuerySolutionNode {

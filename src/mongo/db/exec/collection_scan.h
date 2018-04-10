@@ -76,10 +76,6 @@ public:
 
     const SpecificStats* getSpecificStats() const final;
 
-    bool hasCursor() const {
-        return _cursor.get() != nullptr;
-    }
-
     static const char* kStageType;
 
 private:

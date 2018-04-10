@@ -207,6 +207,16 @@ void fillOutPlannerParams(OperationContext* opCtx,
     } else {
         plannerParams->options |= QueryPlannerParams::KEEP_MUTATIONS;
     }
+
+    // When doing non-tailable collection scans on the oplog, we should wait for visibility when we
+    // are a primary or a standalone.
+    if (canonicalQuery->nss().isOplog() && !canonicalQuery->getQueryRequest().isTailable()) {
+        const repl::ReplicationCoordinator* replCoord = repl::ReplicationCoordinator::get(opCtx);
+        if (replCoord->getReplicationMode() != repl::ReplicationCoordinator::modeReplSet ||
+            replCoord->getMemberState().primary()) {
+            plannerParams->options |= QueryPlannerParams::OPLOG_SCAN_WAIT_FOR_VISIBLE;
+        }
+    }
 }
 
 namespace {

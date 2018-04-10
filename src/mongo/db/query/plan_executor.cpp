@@ -439,50 +439,6 @@ bool PlanExecutor::shouldWaitForInserts() {
     return false;
 }
 
-void PlanExecutor::waitForOplogVisibilityIfNeeded() {
-
-    // Is this an oplog collection scan?
-    auto collectionScan =
-        static_cast<const CollectionScan*>(getStageByType(_root.get(), STAGE_COLLSCAN));
-    if (!collectionScan || !_nss.isOplog()) {
-        return;
-    }
-
-    // Don't wait if a cursor is already open.
-    if (collectionScan->hasCursor()) {
-        return;
-    }
-
-    // Is this a forward scan?
-    auto stats = static_cast<const CollectionScanStats*>(collectionScan->getSpecificStats());
-    if (stats->direction != CollectionScanParams::Direction::FORWARD) {
-        return;
-    }
-
-    // Is this a non-tailable cursor?
-    if (!_cq || _cq->getQueryRequest().isTailable()) {
-        return;
-    }
-
-    // Are we a primary of a replica set or a standalone?
-    const repl::ReplicationCoordinator* replCoord = repl::ReplicationCoordinator::get(_opCtx);
-    if (replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
-        !replCoord->getMemberState().primary()) {
-        return;
-    }
-
-    // If so, wait for the oplog writes to become visible.
-    dassert(_opCtx->lockState()->isCollectionLockedForMode(_nss.ns(), MODE_IS));
-    auto db = dbHolder().get(_opCtx, _nss.db());
-    invariant(db);
-    auto collection = db->getCollection(_opCtx, _nss);
-    invariant(collection);
-
-    getOpCtx()->recoveryUnit()->abandonSnapshot();
-    collection->getRecordStore()->waitForAllEarlierOplogWritesToBeVisible(getOpCtx());
-}
-
-
 std::shared_ptr<CappedInsertNotifier> PlanExecutor::getCappedInsertNotifier() {
     // We don't expect to need a capped insert notifier for non-yielding plans.
     invariant(_yieldPolicy->canReleaseLocksDuringExecution());
@@ -556,10 +512,6 @@ PlanExecutor::ExecState PlanExecutor::getNextImpl(Snapshotted<BSONObj>* objOut, 
         return PlanExecutor::ADVANCED;
     }
 
-    // Wait for all oplog writes to become visible, if necessary. This will only happen on forward
-    // oplog collection scans.
-    waitForOplogVisibilityIfNeeded();
-
     // When a stage requests a yield for document fetch, it gives us back a RecordFetcher*
     // to use to pull the record into memory. We take ownership of the RecordFetcher here,
     // deleting it after we've had a chance to do the fetch. For timing-based yields, we
@@ -570,8 +522,7 @@ PlanExecutor::ExecState PlanExecutor::getNextImpl(Snapshotted<BSONObj>* objOut, 
     size_t writeConflictsInARow = 0;
 
     // Capped insert data; declared outside the loop so we hold a shared pointer to the capped
-    // insert notifier the entire time we are in the loop.  Holding a shared pointer to the
-    // capped
+    // insert notifier the entire time we are in the loop.  Holding a shared pointer to the capped
     // insert notifier is necessary for the notifierVersion to advance.
     CappedInsertNotifierData cappedInsertNotifierData;
     if (shouldWaitForInserts()) {
@@ -708,8 +659,7 @@ void PlanExecutor::dispose(OperationContext* opCtx, CursorManager* cursorManager
     // However, if we have been killed we should not attempt to deregister ourselves, since the
     // caller of markAsKilled() will have done that already, and the CursorManager may no longer
     // exist. Note that the caller's collection lock prevents us from being marked as killed
-    // during
-    // this method, since any interruption event requires a lock in at least MODE_IX.
+    // during this method, since any interruption event requires a lock in at least MODE_IX.
     if (cursorManager && _registrationToken && !isMarkedAsKilled()) {
         dassert(opCtx->lockState()->isCollectionLockedForMode(_nss.ns(), MODE_IS));
         cursorManager->deregisterExecutor(this);

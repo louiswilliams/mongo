@@ -92,13 +92,12 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
 
     while (auto coll = _autoColl->getCollection()) {
 
-        const NamespaceString& nss = coll->ns();
         // The following conditions must be met to read from the last applied timestamp (most recent
         // batch boundary) to allow reads on secondaries in a consistent state.
         // TODO: Refactor this into a single helper method.
 
         // 1. Reading from last applied optime is only used for local and available readConcern
-        // levels. Majority and snapshot readConcern levels handle visiblity correctly, as the
+        // levels. Majority and snapshot readConcern levels handle visibility correctly, as the
         // majority commit point is set at the same time as the last applied timestamp.
         auto localOrAvailable = readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
             readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern;
@@ -112,14 +111,15 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // 3. We only need to read at batch boundaries when users read from replicated collections.
         // Internal reads may need to see inconsistent states, and non-replicated collections do not
         // rely on replication.
-        auto userReadingReplicatedCollectionOrOplog =
+        const NamespaceString& nss = coll->ns();
+        auto userReadingReplicatedCollection =
             (nss.isReplicated()) && opCtx->getClient()->isFromUserConnection();
 
         // Read at the last applied timestamp if the above conditions are met, and the noConflict
         // block is set. If it is unset, we tried at least once to read at the last applied time,
         // but pending catalog changes prevented us.
-        bool readAtLastAppliedTimestamp = _noConflict && userReadingReplicatedCollectionOrOplog &&
-            isSecondary && localOrAvailable;
+        bool readAtLastAppliedTimestamp =
+            _noConflict && userReadingReplicatedCollection && isSecondary && localOrAvailable;
 
         opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(readAtLastAppliedTimestamp);
 
@@ -172,12 +172,12 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // choose not to read explicitly from the last applied timestamp. Index builds on
         // secondaries can complete at timestamps later than the lastAppliedTimestamp during initial
         // sync. After initial sync finishes, readers could block indefinitely waiting for the
-        // lastAppliedTimestamp to move forward indefinitely. Instead we force the reader take the
-        // PBWM lock and retry.
+        // lastAppliedTimestamp to move forward. Instead we force the reader take the PBWM lock and
+        // retry.
         if (readAtLastAppliedTimestamp) {
-            log() << "Tried reading from local snapshot time: " << lastAppliedTimestamp
-                  << " on nss: " << nss.ns() << ", but future catalog changes are pending at time"
-                  << *minSnapshot << ". Trying again without reading from the local snapshot";
+            LOG(2) << "Tried reading from local snapshot time: " << lastAppliedTimestamp
+                   << " on nss: " << nss.ns() << ", but future catalog changes are pending at time"
+                   << *minSnapshot << ". Trying again without reading from the local snapshot";
             _noConflict = boost::none;
         }
 

@@ -17,7 +17,7 @@ function SecondaryReadsTest(name = "secondary_reads_test", replSet) {
 
     /**
      * Return an instance of ReplSetTest initialized with a standard
-     * three-node replica set running with the latest version.
+     * two-node replica set running with the latest version.
      */
     function performStandardSetup() {
         let replSet = new ReplSetTest({name, nodes: 2});

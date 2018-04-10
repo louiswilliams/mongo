@@ -56,9 +56,6 @@ void WiredTigerSnapshotManager::setCommittedSnapshot(const Timestamp& timestamp)
 
 void WiredTigerSnapshotManager::setLocalSnapshot(const Timestamp& timestamp) {
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
-
-    LOG(4) << "setting local snapshot timestamp to " << timestamp.toString();
-
     _localSnapshot = timestamp;
 }
 
@@ -81,8 +78,7 @@ Status WiredTigerSnapshotManager::beginTransactionAtTimestamp(Timestamp pointInT
                                                               WT_SESSION* session,
                                                               bool ignorePrepare) const {
     char readTSConfigString[15 /* read_timestamp= */ + (8 * 2) /* 8 hexadecimal characters */ +
-                            1 /* , */ + 15 /*  ignore_prepare= */ + 5 /* false */ +
-                            1 /* trailing null */];
+                            16 /* ,ignore_prepare= */ + 5 /* false */ + 1 /* trailing null */];
     auto size = std::snprintf(readTSConfigString,
                               sizeof(readTSConfigString),
                               "read_timestamp=%llx,ignore_prepare=%s",
@@ -117,7 +113,7 @@ Status WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* se
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
     invariant(_localSnapshot);
 
-    LOG(2) << "begin_transaction on last local snapshot " << _localSnapshot.get().toString();
+    LOG(3) << "begin_transaction on local snapshot " << _localSnapshot.get().toString();
     return beginTransactionAtTimestamp(_localSnapshot.get(), session, ignorePrepare);
 }
 
@@ -126,6 +122,9 @@ void WiredTigerSnapshotManager::beginTransactionOnOplog(WiredTigerOplogManager* 
     auto allCommittedTimestamp = oplogManager->getOplogReadTimestamp();
     char readTSConfigString[15 /* read_timestamp= */ + (8 * 2) /* 16 hexadecimal digits */ +
                             21 /* ,round_to_oldest=true */ + 1 /* trailing null */];
+
+    // Round up to the oldest_timestamp to avoid a race with it advancing after checking the oplog
+    // read timestamp but before opening the transaction.
     auto size = std::snprintf(readTSConfigString,
                               sizeof(readTSConfigString),
                               "read_timestamp=%llx,round_to_oldest=true",

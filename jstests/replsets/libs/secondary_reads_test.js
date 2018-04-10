@@ -13,8 +13,11 @@ function SecondaryReadsTest(name = "secondary_reads_test", replSet) {
     let primary = rst.getPrimary();
     let primaryDB = primary.getDB(dbName);
     let secondary = rst.getSecondary();
-    let readers = [];
+    let secondaryDB = secondary.getDB(dbName);
+    secondaryDB.getMongo().setSlaveOk();
+    secondaryDB.getMongo().setReadPref('secondaryPreferred');
 
+    let readers = [];
     /**
      * Return an instance of ReplSetTest initialized with a standard
      * two-node replica set running with the latest version.
@@ -24,8 +27,11 @@ function SecondaryReadsTest(name = "secondary_reads_test", replSet) {
         replSet.startSet();
 
         const nodes = replSet.nodeList();
-        replSet.initiate(
-            {_id: name, members: [{_id: 0, host: nodes[0]}, {_id: 1, host: nodes[1]}]});
+        replSet.initiate({
+            _id: name,
+            members:
+                [{_id: 0, host: nodes[0], priority: 1}, {_id: 1, host: nodes[1], priority: 0}]
+        });
         return replSet;
     }
 
@@ -42,9 +48,12 @@ function SecondaryReadsTest(name = "secondary_reads_test", replSet) {
         }
     };
 
-    this.doOnPrimary = function(writeFn) {
-        let db = primary.getDB(dbName);
-        writeFn(db);
+    this.getPrimaryDB = function() {
+        return primaryDB;
+    };
+
+    this.getSecondaryDB = function() {
+        return secondaryDB;
     };
 
     this.stopReaders = function() {

@@ -1390,13 +1390,13 @@ StatusWith<OpTime> SyncTail::multiApply(OperationContext* opCtx, MultiApplier::O
 
     // Use this fail point to hold the PBWM lock and prevent the batch from completing.
     if (MONGO_FAIL_POINT(pauseMultiApplyBeforeCompletion)) {
-        log() << "sync tail - pauseMultiApplyBeforeCompletion fail point enabled. Blocking until "
-                 "fail point is disabled.";
+        log() << "pauseMultiApplyBeforeCompletion fail point enabled. Blocking until fail point is "
+                 "disabled.";
         while (MONGO_FAIL_POINT(pauseMultiApplyBeforeCompletion)) {
             if (inShutdown()) {
                 severe()
                     << "Turn off pauseMultiApplyBeforeCompletion before attempting clean shutdown";
-                fassertFailedNoTrace(40304);
+                fassertFailedNoTrace(50765);
             }
             sleepmillis(100);
         }

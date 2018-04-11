@@ -218,14 +218,18 @@ bool shouldWaitForOplogVisibility(OperationContext* opCtx,
                                   const Collection* collection,
                                   bool tailable) {
 
-    // Only non-tailable cursors on the oplog are affected. Reverse cursors are also not affected,
-    // but this is checked later.
+    // Only non-tailable cursors on the oplog are affected. Only forward cursors, not reverse
+    // cursors, are affected, but this is checked when the cursor is opened.
     if (!collection->ns().isOplog() || tailable) {
         return false;
     }
 
     // Only primaries should require readers to wait for oplog visibility. In any other replication
-    // state, readers read at the most visibile oplog timestamp.
+    // state, readers read at the most visible oplog timestamp. The reason why readers on primaries
+    // need to wait is because multiple optimes can be allocated for operations before their entries
+    // are written to the storage engine. "Holes" will appear when an operation with a later optime
+    // commits before an operation with an earlier optime, and readers should wait so that all data
+    // is consistent.
     repl::ReplicationCoordinator* replCoord = repl::ReplicationCoordinator::get(opCtx);
     return replCoord->getReplicationMode() != repl::ReplicationCoordinator::modeReplSet ||
         replCoord->canAcceptWritesFor(opCtx, collection->ns());

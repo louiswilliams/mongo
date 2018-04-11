@@ -98,12 +98,12 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // that would normally be protected by the PBWM lock. In order to serve secondary reads
         // during this period, we default to not acquiring the lock (by setting _noConflict). On
         // primaries, we always read at a consistent time, so not taking the PBWM lock is not a
-        // problem. On secondaries, we have to guarantee we read at a consistent state, so we
-        // must read at the last applied timestamp, which is set after each complete batch.
+        // problem. On secondaries, we have to guarantee we read at a consistent state, so we must
+        // read at the last applied timestamp, which is set after each complete batch.
         //
         // If an attempt to read at the last applied timestamp is unsuccessful because there are
         // pending catalog changes that occur after the last applied timestamp, we release our locks
-        // and try again with the PBWM lock.
+        // and try again with the PBWM lock (by unsetting _noConflict).
         //
         // The following conditions must be met to read from the last applied timestamp:
 
@@ -128,13 +128,14 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         auto userReadingReplicatedCollection =
             (nss.isReplicated()) && opCtx->getClient()->isFromUserConnection();
 
-        // Read at the last applied timestamp if the above conditions are met and the noConflict
-        // block is set. If it is unset, we tried at least once to read at the last applied time,
-        // but pending catalog changes prevented us.
+        // Finally, read at the last applied timestamp if the above conditions are met and the
+        // noConflict block is set. If it is unset, we tried at least once to read at the last
+        // applied time, but pending catalog changes prevented us.
         bool readAtLastAppliedTimestamp = _noConflict && userReadingReplicatedCollection &&
             cannotAcceptWrites && localOrAvailable;
-
         opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(readAtLastAppliedTimestamp);
+
+        // The remainder of this code deals with pending catalog changes.
 
         // This is the timestamp of the most recent catalog changes to this collection. If this is
         // greater than any point in time read timestamps, we should either wait or return an error.
@@ -142,8 +143,6 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         if (!minSnapshot) {
             return;
         }
-
-        // The remainder of this code deals with pending catalog changes.
 
         // If we are reading from the lastAppliedTimestamp and it is up-to-date with any catalog
         // changes, we can return.

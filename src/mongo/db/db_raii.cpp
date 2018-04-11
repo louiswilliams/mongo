@@ -105,7 +105,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // pending catalog changes that occur after the last applied timestamp, we release our locks
         // and try again with the PBWM lock (by unsetting _noConflict).
         //
-        // The following conditions must be met to read from the last applied timestamp:
+        // If the following conditions are met, we must read from the last applied timestamp:
 
         // 1. Reading from last applied optime is only used for local and available readConcern
         // levels. Majority and snapshot readConcern levels handle visibility correctly, as the

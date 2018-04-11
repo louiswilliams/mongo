@@ -208,15 +208,22 @@ void fillOutPlannerParams(OperationContext* opCtx,
         plannerParams->options |= QueryPlannerParams::KEEP_MUTATIONS;
     }
 
-    // When doing non-tailable collection scans on the oplog, we should wait for visibility when we
-    // are a primary or a standalone.
-    if (canonicalQuery->nss().isOplog() && !canonicalQuery->getQueryRequest().isTailable()) {
-        const repl::ReplicationCoordinator* replCoord = repl::ReplicationCoordinator::get(opCtx);
-        if (replCoord->getReplicationMode() != repl::ReplicationCoordinator::modeReplSet ||
-            replCoord->getMemberState().primary()) {
-            plannerParams->options |= QueryPlannerParams::OPLOG_SCAN_WAIT_FOR_VISIBLE;
-        }
+    if (getShouldWaitForOplogVisibility(
+            opCtx, collection, canonicalQuery->getQueryRequest().isTailable())) {
+        plannerParams->options |= QueryPlannerParams::OPLOG_SCAN_WAIT_FOR_VISIBLE;
     }
+}
+
+bool getShouldWaitForOplogVisibility(OperationContext* opCtx,
+                                     const Collection* collection,
+                                     bool tailable) {
+
+    if (!collection->ns().isOplog() || tailable) {
+        return false;
+    }
+    const repl::ReplicationCoordinator* replCoord = repl::ReplicationCoordinator::get(opCtx);
+    return replCoord->getReplicationMode() != repl::ReplicationCoordinator::modeReplSet ||
+        replCoord->getMemberState().primary();
 }
 
 namespace {
@@ -627,6 +634,8 @@ StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> getOplogStartHack(
     params.tailable = cq->getQueryRequest().isTailable();
     params.shouldTrackLatestOplogTimestamp =
         plannerOptions & QueryPlannerParams::TRACK_LATEST_OPLOG_TS;
+    params.shouldWaitForOplogVisibility =
+        getShouldWaitForOplogVisibility(opCtx, collection, params.tailable);
 
     // If the query is just a lower bound on "ts", we know that every document in the collection
     // after the first matching one must also match. To avoid wasting time running the match

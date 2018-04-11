@@ -63,6 +63,10 @@ void fillOutPlannerParams(OperationContext* opCtx,
                           CanonicalQuery* canonicalQuery,
                           QueryPlannerParams* plannerParams);
 
+bool getShouldWaitForOplogVisibility(OperationContext* opCtx,
+                                     const Collection* collection,
+                                     bool tailable);
+
 /**
  * Get a plan executor for a query.
  *

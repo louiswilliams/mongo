@@ -329,6 +329,9 @@ void WiredTigerRecoveryUnit::_txnOpen() {
 
     } else if (_shouldReadAtLastAppliedTimestamp &&
                _sessionCache->snapshotManager().getLocalSnapshot()) {
+        // Read from the last applied timestamp (tracked globally by the SnapshotManger), which is
+        // the timestamp of the most recent completed replication batch operation. This should only
+        // be true for local or available readConcern on secondaries.
         auto status = _sessionCache->snapshotManager().beginTransactionOnLocalSnapshot(
             session, ignorePrepare);
         uassertStatusOK(status);

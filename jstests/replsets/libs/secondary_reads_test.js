@@ -24,8 +24,11 @@ function SecondaryReadsTest(name = "secondary_reads_test", replSet) {
         replSet.startSet();
 
         const nodes = replSet.nodeList();
-        replSet.initiate(
-            {_id: name, members: [{_id: 0, host: nodes[0]}, {_id: 1, host: nodes[1]}]});
+        replSet.initiate({
+            _id: name,
+            members:
+                [{_id: 0, host: nodes[0], priority: 1}, {_id: 1, host: nodes[1], priority: 0}]
+        });
         return replSet;
     }
 

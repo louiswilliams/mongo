@@ -218,12 +218,17 @@ bool getShouldWaitForOplogVisibility(OperationContext* opCtx,
                                      const Collection* collection,
                                      bool tailable) {
 
+    // Only non-tailable cursors on the oplog are affected. Reverse cursors are also not affected,
+    // but this is checked later.
     if (!collection->ns().isOplog() || tailable) {
         return false;
     }
-    const repl::ReplicationCoordinator* replCoord = repl::ReplicationCoordinator::get(opCtx);
+
+    // Only primaries should require readers to wait for oplog visibility. In any other replication
+    // state, readers read at the most visibile oplog timestamp.
+    repl::ReplicationCoordinator* replCoord = repl::ReplicationCoordinator::get(opCtx);
     return replCoord->getReplicationMode() != repl::ReplicationCoordinator::modeReplSet ||
-        replCoord->getMemberState().primary();
+        replCoord->canAcceptWritesFor(opCtx, collection->ns());
 }
 
 namespace {

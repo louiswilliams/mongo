@@ -58,24 +58,6 @@
 
     // Do a bunch of reads using the 'x' index on the secondary.
     // No errors should be encountered on the secondary.
-    let readCmdSnapshot = `
-        db.getMongo().setSlaveOk();
-        while (true) {
-            let session = db.getSiblingDB("test").getMongo().startSession({
-                causalConsistency: false });
-            let sessionDB = session.getDatabase("test");
-            let txnNumber = 0;
-            for (let x = 0; x < ${nOps}; x++) {
-                assert.commandWorked(sessionDB.runCommand({
-                    find: "${collName}",
-                    filter: {x: x},
-                    projection: {x: 1},
-                    readConcern: {level: "snapshot"},
-                    txnNumber: NumberLong(txnNumber++)
-                }));
-            }
-        }`;
-
     let readCmd = `while (true) {
                        for (let x = 0; x < ${nOps}; x++) {
                            assert.commandWorked(db.runCommand({

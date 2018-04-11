@@ -34,7 +34,7 @@ function SecondaryReadsTest(name = "secondary_reads_test", replSet) {
 
     this.startSecondaryReaders = function(nReaders, cmd) {
         let readCmd = `db.getMongo().setSlaveOk();
-                       db.getMongo().setReadPref('secondaryPreferred');
+                       db.getMongo().setReadPref("secondaryPreferred");
                        db = db.getSiblingDB("${dbName}");
                        ${cmd}`;
 

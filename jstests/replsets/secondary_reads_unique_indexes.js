@@ -29,7 +29,7 @@
 (function() {
     "use strict";
 
-    load('jstests/replsets/libs/secondary_reads_test.js');
+    load("jstests/replsets/libs/secondary_reads_test.js");
 
     const name = "secondaryReadsUniqueIndexes";
     const collName = "testColl";
@@ -61,9 +61,9 @@
     let readCmdSnapshot = `
         db.getMongo().setSlaveOk();
         while (true) {
-            let session = db.getSiblingDB('test').getMongo().startSession({
+            let session = db.getSiblingDB("test").getMongo().startSession({
                 causalConsistency: false });
-            let sessionDB = session.getDatabase('test');
+            let sessionDB = session.getDatabase("test");
             let txnNumber = 0;
             for (let x = 0; x < ${nOps}; x++) {
                 assert.commandWorked(sessionDB.runCommand({
@@ -122,7 +122,7 @@
             let nextX = end + 1;
             updates[i] = {q: {_id: end}, u: {x: nextX, iter: iteration}};
         }
-        print('iteration ' + iteration);
+        print("iteration " + iteration);
         secondaryReadsTest.doOnPrimary(function(db) {
             assert.commandWorked(db.runCommand({update: collName, updates: updates}));
         });

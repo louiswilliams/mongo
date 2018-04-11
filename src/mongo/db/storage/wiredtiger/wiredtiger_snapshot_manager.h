@@ -57,7 +57,7 @@ public:
     //
 
     /**
-     * Stats a transation a specific read timestamp 'pointInTime'. Use 'ignorePrepare' to ignore
+     * Starts a transation a specific read timestamp 'pointInTime'. Use 'ignorePrepare' to ignore
      * prepared transactions. It should usually be undesirable to ignore prepared transactions
      * unless reading with an 'available' readConcern.
      */

@@ -143,6 +143,8 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             return;
         }
 
+        // The remainder of this code deals with pending catalog changes.
+
         // If we are reading from the lastAppliedTimestamp and it is up-to-date with any catalog
         // changes, we can return.
         auto lastAppliedTimestamp = replCoord->getMyLastAppliedOpTime().getTimestamp();

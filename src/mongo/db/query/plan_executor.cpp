@@ -658,8 +658,8 @@ void PlanExecutor::dispose(OperationContext* opCtx, CursorManager* cursorManager
     // If we are registered with the CursorManager we need to be sure to deregister ourselves.
     // However, if we have been killed we should not attempt to deregister ourselves, since the
     // caller of markAsKilled() will have done that already, and the CursorManager may no longer
-    // exist. Note that the caller's collection lock prevents us from being marked as killed
-    // during this method, since any interruption event requires a lock in at least MODE_IX.
+    // exist. Note that the caller's collection lock prevents us from being marked as killed during
+    // this method, since any interruption event requires a lock in at least MODE_IX.
     if (cursorManager && _registrationToken && !isMarkedAsKilled()) {
         dassert(opCtx->lockState()->isCollectionLockedForMode(_nss.ns(), MODE_IS));
         cursorManager->deregisterExecutor(this);

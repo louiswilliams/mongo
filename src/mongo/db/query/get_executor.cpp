@@ -208,15 +208,15 @@ void fillOutPlannerParams(OperationContext* opCtx,
         plannerParams->options |= QueryPlannerParams::KEEP_MUTATIONS;
     }
 
-    if (getShouldWaitForOplogVisibility(
+    if (shouldWaitForOplogVisibility(
             opCtx, collection, canonicalQuery->getQueryRequest().isTailable())) {
         plannerParams->options |= QueryPlannerParams::OPLOG_SCAN_WAIT_FOR_VISIBLE;
     }
 }
 
-bool getShouldWaitForOplogVisibility(OperationContext* opCtx,
-                                     const Collection* collection,
-                                     bool tailable) {
+bool shouldWaitForOplogVisibility(OperationContext* opCtx,
+                                  const Collection* collection,
+                                  bool tailable) {
 
     // Only non-tailable cursors on the oplog are affected. Reverse cursors are also not affected,
     // but this is checked later.
@@ -640,7 +640,7 @@ StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> getOplogStartHack(
     params.shouldTrackLatestOplogTimestamp =
         plannerOptions & QueryPlannerParams::TRACK_LATEST_OPLOG_TS;
     params.shouldWaitForOplogVisibility =
-        getShouldWaitForOplogVisibility(opCtx, collection, params.tailable);
+        shouldWaitForOplogVisibility(opCtx, collection, params.tailable);
 
     // If the query is just a lower bound on "ts", we know that every document in the collection
     // after the first matching one must also match. To avoid wasting time running the match

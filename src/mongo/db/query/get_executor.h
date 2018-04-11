@@ -67,9 +67,9 @@ void fillOutPlannerParams(OperationContext* opCtx,
  * Determines whether or not to wait for oplog visibility for a query. This is only used for
  * colleciton scans on the oplog.
  */
-bool getShouldWaitForOplogVisibility(OperationContext* opCtx,
-                                     const Collection* collection,
-                                     bool tailable);
+bool shouldWaitForOplogVisibility(OperationContext* opCtx,
+                                  const Collection* collection,
+                                  bool tailable);
 
 /**
  * Get a plan executor for a query.

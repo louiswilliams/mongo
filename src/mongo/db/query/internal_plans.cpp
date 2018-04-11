@@ -180,8 +180,7 @@ std::unique_ptr<PlanStage> InternalPlanner::_collectionScan(OperationContext* op
     CollectionScanParams params;
     params.collection = collection;
     params.start = startLoc;
-    params.tailable = false;
-    params.shouldWaitForOplogVisibility = getShouldWaitForOplogVisibility(opCtx, collection, false);
+    params.shouldWaitForOplogVisibility = shouldWaitForOplogVisibility(opCtx, collection, false);
 
     if (FORWARD == direction) {
         params.direction = CollectionScanParams::FORWARD;

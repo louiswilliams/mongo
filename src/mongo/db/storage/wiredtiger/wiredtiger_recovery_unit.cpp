@@ -324,6 +324,7 @@ void WiredTigerRecoveryUnit::_txnOpen() {
         _majorityCommittedSnapshot =
             _sessionCache->snapshotManager().beginTransactionOnCommittedSnapshot(session);
     } else if (_isOplogReader) {
+        invariant(!_shouldReadAtLastAppliedTimestamp);
         _sessionCache->snapshotManager().beginTransactionOnOplog(
             _sessionCache->getKVEngine()->getOplogManager(), session);
 

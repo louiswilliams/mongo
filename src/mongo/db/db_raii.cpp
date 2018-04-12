@@ -37,6 +37,7 @@
 #include "mongo/db/curop.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/s/collection_sharding_state.h"
+#include "mongo/db/server_parameters.h"
 #include "mongo/db/session_catalog.h"
 #include "mongo/util/log.h"
 
@@ -46,6 +47,10 @@ namespace {
 const boost::optional<int> kDoNotChangeProfilingLevel = boost::none;
 
 }  // namespace
+
+// If true, do not take the PBWM lock in AutoGetCollectionForRead on secondaries during batch
+// application.
+MONGO_EXPORT_SERVER_PARAMETER(allowSecondaryReadsDuringBatchApplication, bool, true);
 
 AutoStatsTracker::AutoStatsTracker(OperationContext* opCtx,
                                    const NamespaceString& nss,
@@ -83,7 +88,9 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                                                    AutoGetCollection::ViewMode viewMode,
                                                    Date_t deadline) {
     // By default, don't conflict with secondary batch application.
-    _noConflict.emplace(opCtx->lockState());
+    if (allowSecondaryReadsDuringBatchApplication.load()) {
+        _noConflict.emplace(opCtx->lockState());
+    }
     const auto collectionLockMode = getLockModeForQuery(opCtx);
     _autoColl.emplace(opCtx, nsOrUUID, collectionLockMode, viewMode, deadline);
 
@@ -105,7 +112,8 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // pending catalog changes that occur after the last applied timestamp, we release our locks
         // and try again with the PBWM lock (by unsetting _noConflict).
         //
-        // If the following conditions are met, we must read from the last applied timestamp:
+        // In order to read without the PBWM lock, we must read at the last applied timestamp any
+        // time all of the following conditions are met:
 
         // 1. Reading from last applied optime is only used for local and available readConcern
         // levels. Majority and snapshot readConcern levels handle visibility correctly, as the
@@ -116,7 +124,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // 2. If we are in a replication state (like secondary or primary catch-up) where we are
         // not accepting writes, we should always read from the last applied snapshot. If this node
         // can accept writes, then no conflicting replication batches are being applied to conflict
-        // and we should read from the default snapshot.
+        // and we can read from the default snapshot.
         const NamespaceString& nss = coll->ns();
         auto cannotAcceptWrites =
             replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
@@ -124,13 +132,14 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
 
         // 3. We only need to read at batch boundaries when users read from replicated collections.
         // Internal reads may need to see inconsistent states, and non-replicated collections do not
-        // rely on replication.
+        // rely on replication, and thus cannot be in inconsistent states.
         auto userReadingReplicatedCollection =
             (nss.isReplicated()) && opCtx->getClient()->isFromUserConnection();
 
         // Finally, read at the last applied timestamp if the above conditions are met and the
-        // noConflict block is set. If it is unset, we tried at least once to read at the last
-        // applied time, but pending catalog changes prevented us.
+        // noConflict block is set, meaning we do not currently have a PBWM lock. If it is unset, we
+        // tried at least once to read at the last applied time, but pending catalog changes
+        // prevented us.
         bool readAtLastAppliedTimestamp = _noConflict && userReadingReplicatedCollection &&
             cannotAcceptWrites && localOrAvailable;
         opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(readAtLastAppliedTimestamp);

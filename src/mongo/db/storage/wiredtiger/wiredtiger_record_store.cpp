@@ -1562,8 +1562,11 @@ boost::optional<RecordId> WiredTigerRecordStore::oplogStartHack(
     if (!_isOplog)
         return boost::none;
 
-    if (_isOplog) {
-        WiredTigerRecoveryUnit::get(opCtx)->setIsOplogReader();
+    // Oplog reads can be part of an operation to read at lastApplied or a majority read. Both are
+    // valid and should not read from the oplog timestamp.
+    auto wru = WiredTigerRecoveryUnit::get(opCtx);
+    if (_isOplog && wru->getTimestampReadSource() == RecoveryUnit::ReadSource::kNone) {
+        wru->setTimestampReadSource(RecoveryUnit::ReadSource::kOplog);
     }
 
     WiredTigerCursor cursor(_uri, _tableId, true, opCtx);
@@ -1667,7 +1670,8 @@ void WiredTigerRecordStore::cappedTruncateAfter(OperationContext* opCtx,
         // timestamp has not yet been updated to reflect all committed oplog transactions. Setting
         // the read timestamp to its maximum value should ensure that we read the effects of all
         // previously committed transactions.
-        invariant(opCtx->recoveryUnit()->setPointInTimeReadTimestamp(Timestamp::max()).isOK());
+        opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kProvided,
+                                                      Timestamp::max());
     }
 
     std::unique_ptr<SeekableRecordCursor> cursor = getCursor(opCtx, true);
@@ -1876,8 +1880,10 @@ void WiredTigerRecordStoreCursorBase::saveUnpositioned() {
 }
 
 bool WiredTigerRecordStoreCursorBase::restore() {
-    if (_rs._isOplog && _forward) {
-        WiredTigerRecoveryUnit::get(_opCtx)->setIsOplogReader();
+    auto wru = WiredTigerRecoveryUnit::get(_opCtx);
+    if (_rs._isOplog && _forward &&
+        wru->getTimestampReadSource() == RecoveryUnit::ReadSource::kNone) {
+        wru->setTimestampReadSource(RecoveryUnit::ReadSource::kOplog);
     }
 
     if (!_cursor)
@@ -1972,7 +1978,12 @@ std::unique_ptr<SeekableRecordCursor> StandardWiredTigerRecordStore::getCursor(
             !opCtx->lockState()->isCollectionLockedForMode(_ns, MODE_X)) {
             throw WriteConflictException();
         }
-        wru->setIsOplogReader();
+        // cappedTruncateAfter may set a point-in-time read to Timestamp::max(), and oplog reads on
+        // secondaries may request to read at the last applied timestamp. Both are acceptable to
+        // skip.
+        if (wru->getTimestampReadSource() == RecoveryUnit::ReadSource::kNone) {
+            wru->setTimestampReadSource(RecoveryUnit::ReadSource::kOplog);
+        }
     }
 
     return stdx::make_unique<WiredTigerRecordStoreStandardCursor>(opCtx, *this, forward);
@@ -2023,7 +2034,12 @@ std::unique_ptr<SeekableRecordCursor> PrefixedWiredTigerRecordStore::getCursor(
             !opCtx->lockState()->isCollectionLockedForMode(_ns, MODE_X)) {
             throw WriteConflictException();
         }
-        wru->setIsOplogReader();
+        // cappedTruncateAfter may set a point-in-time read to Timestamp::max(), and oplog reads on
+        // secondaries may request to read at the last applied timestamp. Both are acceptable to
+        // skip.
+        if (wru->getTimestampReadSource() == RecoveryUnit::ReadSource::kNone) {
+            wru->setTimestampReadSource(RecoveryUnit::ReadSource::kOplog);
+        }
     }
 
     return stdx::make_unique<WiredTigerRecordStorePrefixedCursor>(opCtx, *this, _prefix, forward);

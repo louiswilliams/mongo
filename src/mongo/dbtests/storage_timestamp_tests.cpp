@@ -160,7 +160,7 @@ public:
      */
     void reset(NamespaceString nss) const {
         ::mongo::writeConflictRetry(_opCtx, "deleteAll", nss.ns(), [&] {
-            invariant(_opCtx->recoveryUnit()->setPointInTimeReadTimestamp(Timestamp::min()).isOK());
+            _opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kNone);
             AutoGetCollection collRaii(_opCtx, nss, LockMode::MODE_X);
 
             if (collRaii.getCollection()) {
@@ -242,7 +242,11 @@ public:
                                            const repl::MinValidDocument& expectedDoc) {
         auto recoveryUnit = _opCtx->recoveryUnit();
         recoveryUnit->abandonSnapshot();
-        ASSERT_OK(recoveryUnit->setPointInTimeReadTimestamp(ts));
+        if (!ts.isNull()) {
+            ASSERT_OK(recoveryUnit->setPointInTimeReadTimestamp(ts));
+        } else {
+            recoveryUnit->setTimestampReadSource(RecoveryUnit::ReadSource::kNone);
+        }
         auto doc =
             repl::MinValidDocument::parse(IDLParserErrorContext("MinValidDocument"), findOne(coll));
         ASSERT_EQ(expectedDoc.getMinValidTimestamp(), doc.getMinValidTimestamp())
@@ -268,7 +272,11 @@ public:
 
         auto recoveryUnit = _opCtx->recoveryUnit();
         recoveryUnit->abandonSnapshot();
-        ASSERT_OK(recoveryUnit->setPointInTimeReadTimestamp(ts));
+        if (!ts.isNull()) {
+            ASSERT_OK(recoveryUnit->setPointInTimeReadTimestamp(ts));
+        } else {
+            recoveryUnit->setTimestampReadSource(RecoveryUnit::ReadSource::kNone);
+        }
         if (expectedDoc.isEmpty()) {
             ASSERT_EQ(0, itCount(coll)) << "Should not find any documents in " << coll->ns()
                                         << " at ts: " << ts;
@@ -300,7 +308,11 @@ public:
 
         auto recoveryUnit = _opCtx->recoveryUnit();
         recoveryUnit->abandonSnapshot();
-        ASSERT_OK(recoveryUnit->setPointInTimeReadTimestamp(ts));
+        if (!ts.isNull()) {
+            ASSERT_OK(recoveryUnit->setPointInTimeReadTimestamp(ts));
+        } else {
+            recoveryUnit->setTimestampReadSource(RecoveryUnit::ReadSource::kNone);
+        }
 
         // getCollectionIdent() returns the ident for the given namespace in the KVCatalog.
         // getAllIdents() actually looks in the RecordStore for a list of all idents, and is thus
@@ -463,6 +475,7 @@ public:
         const std::uint32_t docsToInsert = 10;
         const LogicalTime firstInsertTime = _clock->reserveTicks(docsToInsert);
         for (std::uint32_t idx = 0; idx < docsToInsert; ++idx) {
+            log() << "timestamp: " << firstInsertTime.addTicks(idx).asTimestamp();
             BSONObjBuilder result;
             ASSERT_OK(applyOps(
                 _opCtx,

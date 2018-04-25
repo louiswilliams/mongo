@@ -259,21 +259,6 @@
         assert.eq(res.cursor.firstBatch.length, TestData.numDocs, tojson(res));
     }, {"command.pipeline": [{$match: {x: 1}}]}, {"command.pipeline": [{$match: {x: 1}}]});
 
-    // TODO: SERVER-34113 Remove this test when we completely remove snapshot
-    // reads since this command is not supported with transaction api.
-    // Test geoNear.
-    testCommand(function() {
-        const res = assert.commandWorked(db.runCommand({
-            geoNear: "coll",
-            near: [0, 0],
-            readConcern: {level: "snapshot"},
-            lsid: TestData.sessionId,
-            txnNumber: NumberLong(TestData.txnNumber)
-        }));
-        assert(res.hasOwnProperty("results"));
-        assert.eq(res.results.length, TestData.numDocs, tojson(res));
-    }, {"command.geoNear": "coll"}, {"command.geoNear": "coll"});
-
     // Test getMore with an initial find batchSize of 0. Interrupt behavior of a getMore is not
     // expected to change with a change of batchSize in the originating command.
     testCommand(function() {
@@ -326,18 +311,6 @@
         assert(res.hasOwnProperty("values"));
         assert.eq(res.values.length, 4, tojson(res));
     }, {"command.distinct": "coll"}, {"command.distinct": "coll"});
-
-    // Test group.
-    testCommand(function() {
-        const res = assert.commandWorked(db.runCommand({
-            group: {ns: "coll", key: {_id: 1}, $reduce: function(curr, result) {}, initial: {}},
-            readConcern: {level: "snapshot"},
-            lsid: TestData.sessionId,
-            txnNumber: NumberLong(TestData.txnNumber)
-        }));
-        assert(res.hasOwnProperty("count"), tojson(res));
-        assert.eq(res.count, 4);
-    }, {"command.group.ns": "coll"}, {"command.group.ns": "coll"});
 
     // Test update.
     // TODO SERVER-33548: We cannot provide a 'profilerFilter' because profiling is turned off for

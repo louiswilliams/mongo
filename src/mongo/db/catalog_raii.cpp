@@ -113,15 +113,14 @@ AutoGetCollection::AutoGetCollection(OperationContext* opCtx,
                             << " disappeared after successufully resolving "
                             << nsOrUUID.toString());
 
+    auto readConcernLevel = repl::ReadConcernArgs::get(opCtx).getLevel();
     if (_coll) {
         // Unlike read concern majority, read concern snapshot cannot yield and wait when there are
         // pending catalog changes. Instead, we must return an error in such situations. We ignore
         // this restriction for the oplog, since it never has pending catalog changes.
-        if (opCtx->recoveryUnit()->getReadConcernLevel() ==
-                repl::ReadConcernLevel::kSnapshotReadConcern &&
+        auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+        if (readConcernLevel == repl::ReadConcernLevel::kSnapshotReadConcern && mySnapshot &&
             _resolvedNss != NamespaceString::kRsOplogNamespace) {
-            auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
-            invariant(mySnapshot);
             auto minSnapshot = _coll->getMinimumVisibleSnapshot();
             uassert(
                 ErrorCodes::SnapshotUnavailable,

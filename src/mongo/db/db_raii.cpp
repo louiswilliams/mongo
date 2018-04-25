@@ -97,7 +97,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
     _autoColl.emplace(opCtx, nsOrUUID, collectionLockMode, viewMode, deadline);
 
     repl::ReplicationCoordinator* const replCoord = repl::ReplicationCoordinator::get(opCtx);
-    const auto readConcernLevel = opCtx->recoveryUnit()->getReadConcernLevel();
+    const auto& readConcernLevel = repl::ReadConcernArgs::get(opCtx).getLevel();
 
     // If the collection doesn't exist or disappears after releasing locks and waiting, there is no
     // need to check for pending catalog changes.
@@ -123,7 +123,9 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         bool readAtLastAppliedTimestamp =
             _shouldReadAtLastAppliedTimestamp(opCtx, nss, readConcernLevel);
 
-        opCtx->recoveryUnit()->setShouldReadAtLastAppliedTimestamp(readAtLastAppliedTimestamp);
+        if (readAtLastAppliedTimestamp) {
+            opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kLastApplied);
+        }
 
         // This timestamp could be earlier than the timestamp seen when the transaction is opened
         // because it is set asynchonously. This is not problematic because holding the collection
@@ -138,8 +140,9 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             return;
         }
 
+        auto readSource = opCtx->recoveryUnit()->getTimestampReadSource();
         invariant(lastAppliedTimestamp ||
-                  readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern);
+                  readSource == RecoveryUnit::ReadSource::kMajorityCommitted);
 
         // Yield locks in order to do the blocking call below.
         // This should only be called if we are doing a snapshot read at the last applied time or
@@ -158,9 +161,10 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                    << " on nss: " << nss.ns() << ", but future catalog changes are pending at time "
                    << *minSnapshot << ". Trying again without reading at last-applied time.";
             _shouldNotConflictWithSecondaryBatchApplicationBlock = boost::none;
+            opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kNone);
         }
 
-        if (readConcernLevel == repl::ReadConcernLevel::kMajorityReadConcern) {
+        if (readSource == RecoveryUnit::ReadSource::kMajorityCommitted) {
             replCoord->waitUntilSnapshotCommitted(opCtx, *minSnapshot);
             uassertStatusOK(opCtx->recoveryUnit()->obtainMajorityCommittedSnapshot());
         }

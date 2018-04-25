@@ -274,9 +274,11 @@ void WiredTigerRecoveryUnit::_txnClose(bool commit) {
     invariantWTOK(wtRet);
 
     _active = false;
+    _ignorePrepared = false;
     _prepareTimestamp = Timestamp();
     _mySnapshotId = nextSnapshotId.fetchAndAdd(1);
-    _isOplogReader = false;
+    if (_timestampReadSource == ReadSource::kOplog)
+        _timestampReadSource = ReadSource::kNone;
     _orderedCommit = true;  // Default value is true; we assume all writes are ordered.
 }
 
@@ -286,7 +288,7 @@ SnapshotId WiredTigerRecoveryUnit::getSnapshotId() const {
 }
 
 Status WiredTigerRecoveryUnit::obtainMajorityCommittedSnapshot() {
-    invariant(_isReadingFromPointInTime());
+    invariant(_timestampReadSource == ReadSource::kMajorityCommitted);
     auto snapshotName = _sessionCache->snapshotManager().getMinSnapshotForNextCommittedRead();
     if (!snapshotName) {
         return {ErrorCodes::ReadConcernMajorityNotAvailableYet,
@@ -297,11 +299,11 @@ Status WiredTigerRecoveryUnit::obtainMajorityCommittedSnapshot() {
 }
 
 boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp() const {
-    if (!_isReadingFromPointInTime())
+    if (_timestampReadSource != ReadSource::kMajorityCommitted &&
+        _timestampReadSource != ReadSource::kProvided)
         return boost::none;
 
-    if (getReadConcernLevel() == repl::ReadConcernLevel::kSnapshotReadConcern &&
-        !_readAtTimestamp.isNull()) {
+    if (_timestampReadSource == ReadSource::kProvided && !_readAtTimestamp.isNull()) {
         return _readAtTimestamp;
     }
 
@@ -319,42 +321,51 @@ void WiredTigerRecoveryUnit::_txnOpen() {
     }
     WT_SESSION* session = _session->getSession();
 
-    auto ignorePrepare = _readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern;
-    // '_readAtTimestamp' is available outside of a check for readConcern level 'snapshot' to
-    // accommodate unit testing. Note that the order of this if/else chain below is important for
-    // correctness. Also, note that we use the '_readAtTimestamp' to work around an oplog visibility
-    // issue in cappedTruncateAfter by setting the timestamp to the maximum value.
-    if (_readAtTimestamp != Timestamp::min()) {
-        invariantWTOK(session->begin_transaction(session, NULL));
-        auto rollbacker =
-            MakeGuard([&] { invariant(session->rollback_transaction(session, nullptr) == 0); });
-        auto status =
-            _sessionCache->snapshotManager().setTransactionReadTimestamp(_readAtTimestamp, session);
-
-        if (!status.isOK() && status.code() == ErrorCodes::BadValue) {
-            uasserted(ErrorCodes::SnapshotTooOld,
-                      str::stream() << "Read timestamp " << _readAtTimestamp.toString()
-                                    << " is older than the oldest available timestamp.");
+    switch (_timestampReadSource) {
+        case ReadSource::kNone: {
+            invariantWTOK(session->begin_transaction(
+                session, _ignorePrepared ? "ignore_prepare=true" : nullptr));
+            break;
         }
-        uassertStatusOK(status);
-        rollbacker.Dismiss();
-    } else if (_isReadingFromPointInTime()) {
-        // We reset _majorityCommittedSnapshot to the actual read timestamp used when the
-        // transaction was started.
-        _majorityCommittedSnapshot =
-            _sessionCache->snapshotManager().beginTransactionOnCommittedSnapshot(session);
-    } else if (_shouldReadAtLastAppliedTimestamp &&
-               _sessionCache->snapshotManager().getLocalSnapshot()) {
-        // Read from the last applied timestamp (tracked globally by the SnapshotManager), which is
-        // the timestamp of the most recent completed replication batch operation. This should only
-        // be true for local or available readConcern on secondaries.
-        _sessionCache->snapshotManager().beginTransactionOnLocalSnapshot(session, ignorePrepare);
-    } else if (_isOplogReader) {
-        _sessionCache->snapshotManager().beginTransactionOnOplog(
-            _sessionCache->getKVEngine()->getOplogManager(), session);
-    } else {
-        invariantWTOK(
-            session->begin_transaction(session, ignorePrepare ? "ignore_prepare=true" : nullptr));
+        case ReadSource::kMajorityCommitted: {
+            // We reset _majorityCommittedSnapshot to the actual read timestamp used when the
+            // transaction was started.
+            _majorityCommittedSnapshot =
+                _sessionCache->snapshotManager().beginTransactionOnCommittedSnapshot(session);
+            break;
+        }
+        case ReadSource::kOplog: {
+            _sessionCache->snapshotManager().beginTransactionOnOplog(_oplogManager, session);
+            break;
+        }
+        case ReadSource::kLastApplied: {
+            // Read from the last applied timestamp (tracked globally by the SnapshotManager), which
+            // is
+            // the timestamp of the most recent completed replication batch operation. This should
+            // only
+            // be true for local or available readConcern on secondaries.
+            _sessionCache->snapshotManager().beginTransactionOnLocalSnapshot(session,
+                                                                             _ignorePrepared);
+            break;
+        }
+        case ReadSource::kProvided: {
+            invariantWTOK(session->begin_transaction(session, NULL));
+            auto rollbacker =
+                MakeGuard([&] { invariant(session->rollback_transaction(session, nullptr) == 0); });
+            auto status = _sessionCache->snapshotManager().setTransactionReadTimestamp(
+                _readAtTimestamp, session);
+
+            if (!status.isOK() && status.code() == ErrorCodes::BadValue) {
+                uasserted(ErrorCodes::SnapshotTooOld,
+                          str::stream() << "Read timestamp " << _readAtTimestamp.toString()
+                                        << " is older than the oldest available timestamp.");
+            }
+            uassertStatusOK(status);
+            rollbacker.Dismiss();
+            break;
+        }
+        default:
+            MONGO_UNREACHABLE;
     }
 
     LOG(3) << "WT begin_transaction for snapshot id " << _mySnapshotId;
@@ -411,15 +422,34 @@ void WiredTigerRecoveryUnit::setPrepareTimestamp(Timestamp timestamp) {
     _prepareTimestamp = timestamp;
 }
 
+void WiredTigerRecoveryUnit::setIgnorePrepared(bool value) {
+    _ignorePrepared = value;
+}
+
 Status WiredTigerRecoveryUnit::setPointInTimeReadTimestamp(Timestamp timestamp) {
-    _readAtTimestamp = timestamp;
+    setTimestampReadSource(ReadSource::kProvided, timestamp);
     return Status::OK();
 }
 
-void WiredTigerRecoveryUnit::setIsOplogReader() {
-    // Note: it would be nice to assert !active here, but OplogStones currently opens a cursor on
-    // the oplog while the recovery unit is already active.
-    _isOplogReader = true;
+void WiredTigerRecoveryUnit::setTimestampReadSource(ReadSource readSource,
+                                                    boost::optional<Timestamp> provided) {
+    log() << "setting timestamp read source: " << static_cast<int>(readSource)
+          << ", provided timestamp: " << ((provided) ? provided->toString() : "none");
+
+    invariant(!_active || _timestampReadSource == ReadSource::kNone ||
+              _timestampReadSource == readSource);
+    invariant((readSource != ReadSource::kProvided && !provided) ||
+              (readSource == ReadSource::kProvided && provided));
+    invariant(!provided || !provided->isNull());
+
+    _timestampReadSource = readSource;
+    if (provided) {
+        _readAtTimestamp = *provided;
+    }
+}
+
+RecoveryUnit::ReadSource WiredTigerRecoveryUnit::getTimestampReadSource() const {
+    return _timestampReadSource;
 }
 
 void WiredTigerRecoveryUnit::beginIdle() {

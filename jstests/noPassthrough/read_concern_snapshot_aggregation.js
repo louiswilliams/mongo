@@ -170,56 +170,6 @@
     // isolation across getMore for $geoNear as it is an initial document source.
     const coll = sessionDB.getCollection(kCollName);
     coll.drop();
-    assert.commandWorked(sessionDB.runCommand({
-        createIndexes: kCollName,
-        indexes: [{key: {geo: "2dsphere"}, name: "geo_2dsphere"}],
-        writeConcern: {w: "majority"}
-    }));
-
-    let bulk = coll.initializeUnorderedBulkOp();
-    const numInitialGeoInsert = 4;
-    for (let i = 0; i < numInitialGeoInsert; ++i) {
-        bulk.insert({_id: i, geo: {type: "Point", coordinates: [0, 0]}});
-    }
-    assert.commandWorked(bulk.execute({w: "majority"}));
-
-    let cmdRes = assert.commandWorked(sessionDB.runCommand({
-        aggregate: kCollName,
-        pipeline: [{
-            $geoNear: {
-                spherical: true,
-                near: {type: "Point", coordinates: [0, 0]},
-                distanceField: "distance"
-            }
-        }],
-        txnNumber: NumberLong(++txnNumber),
-        readConcern: {level: "snapshot"},
-        autocommit: false,
-        startTransaction: true,
-        cursor: {batchSize: 0}
-    }));
-    assert(cmdRes.hasOwnProperty("cursor"));
-    const cursorId = cmdRes.cursor.id;
-    assert.neq(cursorId, 0);
-
-    assert.commandWorked(
-        coll.insert({_id: numInitialGeoInsert, geo: {type: "Point", coordinates: [0, 0]}},
-                    {writeConcern: {w: "majority"}}));
-
-    cmdRes = assert.commandWorked(sessionDB.runCommand({
-        getMore: NumberLong(cursorId),
-        collection: kCollName,
-        autocommit: false,
-        txnNumber: NumberLong(txnNumber)
-    }));
-    assert.commandWorked(sessionDB.adminCommand(
-        {commitTransaction: 1, txnNumber: NumberLong(txnNumber), autocommit: false}));
-    assert(cmdRes.hasOwnProperty("cursor"));
-    assert(cmdRes.cursor.hasOwnProperty("nextBatch"));
-    assert.eq(cmdRes.cursor.nextBatch.length, numInitialGeoInsert);
-
-    // Test that snapshot reads are legal for $facet.
-    coll.drop();
     assert.commandWorked(coll.insert(
         [
           {group1: 1, group2: 1, val: 1},
@@ -228,7 +178,7 @@
         ],
         kWCMajority));
 
-    cmdRes = sessionDB.runCommand({
+    let cmdRes = sessionDB.runCommand({
         aggregate: kCollName,
         pipeline: [
             {

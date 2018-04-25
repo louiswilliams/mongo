@@ -119,11 +119,11 @@ void WiredTigerSnapshotManager::beginTransactionOnLocalSnapshot(WT_SESSION* sess
         MakeGuard([&] { invariant(session->rollback_transaction(session, nullptr) == 0); });
 
     stdx::lock_guard<stdx::mutex> lock(_localSnapshotMutex);
-    invariant(_localSnapshot);
-
-    LOG(3) << "begin_transaction on local snapshot " << _localSnapshot.get().toString();
-    auto status = setTransactionReadTimestamp(_localSnapshot.get(), session);
-    fassert(50775, status);
+    if (_localSnapshot) {
+        LOG(3) << "begin_transaction on local snapshot " << _localSnapshot.get().toString();
+        auto status = setTransactionReadTimestamp(_localSnapshot.get(), session);
+        fassert(50775, status);
+    }
     rollbacker.Dismiss();
 }
 

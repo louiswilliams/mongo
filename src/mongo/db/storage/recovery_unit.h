@@ -89,6 +89,11 @@ public:
                   "This storage engine does not support prepared transactions");
     }
 
+    virtual void setIgnorePrepared(bool ignore) {
+        uasserted(ErrorCodes::CommandNotSupported,
+                  "This storage engine does not support prepared transactions");
+    }
+
     /**
      * Waits until all commits that happened before this call are durable in the journal. Returns
      * true, unless the storage engine cannot guarantee durability, which should never happen when
@@ -145,33 +150,6 @@ public:
     }
 
     /**
-     * Set this operation's readConcern level and replication mode on the recovery unit.
-     */
-    void setReadConcernLevelAndReplicationMode(repl::ReadConcernLevel readConcernLevel,
-                                               repl::ReplicationCoordinator::Mode replicationMode) {
-        _readConcernLevel = readConcernLevel;
-        _replicationMode = replicationMode;
-    }
-
-    /**
-     * Returns the readConcern level of this recovery unit.
-     */
-    repl::ReadConcernLevel getReadConcernLevel() const {
-        return _readConcernLevel;
-    }
-
-    /**
-     * Tells the recovery unit to read at the last applied timestamp, tracked by the SnapshotManger.
-     * This should only be set to true for local and available read concerns. This should be used to
-     * read from a consistent state on a secondary while replicated batches are being applied.
-     */
-    void setShouldReadAtLastAppliedTimestamp(bool value) {
-        invariant(!value || _readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern ||
-                  _readConcernLevel == repl::ReadConcernLevel::kAvailableReadConcern);
-        _shouldReadAtLastAppliedTimestamp = value;
-    }
-
-    /**
      * Returns the Timestamp being used by this recovery unit or boost::none if not reading from
      * a point in time. Any point in time returned will reflect either:
      *  - A timestamp set via call to setPointInTimeReadTimestamp()
@@ -179,8 +157,6 @@ public:
      *    has been enabled via call to obtainMajorityCommittedSnapshot())
      */
     virtual boost::optional<Timestamp> getPointInTimeReadTimestamp() const {
-        invariant(_readConcernLevel != repl::ReadConcernLevel::kMajorityReadConcern &&
-                  _readConcernLevel != repl::ReadConcernLevel::kSnapshotReadConcern);
         return boost::none;
     }
 
@@ -240,6 +216,28 @@ public:
                       "point-in-time reads are not implemented for this storage engine");
     }
 
+    /**
+     * When no read timestamp is provided to the recovery unit, the ReadSource indicates which
+     * external timestamp source to read from.
+     */
+    enum ReadSource {
+        kNone,               // Do not read from a timestamp. This is the default.
+        kOplog,              // Read from the most visible oplog timestamp.
+        kMajorityCommitted,  // Read from the majority all-commmitted timestamp.
+        kLastApplied,        // Read from the last applied timestamp.
+        kProvided            // Read from the timestamp provided to setTimestampReadSource.
+    };
+
+    /**
+     * Sets which timestamp to use for read transactions. If 'provided' is supplied, only kProvided
+     * is an acceptable input.
+     */
+    virtual void setTimestampReadSource(ReadSource source,
+                                        boost::optional<Timestamp> provided = boost::none) {}
+
+    virtual ReadSource getTimestampReadSource() const {
+        return ReadSource::kNone;
+    };
     /**
      * A Change is an action that is registerChange()'d while a WriteUnitOfWork exists. The
      * change is either rollback()'d or commit()'d when the WriteUnitOfWork goes out of scope.
@@ -362,9 +360,6 @@ public:
 
 protected:
     RecoveryUnit() {}
-    repl::ReplicationCoordinator::Mode _replicationMode = repl::ReplicationCoordinator::modeNone;
-    repl::ReadConcernLevel _readConcernLevel = repl::ReadConcernLevel::kLocalReadConcern;
-    bool _shouldReadAtLastAppliedTimestamp = false;
 };
 
 }  // namespace mongo

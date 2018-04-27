@@ -193,7 +193,9 @@ public:
          * A GlobalLock without a deadline defaults to Date_t::max() and an InterruptBehavior of
          * kThrow.
          */
-        GlobalLock(OperationContext* opCtx, LockMode lockMode);
+        GlobalLock(OperationContext* opCtx, LockMode lockMode)
+            : GlobalLock(opCtx, lockMode, Date_t::max(), InterruptBehavior::kThrow) {}
+
         /**
          * A GlobalLock with a deadline requires the interrupt behavior to be explicitly defined.
          */
@@ -201,6 +203,7 @@ public:
                    LockMode lockMode,
                    Date_t deadline,
                    InterruptBehavior behavior);
+
         GlobalLock(GlobalLock&&);
 
         /**

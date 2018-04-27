@@ -136,9 +136,6 @@ bool Lock::ResourceMutex::isAtLeastReadLocked(Locker* locker) {
     return locker->isLockHeldForMode(_rid, MODE_IS);
 }
 
-Lock::GlobalLock::GlobalLock(OperationContext* opCtx, LockMode lockMode)
-    : GlobalLock(opCtx, lockMode, Date_t::max(), InterruptBehavior::kThrow) {}
-
 Lock::GlobalLock::GlobalLock(OperationContext* opCtx,
                              LockMode lockMode,
                              Date_t deadline,
@@ -164,7 +161,7 @@ Lock::GlobalLock::GlobalLock(GlobalLock&& otherLock)
     : _opCtx(otherLock._opCtx),
       _result(otherLock._result),
       _pbwm(std::move(otherLock._pbwm)),
-      _interruptBehavior(std::move(otherLock._interruptBehavior)),
+      _interruptBehavior(otherLock._interruptBehavior),
       _isOutermostLock(otherLock._isOutermostLock) {
     // Mark as moved so the destructor doesn't invalidate the newly-constructed lock.
     otherLock._result = LOCK_INVALID;
@@ -178,6 +175,7 @@ void Lock::GlobalLock::_enqueue(LockMode lockMode, Date_t deadline) {
 
         _result = _opCtx->lockState()->lockGlobalBegin(_opCtx, lockMode, deadline);
     } catch (const ExceptionForCat<ErrorCategory::Interruption>&) {
+        // The kLeaveUnlocked behavior suppresses this exception.
         if (_interruptBehavior == InterruptBehavior::kThrow)
             throw;
     }
@@ -194,6 +192,7 @@ void Lock::GlobalLock::waitForLockUntil(Date_t deadline) {
             _pbwm.unlock();
         }
     } catch (const ExceptionForCat<ErrorCategory::Interruption>&) {
+        // The kLeaveUnlocked behavior suppresses this exception.
         if (_interruptBehavior == InterruptBehavior::kThrow)
             throw;
     }

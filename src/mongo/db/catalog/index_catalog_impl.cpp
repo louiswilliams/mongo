@@ -46,6 +46,7 @@
 #include "mongo/db/catalog/index_key_validate.h"
 #include "mongo/db/client.h"
 #include "mongo/db/clientcursor.h"
+#include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/curop.h"
 #include "mongo/db/field_ref.h"
 #include "mongo/db/index/index_access_method.h"
@@ -934,7 +935,16 @@ void IndexCatalogImpl::dropAllIndexes(OperationContext* opCtx,
         LOG(1) << "\t dropAllIndexes dropping: " << desc->toString();
         IndexCatalogEntry* entry = _entries.find(desc);
         invariant(entry);
-        _dropIndex(opCtx, entry).transitional_ignore();
+
+        writeConflictRetry(opCtx, "dropAllIndexes", _collection->ns().db(), [=] {
+            WriteUnitOfWork wunit(opCtx);
+
+            _dropIndex(opCtx, entry).transitional_ignore();
+            opCtx->getServiceContext()->getOpObserver()->onDropIndex(
+                opCtx, _collection->ns(), _collection->uuid(), desc->indexName(), desc->infoObj());
+
+            wunit.commit();
+        });
 
         if (droppedIndexes != nullptr) {
             droppedIndexes->emplace(desc->indexName(), desc->infoObj());
@@ -978,7 +988,18 @@ Status IndexCatalogImpl::dropIndex(OperationContext* opCtx, IndexDescriptor* des
 
     BackgroundOperation::assertNoBgOpInProgForNs(_collection->ns().ns());
 
-    return _dropIndex(opCtx, entry);
+    return writeConflictRetry(opCtx, "dropIndex", _collection->ns().db(), [=] {
+        WriteUnitOfWork wunit(opCtx);
+
+        Status status = _dropIndex(opCtx, entry);
+        if (!status.isOK())
+            return status;
+
+        opCtx->getServiceContext()->getOpObserver()->onDropIndex(
+            opCtx, _collection->ns(), _collection->uuid(), desc->indexName(), desc->infoObj());
+        wunit.commit();
+        return Status::OK();
+    });
 }
 
 namespace {

@@ -63,12 +63,6 @@ Status wrappedRun(OperationContext* opCtx,
             std::map<std::string, BSONObj> droppedIndexes;
             indexCatalog->dropAllIndexes(opCtx, false, &droppedIndexes);
 
-            // We log one op for every dropped index so that we can roll them back if necessary.
-            for (auto const& idx : droppedIndexes) {
-                opCtx->getServiceContext()->getOpObserver()->onDropIndex(
-                    opCtx, collection->ns(), collection->uuid(), idx.first, idx.second);
-            }
-
             anObjBuilder->append("msg", "non-_id indexes dropped for collection");
             return Status::OK();
         }
@@ -88,9 +82,6 @@ Status wrappedRun(OperationContext* opCtx,
         if (!s.isOK()) {
             return s;
         }
-
-        opCtx->getServiceContext()->getOpObserver()->onDropIndex(
-            opCtx, collection->ns(), collection->uuid(), desc->indexName(), desc->infoObj());
 
         return Status::OK();
     }
@@ -133,9 +124,6 @@ Status wrappedRun(OperationContext* opCtx,
             return s;
         }
 
-        opCtx->getServiceContext()->getOpObserver()->onDropIndex(
-            opCtx, collection->ns(), collection->uuid(), desc->indexName(), desc->infoObj());
-
         return Status::OK();
     }
 
@@ -148,47 +136,41 @@ Status dropIndexes(OperationContext* opCtx,
                    const NamespaceString& nss,
                    const BSONObj& idxDescriptor,
                    BSONObjBuilder* result) {
-    return writeConflictRetry(
-        opCtx, "dropIndexes", nss.db(), [opCtx, &nss, &idxDescriptor, result] {
-            AutoGetDb autoDb(opCtx, nss.db(), MODE_X);
+    AutoGetDb autoDb(opCtx, nss.db(), MODE_X);
 
-            bool userInitiatedWritesAndNotPrimary = opCtx->writesAreReplicated() &&
-                !repl::ReplicationCoordinator::get(opCtx)->canAcceptWritesFor(opCtx, nss);
+    bool userInitiatedWritesAndNotPrimary = opCtx->writesAreReplicated() &&
+        !repl::ReplicationCoordinator::get(opCtx)->canAcceptWritesFor(opCtx, nss);
 
-            if (userInitiatedWritesAndNotPrimary) {
-                return Status(ErrorCodes::NotMaster,
-                              str::stream() << "Not primary while dropping indexes in "
-                                            << nss.ns());
-            }
+    if (userInitiatedWritesAndNotPrimary) {
+        return Status(ErrorCodes::NotMaster,
+                      str::stream() << "Not primary while dropping indexes in " << nss.ns());
+    }
 
-            if (!serverGlobalParams.quiet.load()) {
-                LOG(0) << "CMD: dropIndexes " << nss;
-            }
+    if (!serverGlobalParams.quiet.load()) {
+        LOG(0) << "CMD: dropIndexes " << nss;
+    }
 
-            // If db/collection does not exist, short circuit and return.
-            Database* db = autoDb.getDb();
-            Collection* collection = db ? db->getCollection(opCtx, nss) : nullptr;
-            if (!db || !collection) {
-                if (db && db->getViewCatalog()->lookup(opCtx, nss.ns())) {
-                    return Status(ErrorCodes::CommandNotSupportedOnView,
-                                  str::stream() << "Cannot drop indexes on view " << nss.ns());
-                }
+    // If db/collection does not exist, short circuit and return.
+    Database* db = autoDb.getDb();
+    Collection* collection = db ? db->getCollection(opCtx, nss) : nullptr;
+    if (!db || !collection) {
+        if (db && db->getViewCatalog()->lookup(opCtx, nss.ns())) {
+            return Status(ErrorCodes::CommandNotSupportedOnView,
+                          str::stream() << "Cannot drop indexes on view " << nss.ns());
+        }
 
-                return Status(ErrorCodes::NamespaceNotFound, "ns not found");
-            }
+        return Status(ErrorCodes::NamespaceNotFound, "ns not found");
+    }
 
-            WriteUnitOfWork wunit(opCtx);
-            OldClientContext ctx(opCtx, nss.ns());
-            BackgroundOperation::assertNoBgOpInProgForNs(nss);
+    OldClientContext ctx(opCtx, nss.ns());
+    BackgroundOperation::assertNoBgOpInProgForNs(nss);
 
-            Status status = wrappedRun(opCtx, collection, idxDescriptor, result);
-            if (!status.isOK()) {
-                return status;
-            }
+    Status status = wrappedRun(opCtx, collection, idxDescriptor, result);
+    if (!status.isOK()) {
+        return status;
+    }
 
-            wunit.commit();
-            return Status::OK();
-        });
+    return Status::OK();
 }
 
 }  // namespace mongo

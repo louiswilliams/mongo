@@ -936,15 +936,18 @@ void IndexCatalogImpl::dropAllIndexes(OperationContext* opCtx,
         IndexCatalogEntry* entry = _entries.find(desc);
         invariant(entry);
 
-        writeConflictRetry(opCtx, "dropAllIndexes", _collection->ns().db(), [=] {
-            WriteUnitOfWork wunit(opCtx);
+        writeConflictRetry(
+            opCtx, "dropAllIndexes", _collection->ns().db(), [this, opCtx, entry, desc] {
+                WriteUnitOfWork wunit(opCtx);
 
-            _dropIndex(opCtx, entry).transitional_ignore();
-            opCtx->getServiceContext()->getOpObserver()->onDropIndex(
-                opCtx, _collection->ns(), _collection->uuid(), desc->indexName(), desc->infoObj());
-
-            wunit.commit();
-        });
+                _dropIndex(opCtx, entry).transitional_ignore();
+                opCtx->getServiceContext()->getOpObserver()->onDropIndex(opCtx,
+                                                                         _collection->ns(),
+                                                                         _collection->uuid(),
+                                                                         desc->indexName(),
+                                                                         desc->infoObj());
+                wunit.commit();
+            });
 
         if (droppedIndexes != nullptr) {
             droppedIndexes->emplace(desc->indexName(), desc->infoObj());

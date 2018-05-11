@@ -938,12 +938,14 @@ void IndexCatalogImpl::dropAllIndexes(OperationContext* opCtx, bool includingIdI
             opCtx, "dropAllIndexes", _collection->ns().db(), [this, opCtx, entry, desc] {
                 WriteUnitOfWork wunit(opCtx);
 
-                _dropIndex(opCtx, entry).transitional_ignore();
                 opCtx->getServiceContext()->getOpObserver()->onDropIndex(opCtx,
                                                                          _collection->ns(),
                                                                          _collection->uuid(),
                                                                          desc->indexName(),
                                                                          desc->infoObj());
+                // Drop the index after the logOp so that it gets timestamped at the same time, and
+                // so that this WriteUnitOfWork can be nested.
+                _dropIndex(opCtx, entry).transitional_ignore();
                 wunit.commit();
             });
     }

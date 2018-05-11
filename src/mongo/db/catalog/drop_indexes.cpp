@@ -135,41 +135,47 @@ Status dropIndexes(OperationContext* opCtx,
                    const NamespaceString& nss,
                    const BSONObj& idxDescriptor,
                    BSONObjBuilder* result) {
-    AutoGetDb autoDb(opCtx, nss.db(), MODE_X);
+    return writeConflictRetry(
+        opCtx, "dropIndexes", nss.db(), [opCtx, &nss, &idxDescriptor, result] {
+            AutoGetDb autoDb(opCtx, nss.db(), MODE_X);
 
-    bool userInitiatedWritesAndNotPrimary = opCtx->writesAreReplicated() &&
-        !repl::ReplicationCoordinator::get(opCtx)->canAcceptWritesFor(opCtx, nss);
+            bool userInitiatedWritesAndNotPrimary = opCtx->writesAreReplicated() &&
+                !repl::ReplicationCoordinator::get(opCtx)->canAcceptWritesFor(opCtx, nss);
 
-    if (userInitiatedWritesAndNotPrimary) {
-        return Status(ErrorCodes::NotMaster,
-                      str::stream() << "Not primary while dropping indexes in " << nss.ns());
-    }
+            if (userInitiatedWritesAndNotPrimary) {
+                return Status(ErrorCodes::NotMaster,
+                              str::stream() << "Not primary while dropping indexes in "
+                                            << nss.ns());
+            }
 
-    if (!serverGlobalParams.quiet.load()) {
-        LOG(0) << "CMD: dropIndexes " << nss;
-    }
+            if (!serverGlobalParams.quiet.load()) {
+                LOG(0) << "CMD: dropIndexes " << nss;
+            }
 
-    // If db/collection does not exist, short circuit and return.
-    Database* db = autoDb.getDb();
-    Collection* collection = db ? db->getCollection(opCtx, nss) : nullptr;
-    if (!db || !collection) {
-        if (db && db->getViewCatalog()->lookup(opCtx, nss.ns())) {
-            return Status(ErrorCodes::CommandNotSupportedOnView,
-                          str::stream() << "Cannot drop indexes on view " << nss.ns());
-        }
+            // If db/collection does not exist, short circuit and return.
+            Database* db = autoDb.getDb();
+            Collection* collection = db ? db->getCollection(opCtx, nss) : nullptr;
+            if (!db || !collection) {
+                if (db && db->getViewCatalog()->lookup(opCtx, nss.ns())) {
+                    return Status(ErrorCodes::CommandNotSupportedOnView,
+                                  str::stream() << "Cannot drop indexes on view " << nss.ns());
+                }
 
-        return Status(ErrorCodes::NamespaceNotFound, "ns not found");
-    }
+                return Status(ErrorCodes::NamespaceNotFound, "ns not found");
+            }
 
-    OldClientContext ctx(opCtx, nss.ns());
-    BackgroundOperation::assertNoBgOpInProgForNs(nss);
+            WriteUnitOfWork wunit(opCtx);
+            OldClientContext ctx(opCtx, nss.ns());
+            BackgroundOperation::assertNoBgOpInProgForNs(nss);
 
-    Status status = wrappedRun(opCtx, collection, idxDescriptor, result);
-    if (!status.isOK()) {
-        return status;
-    }
+            Status status = wrappedRun(opCtx, collection, idxDescriptor, result);
+            if (!status.isOK()) {
+                return status;
+            }
 
-    return Status::OK();
+            wunit.commit();
+            return Status::OK();
+        });
 }
 
 }  // namespace mongo

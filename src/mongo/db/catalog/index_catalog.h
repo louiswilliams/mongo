@@ -207,9 +207,7 @@ public:
         virtual StatusWith<BSONObj> prepareSpecForCreate(OperationContext* opCtx,
                                                          const BSONObj& original) const = 0;
 
-        virtual void dropAllIndexes(OperationContext* opCtx,
-                                    bool includingIdIndex,
-                                    std::map<std::string, BSONObj>* droppedIndexes) = 0;
+        virtual void dropAllIndexes(OperationContext* opCtx, bool includingIdIndex) = 0;
 
         virtual Status dropIndex(OperationContext* opCtx, IndexDescriptor* desc) = 0;
 
@@ -448,13 +446,10 @@ public:
 
     /**
      * Drops all indexes in the index catalog, optionally dropping the id index depending on the
-     * 'includingIdIndex' parameter value. If the 'droppedIndexes' parameter is not null,
-     * it is filled with the names and index info of the dropped indexes.
+     * 'includingIdIndex' parameter value.
      */
-    inline void dropAllIndexes(OperationContext* const opCtx,
-                               const bool includingIdIndex,
-                               std::map<std::string, BSONObj>* const droppedIndexes = nullptr) {
-        this->_impl().dropAllIndexes(opCtx, includingIdIndex, droppedIndexes);
+    inline void dropAllIndexes(OperationContext* const opCtx, const bool includingIdIndex) {
+        this->_impl().dropAllIndexes(opCtx, includingIdIndex);
     }
 
     inline Status dropIndex(OperationContext* const opCtx, IndexDescriptor* const desc) {

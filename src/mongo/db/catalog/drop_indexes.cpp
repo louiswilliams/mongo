@@ -60,8 +60,7 @@ Status wrappedRun(OperationContext* opCtx,
         std::string indexToDelete = f.valuestr();
 
         if (indexToDelete == "*") {
-            std::map<std::string, BSONObj> droppedIndexes;
-            indexCatalog->dropAllIndexes(opCtx, false, &droppedIndexes);
+            indexCatalog->dropAllIndexes(opCtx, false);
 
             anObjBuilder->append("msg", "non-_id indexes dropped for collection");
             return Status::OK();

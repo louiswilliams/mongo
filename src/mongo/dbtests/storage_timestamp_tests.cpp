@@ -214,6 +214,36 @@ public:
         ASSERT_OK(coll->insertDocument(_opCtx, stmt, nullOpDebug, enforceQuota, fromMigrate));
     }
 
+    void createIndex(Collection* coll, std::string indexName, const BSONObj& indexKey) {
+
+        // Build an index.
+        MultiIndexBlock indexer(_opCtx, coll);
+        BSONObj indexInfoObj;
+        {
+            auto swIndexInfoObj = indexer.init({BSON(
+                "v" << 2 << "name" << indexName << "ns" << coll->ns().ns() << "key" << indexKey)});
+            ASSERT_OK(swIndexInfoObj.getStatus());
+            indexInfoObj = std::move(swIndexInfoObj.getValue()[0]);
+        }
+
+        // Inserting all the documents has the side-effect of setting internal state on the index
+        // builder that the index is multikey.
+        ASSERT_OK(indexer.insertAllDocumentsInCollection());
+
+        {
+            WriteUnitOfWork wuow(_opCtx);
+            // All callers of `MultiIndexBlock::commit` are responsible for timestamping index
+            // completion.  Primaries write an oplog entry. Secondaries explicitly set a
+            // timestamp.
+            indexer.commit();
+            // The op observer is not called from the index builder, but rather the
+            // `createIndexes` command.
+            _opCtx->getServiceContext()->getOpObserver()->onCreateIndex(
+                _opCtx, coll->ns(), coll->uuid(), indexInfoObj, false);
+            wuow.commit();
+        }
+    }
+
     std::int32_t itCount(Collection* coll) {
         std::uint64_t ret = 0;
         auto cursor = coll->getRecordStore()->getCursor(_opCtx);
@@ -1834,6 +1864,64 @@ public:
     }
 };
 
+class TimestampIndexDrops : public StorageTimestampTest {
+public:
+    void run() {
+        // Only run on 'wiredTiger'. No other storage engines to-date support timestamp writes.
+        if (mongo::storageGlobalParams.engine != "wiredTiger") {
+            return;
+        }
+        auto kvStorageEngine =
+            dynamic_cast<KVStorageEngine*>(_opCtx->getServiceContext()->getStorageEngine());
+        KVCatalog* kvCatalog = kvStorageEngine->getCatalog();
+
+        NamespaceString nss("unittests.timestampIndexDrops");
+        reset(nss);
+
+        AutoGetCollection autoColl(_opCtx, nss, LockMode::MODE_X, LockMode::MODE_X);
+
+        const LogicalTime insertTimestamp = _clock->reserveTicks(1);
+        {
+            WriteUnitOfWork wuow(_opCtx);
+            insertDocument(autoColl.getCollection(),
+                           InsertStatement(BSON("_id" << 0 << "a" << BSON_ARRAY(1 << 2)),
+                                           insertTimestamp.asTimestamp(),
+                                           0LL));
+            wuow.commit();
+            ASSERT_EQ(1, itCount(autoColl.getCollection()));
+        }
+
+        // Save the pre-state idents so we can capture the specific ident related to index
+        // creation.
+
+        const Timestamp beforeIndexBuild = _clock->reserveTicks(1).asTimestamp();
+
+        std::vector<std::string> origIdents = kvCatalog->getAllIdents(_opCtx);
+
+        std::vector<Timestamp> afterCreateTimestamps;
+        std::vector<std::string> indexIdents;
+        for (auto key : {"a", "b", "c"}) {
+            createIndex(autoColl.getCollection(), str::stream() << key << "_1", BSON(key << 1));
+
+            // Timestamps at the completion of each index build.
+            afterCreateTimestamps.push_back(_clock->reserveTicks(1).asTimestamp());
+
+            // Add the new ident to the vector and reset the current idents.
+            indexIdents.push_back(getNewIndexIdent(kvCatalog, origIdents));
+            origIdents = kvCatalog->getAllIdents(_opCtx);
+        }
+
+        assertIdentsMissingAtTimestamp(kvCatalog, "", indexIdents[0], beforeIndexBuild);
+        for (size_t i = 0; i < indexIdents.size(); i++) {
+            assertIdentsExistAtTimestamp(kvCatalog, "", indexIdents[i], afterCreateTimestamps[i]);
+            if (i > 0) {
+                assertIdentsMissingAtTimestamp(
+                    kvCatalog, "", indexIdents[i], afterCreateTimestamps[i - 1]);
+            }
+        }
+    }
+};
+
 class SecondaryReadsDuringBatchApplicationAreAllowed : public StorageTimestampTest {
 public:
     void run() {
@@ -2069,6 +2157,7 @@ public:
         // TimestampIndexBuilds<SimulatePrimary>
         add<TimestampIndexBuilds<false>>();
         add<TimestampIndexBuilds<true>>();
+        add<TimestampIndexDrops>();
         // TimestampIndexBuilderOnPrimary<Background>
         add<TimestampIndexBuilderOnPrimary<false>>();
         add<TimestampIndexBuilderOnPrimary<true>>();

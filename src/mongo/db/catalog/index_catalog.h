@@ -449,7 +449,8 @@ public:
 
     /**
      * Drops all indexes in the index catalog, optionally dropping the id index depending on the
-     * 'includingIdIndex' parameter value.
+     * 'includingIdIndex' parameter value. If 'onDropFn' is provided, it will be called before each
+     * index is dropped to allow timestamping each individual drop.
      */
     inline void dropAllIndexes(OperationContext* opCtx,
                                bool includingIdIndex,

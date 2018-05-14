@@ -893,7 +893,9 @@ BSONObj IndexCatalogImpl::getDefaultIdIndexSpec() const {
     return b.obj();
 }
 
-void IndexCatalogImpl::dropAllIndexes(OperationContext* opCtx, bool includingIdIndex) {
+void IndexCatalogImpl::dropAllIndexes(OperationContext* opCtx,
+                                      bool includingIdIndex,
+                                      stdx::function<void(const IndexDescriptor*)> onDropFn) {
     invariant(opCtx->lockState()->isCollectionLockedForMode(_collection->ns().toString(), MODE_X));
 
     BackgroundOperation::assertNoBgOpInProgForNs(_collection->ns().ns());
@@ -934,20 +936,12 @@ void IndexCatalogImpl::dropAllIndexes(OperationContext* opCtx, bool includingIdI
         IndexCatalogEntry* entry = _entries.find(desc);
         invariant(entry);
 
-        writeConflictRetry(
-            opCtx, "dropAllIndexes", _collection->ns().db(), [this, opCtx, entry, desc] {
-                WriteUnitOfWork wunit(opCtx);
-
-                opCtx->getServiceContext()->getOpObserver()->onDropIndex(opCtx,
-                                                                         _collection->ns(),
-                                                                         _collection->uuid(),
-                                                                         desc->indexName(),
-                                                                         desc->infoObj());
-                // Drop the index after the logOp so that it gets timestamped at the same time, and
-                // so that this WriteUnitOfWork can be nested.
-                _dropIndex(opCtx, entry).transitional_ignore();
-                wunit.commit();
-            });
+        // If the onDrop function creates an oplog entry, it should run first so that the drop is
+        // timestamped at the same optime.
+        if (onDropFn) {
+            onDropFn(desc);
+        }
+        _dropIndex(opCtx, entry).transitional_ignore();
     }
 
     // verify state is sane post cleaning
@@ -987,18 +981,7 @@ Status IndexCatalogImpl::dropIndex(OperationContext* opCtx, IndexDescriptor* des
 
     BackgroundOperation::assertNoBgOpInProgForNs(_collection->ns().ns());
 
-    return writeConflictRetry(opCtx, "dropIndex", _collection->ns().db(), [=] {
-        WriteUnitOfWork wunit(opCtx);
-
-        Status status = _dropIndex(opCtx, entry);
-        if (!status.isOK())
-            return status;
-
-        opCtx->getServiceContext()->getOpObserver()->onDropIndex(
-            opCtx, _collection->ns(), _collection->uuid(), desc->indexName(), desc->infoObj());
-        wunit.commit();
-        return Status::OK();
-    });
+    return _dropIndex(opCtx, entry);
 }
 
 namespace {

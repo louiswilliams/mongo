@@ -227,7 +227,9 @@ public:
      * 'includingIdIndex' parameter value. If the 'droppedIndexes' parameter is not null,
      * it is filled with the names and index info of the dropped indexes.
      */
-    void dropAllIndexes(OperationContext* opCtx, bool includingIdIndex) override;
+    void dropAllIndexes(OperationContext* opCtx,
+                        bool includingIdIndex,
+                        stdx::function<void(const IndexDescriptor*)> onDropFn = nullptr) override;
 
     Status dropIndex(OperationContext* opCtx, IndexDescriptor* desc) override;
 

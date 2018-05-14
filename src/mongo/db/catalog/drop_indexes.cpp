@@ -60,7 +60,15 @@ Status wrappedRun(OperationContext* opCtx,
         std::string indexToDelete = f.valuestr();
 
         if (indexToDelete == "*") {
-            indexCatalog->dropAllIndexes(opCtx, false);
+            indexCatalog->dropAllIndexes(
+                opCtx, false, [opCtx, collection](const IndexDescriptor* desc) {
+                    opCtx->getServiceContext()->getOpObserver()->onDropIndex(opCtx,
+                                                                             collection->ns(),
+                                                                             collection->uuid(),
+                                                                             desc->indexName(),
+                                                                             desc->infoObj());
+
+                });
 
             anObjBuilder->append("msg", "non-_id indexes dropped for collection");
             return Status::OK();
@@ -81,6 +89,9 @@ Status wrappedRun(OperationContext* opCtx,
         if (!s.isOK()) {
             return s;
         }
+
+        opCtx->getServiceContext()->getOpObserver()->onDropIndex(
+            opCtx, collection->ns(), collection->uuid(), desc->indexName(), desc->infoObj());
 
         return Status::OK();
     }
@@ -122,6 +133,9 @@ Status wrappedRun(OperationContext* opCtx,
         if (!s.isOK()) {
             return s;
         }
+
+        opCtx->getServiceContext()->getOpObserver()->onDropIndex(
+            opCtx, collection->ns(), collection->uuid(), desc->indexName(), desc->infoObj());
 
         return Status::OK();
     }

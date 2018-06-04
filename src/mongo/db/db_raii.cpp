@@ -87,8 +87,6 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                                                    const NamespaceStringOrUUID& nsOrUUID,
                                                    AutoGetCollection::ViewMode viewMode,
                                                    Date_t deadline) {
-    bool optedOutOfPbwmLock = !opCtx->lockState()->shouldConflictWithSecondaryBatchApplication();
-
     // Don't take the ParallelBatchWriterMode lock when the server parameter is set and our
     // storage engine supports snapshot reads.
     if (allowSecondaryReadsDuringBatchApplication.load() &&
@@ -101,11 +99,10 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
     repl::ReplicationCoordinator* const replCoord = repl::ReplicationCoordinator::get(opCtx);
     const auto readConcernLevel = repl::ReadConcernArgs::get(opCtx).getLevel();
 
-    // Readers that opted-out of the PBWM lock before entering this function are either using
-    // unenforced nesting of AutoGetCollectionForRead or are implicitly willing to read without a
-    // timestamp, like internal operations such as rollback.
-    if (optedOutOfPbwmLock && readConcernLevel == repl::ReadConcernLevel::kLocalReadConcern)
+    if (opCtx->recoveryUnit()->getTimestampReadSource() == RecoveryUnit::ReadSource::kNoTimestamp) {
+        log() << "reading without a timestamp";
         return;
+    }
 
     // If the collection doesn't exist or disappears after releasing locks and waiting, there is no
     // need to check for pending catalog changes.
@@ -165,7 +162,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
                    << " on nss: " << nss.ns() << ", but future catalog changes are pending at time "
                    << *minSnapshot << ". Trying again without reading at last-applied time.";
             _shouldNotConflictWithSecondaryBatchApplicationBlock = boost::none;
-            opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kNone);
+            opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kUnset);
         }
 
         if (readSource == RecoveryUnit::ReadSource::kMajorityCommitted) {

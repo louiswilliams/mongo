@@ -21,55 +21,6 @@ var $config = (function() {
         getRandomView: function(viewList) {
             return viewList[Random.randInt(viewList.length)];
         },
-        getRandomViewPipeline: function() {
-            const lookupViewNs1 = this.getRandomView(this.viewList);
-            const lookupViewNs2 = this.getRandomView(this.viewList);
-            const index = 3;
-            switch (index) {
-                case 0:
-                    return [{
-                        $lookup: {
-                            from: lookupViewNs1,
-                            localField: 'a',
-                            foreignField: 'b',
-                            as: 'result1'
-                        }
-                    }];
-                case 1:
-                    return [{
-                        $lookup: {
-                            from: lookupViewNs1,
-                            let : {a1: '$a'},
-                            pipeline: [
-                                {$match: {$expr: {$eq: ["$$a1", "$b"]}}},
-                                {
-                                  $lookup: {
-                                      from: lookupViewNs2,
-                                      let : {b1: '$b'},
-                                      pipeline: [{$match: {$expr: {$eq: ["$$b1", "$b"]}}}],
-                                      as: "result2Inner"
-                                  }
-                                }
-                            ],
-                            as: 'result2'
-                        }
-                    }];
-                case 2:
-                    return [{
-                        $graphLookup: {
-                            from: lookupViewNs1,
-                            startWith: '$a',
-                            connectFromField: 'a',
-                            connectToField: 'b',
-                            as: 'result3'
-                        }
-                    }];
-                case 3:
-                    return [];
-                default:
-                    assertAlways(false, "Invalid index: " + index);
-            }
-        },
     };
 
     var states = (function() {
@@ -80,10 +31,18 @@ var $config = (function() {
          */
         function remapViewToView(db, collName) {
             const fromName = this.getRandomView(this.viewList);
-            const toName = this.getRandomView(this.viewList);
-            const res = db.runCommand(
-                {collMod: fromName, viewOn: toName, pipeline: this.getRandomViewPipeline()});
+            let toName;
+            while (true) {
+                toName = this.getRandomView(this.viewList);
+                if (toName !== fromName) {
+                    break;
+                }
+            }
+            const res = db.runCommand({collMod: fromName, viewOn: toName, pipeline: []});
             assertAlways(res.ok === 1 || res.code === ErrorCodes.GraphContainsCycle, tojson(res));
+            if (res.ok === 1) {
+                jsTestLog("point " + fromName + " to " + toName);
+            }
         }
 
         /**
@@ -93,8 +52,7 @@ var $config = (function() {
          */
         function remapViewToCollection(db, collName) {
             const fromName = this.getRandomView(this.viewList);
-            const res = db.runCommand(
-                {collMod: fromName, viewOn: collName, pipeline: this.getRandomViewPipeline()});
+            const res = db.runCommand({collMod: fromName, viewOn: collName, pipeline: []});
             assertAlways(res.ok === 1 || res.code === ErrorCodes.GraphContainsCycle, tojson(res));
         }
 
@@ -112,10 +70,10 @@ var $config = (function() {
     })();
 
     var transitions = {
-        remapViewToView: {remapViewToView: 0.50, remapViewToCollection: 0.00, readFromView: 0.50},
+        remapViewToView: {remapViewToView: 0.00, remapViewToCollection: 0.00, readFromView: 1.00},
         remapViewToCollection:
             {remapViewToView: 0.40, remapViewToCollection: 0.10, readFromView: 0.50},
-        readFromView: {remapViewToView: 0.50, remapViewToCollection: 0.00, readFromView: 0.50},
+        readFromView: {remapViewToView: 1.00, remapViewToCollection: 0.00, readFromView: 0.00},
     };
 
     function setup(db, collName, cluster) {

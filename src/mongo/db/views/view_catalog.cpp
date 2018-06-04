@@ -74,10 +74,9 @@ Status ViewCatalog::reloadIfNeeded(OperationContext* opCtx) {
 }
 
 Status ViewCatalog::_reloadIfNeeded_inlock(OperationContext* opCtx) {
-    if (_valid.load())
+    if (_valid.load()) {
         return Status::OK();
-
-    LOG(1) << "reloading view catalog for database " << _durable->getName();
+    }
 
     // Need to reload, first clear our cache.
     _viewMap.clear();

@@ -40,6 +40,7 @@
 #include "mongo/db/server_parameters.h"
 #include "mongo/db/session_catalog.h"
 #include "mongo/util/log.h"
+#include "mongo/util/stacktrace.h"
 
 namespace mongo {
 namespace {
@@ -91,8 +92,11 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
     // storage engine supports snapshot reads.
     if (allowSecondaryReadsDuringBatchApplication.load() &&
         opCtx->getServiceContext()->getStorageEngine()->supportsReadConcernSnapshot()) {
-        _shouldNotConflictWithSecondaryBatchApplicationBlock.emplace(opCtx->lockState());
+        _shouldConflictWithSecondaryBatchApplicationBlock.emplace(opCtx->lockState(), false);
+    } else {
+        _shouldConflictWithSecondaryBatchApplicationBlock.emplace(opCtx->lockState(), true);
     }
+
     const auto collectionLockMode = getLockModeForQuery(opCtx);
     _autoColl.emplace(opCtx, nsOrUUID, collectionLockMode, viewMode, deadline);
 
@@ -100,7 +104,6 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
     const auto readConcernLevel = repl::ReadConcernArgs::get(opCtx).getLevel();
 
     if (opCtx->recoveryUnit()->getTimestampReadSource() == RecoveryUnit::ReadSource::kNoTimestamp) {
-        log() << "reading without a timestamp";
         return;
     }
 
@@ -111,7 +114,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // During batch application on secondaries, there is a potential to read inconsistent states
         // that would normally be protected by the PBWM lock. In order to serve secondary reads
         // during this period, we default to not acquiring the lock (by setting
-        // _shouldNotConflictWithSecondaryBatchApplicationBlock). On primaries, we always read at a
+        // _shouldConflictWithSecondaryBatchApplicationBlock). On primaries, we always read at a
         // consistent time, so not taking the PBWM lock is not a problem. On secondaries, we have to
         // guarantee we read at a consistent state, so we must read at the last applied timestamp,
         // which is set after each complete batch.
@@ -119,7 +122,7 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // If an attempt to read at the last applied timestamp is unsuccessful because there are
         // pending catalog changes that occur after the last applied timestamp, we release our locks
         // and try again with the PBWM lock (by unsetting
-        // _shouldNotConflictWithSecondaryBatchApplicationBlock).
+        // _shouldConflictWithSecondaryBatchApplicationBlock).
 
         const NamespaceString& nss = coll->ns();
 
@@ -152,16 +155,16 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
 
         // If there are pending catalog changes, we should conflict with any in-progress batches (by
         // taking the PBWM lock) and choose not to read from the last applied timestamp by unsetting
-        // _shouldNotConflictWithSecondaryBatchApplicationBlock. Index builds on secondaries can
+        // _shouldConflictWithSecondaryBatchApplicationBlock. Index builds on secondaries can
         // complete at timestamps later than the lastAppliedTimestamp during initial sync. After
         // initial sync finishes, if we waited instead of retrying, readers would block indefinitely
         // waiting for the lastAppliedTimestamp to move forward. Instead we force the reader take
         // the PBWM lock and retry.
         if (lastAppliedTimestamp) {
-            LOG(2) << "Tried reading at last-applied time: " << *lastAppliedTimestamp
+            LOG(0) << "Tried reading at last-applied time: " << *lastAppliedTimestamp
                    << " on nss: " << nss.ns() << ", but future catalog changes are pending at time "
                    << *minSnapshot << ". Trying again without reading at last-applied time.";
-            _shouldNotConflictWithSecondaryBatchApplicationBlock = boost::none;
+            _shouldConflictWithSecondaryBatchApplicationBlock.emplace(opCtx->lockState(), true);
             opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kUnset);
         }
 
@@ -185,7 +188,8 @@ bool AutoGetCollectionForRead::_shouldReadAtLastAppliedTimestamp(
     repl::ReadConcernLevel readConcernLevel) const {
 
     // If external circumstances prevent us from reading at lastApplied, disallow it.
-    if (!_shouldNotConflictWithSecondaryBatchApplicationBlock) {
+    if (_shouldConflictWithSecondaryBatchApplicationBlock->shouldConflict()) {
+        log() << "should conflict with secondary batch application";
         return false;
     }
 

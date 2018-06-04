@@ -498,22 +498,30 @@ private:
 /**
  * RAII-style class to opt out of replication's use of ParallelBatchWriterMode.
  */
-class ShouldNotConflictWithSecondaryBatchApplicationBlock {
-    MONGO_DISALLOW_COPYING(ShouldNotConflictWithSecondaryBatchApplicationBlock);
+class ShouldConflictWithSecondaryBatchApplicationBlock {
+    MONGO_DISALLOW_COPYING(ShouldConflictWithSecondaryBatchApplicationBlock);
 
 public:
-    explicit ShouldNotConflictWithSecondaryBatchApplicationBlock(Locker* lockState)
+    explicit ShouldConflictWithSecondaryBatchApplicationBlock(Locker* lockState,
+                                                              bool shouldConflict)
         : _lockState(lockState),
+          _shouldConflict(shouldConflict),
           _originalShouldConflict(_lockState->shouldConflictWithSecondaryBatchApplication()) {
-        _lockState->setShouldConflictWithSecondaryBatchApplication(false);
+        _lockState->setShouldConflictWithSecondaryBatchApplication(shouldConflict);
     }
 
-    ~ShouldNotConflictWithSecondaryBatchApplicationBlock() {
+    ~ShouldConflictWithSecondaryBatchApplicationBlock() {
         _lockState->setShouldConflictWithSecondaryBatchApplication(_originalShouldConflict);
     }
 
+    bool shouldConflict() const {
+        return _shouldConflict;
+    }
+
+
 private:
     Locker* const _lockState;
+    const bool _shouldConflict;
     const bool _originalShouldConflict;
 };
 

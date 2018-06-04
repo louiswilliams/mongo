@@ -420,8 +420,7 @@ void scheduleWritesToOplog(OperationContext* opCtx,
         return [storageInterface, &ops, begin, end] {
             auto opCtx = cc().makeOperationContext();
             UnreplicatedWritesBlock uwb(opCtx.get());
-            ShouldNotConflictWithSecondaryBatchApplicationBlock shouldNotConflictBlock(
-                opCtx->lockState());
+            ShouldConflictWithSecondaryBatchApplicationBlock noConflict(opCtx->lockState(), false);
 
             std::vector<InsertStatement> docs;
             docs.reserve(end - begin);
@@ -1166,7 +1165,7 @@ Status multiSyncApply(OperationContext* opCtx,
 
     UnreplicatedWritesBlock uwb(opCtx);
     DisableDocumentValidation validationDisabler(opCtx);
-    ShouldNotConflictWithSecondaryBatchApplicationBlock shouldNotConflictBlock(opCtx->lockState());
+    ShouldConflictWithSecondaryBatchApplicationBlock noConflict(opCtx->lockState(), false);
 
     ApplierHelpers::stableSortByNamespace(ops);
 

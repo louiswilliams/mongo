@@ -66,7 +66,7 @@ std::tuple<BSONObj, Date_t> FTDCCollectorCollection::collect(Client* client) {
     // batches. This is desirable because we want to be able to collect data in the middle of
     // batches that are taking a long time.
     auto opCtx = client->makeOperationContext();
-    ShouldNotConflictWithSecondaryBatchApplicationBlock shouldNotConflictBlock(opCtx->lockState());
+    ShouldConflictWithSecondaryBatchApplicationBlock noConflict(opCtx->lockState(), false);
     opCtx->lockState()->setShouldAcquireTicket(false);
 
     // Explicitly start read transactions without a timestamp.

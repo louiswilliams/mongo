@@ -409,7 +409,7 @@ public:
 
     private:
         ResourceLock _pbwm;
-        ShouldNotConflictWithSecondaryBatchApplicationBlock _shouldNotConflictBlock;
+        ShouldConflictWithSecondaryBatchApplicationBlock _shouldNotConflictBlock;
     };
 };
 

@@ -39,6 +39,7 @@
 #include "mongo/db/catalog/database_holder.h"
 #include "mongo/db/concurrency/d_concurrency.h"
 #include "mongo/db/curop.h"
+#include "mongo/db/db_raii.h"
 #include "mongo/db/dbhelpers.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/operation_context.h"
@@ -55,10 +56,14 @@ namespace mongo {
 void DurableViewCatalog::onExternalChange(OperationContext* opCtx, const NamespaceString& name) {
     dassert(opCtx->lockState()->isDbLockedForMode(name.db(), MODE_IX));
     Database* db = DatabaseHolder::getDatabaseHolder().get(opCtx, name.db());
+    Collection* systemViews = db->getCollection(opCtx, db->getSystemViewsName());
 
     if (db) {
-        opCtx->recoveryUnit()->onCommit(
-            [db](boost::optional<Timestamp>) { db->getViewCatalog()->invalidate(); });
+        opCtx->recoveryUnit()->onCommit([db, systemViews](boost::optional<Timestamp> commitTime) {
+            db->getViewCatalog()->invalidate();
+            invariant(commitTime);
+            systemViews->setMinimumVisibleSnapshot(commitTime.get());
+        });
     }
 }
 
@@ -71,7 +76,13 @@ const std::string& DurableViewCatalogImpl::getName() const {
 Status DurableViewCatalogImpl::iterate(OperationContext* opCtx, Callback callback) {
     dassert(opCtx->lockState()->isDbLockedForMode(_db->name(), MODE_IS) ||
             opCtx->lockState()->isDbLockedForMode(_db->name(), MODE_IX));
-    Collection* systemViews = _db->getCollection(opCtx, _db->getSystemViewsName());
+
+    // Use AutoGetCollectionForRead to read at the batch boundary if it's on the
+    // secondary.
+    AutoGetCollectionForRead autoColl(opCtx, NamespaceString(_db->getSystemViewsName()));
+    Collection* systemViews = autoColl.getCollection();
+    // Collection* systemViews = _db->getCollection(opCtx, _db->getSystemViewsName());
+
     if (!systemViews)
         return Status::OK();
 
@@ -129,6 +140,7 @@ Status DurableViewCatalogImpl::iterate(OperationContext* opCtx, Callback callbac
             return callbackStatus;
         }
     }
+    opCtx->recoveryUnit()->abandonSnapshot();
     return Status::OK();
 }
 

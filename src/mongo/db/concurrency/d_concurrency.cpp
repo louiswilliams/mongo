@@ -317,7 +317,7 @@ void Lock::OplogIntentWriteLock::serializeIfNeeded() {
 
 Lock::ParallelBatchWriterMode::ParallelBatchWriterMode(Locker* lockState)
     : _pbwm(lockState, resourceIdParallelBatchWriterMode, MODE_X),
-      _shouldNotConflictBlock(lockState) {}
+      _shouldNotConflictBlock(lockState, false) {}
 
 void Lock::ResourceLock::lock(LockMode mode) {
     invariant(_result == LOCK_INVALID);

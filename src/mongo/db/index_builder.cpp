@@ -122,7 +122,8 @@ void IndexBuilder::run() {
     LOG(2) << "IndexBuilder building index " << _index;
 
     auto opCtx = cc().makeOperationContext();
-    ShouldNotConflictWithSecondaryBatchApplicationBlock shouldNotConflictBlock(opCtx->lockState());
+    ShouldConflictWithSecondaryBatchApplicationBlock shouldNotConflictBlock(opCtx->lockState(),
+                                                                            false);
 
     AuthorizationSession::get(opCtx->getClient())->grantInternalAuthorization();
 

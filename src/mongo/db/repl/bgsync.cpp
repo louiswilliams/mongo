@@ -591,7 +591,7 @@ void BackgroundSync::_runRollback(OperationContext* opCtx,
         return;
     }
 
-    ShouldNotConflictWithSecondaryBatchApplicationBlock noConflict(opCtx->lockState());
+    ShouldConflictWithSecondaryBatchApplicationBlock noConflict(opCtx->lockState(), false);
 
     // Explicitly start read transactions without a timestamp.
     opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kNoTimestamp);
@@ -749,7 +749,7 @@ void BackgroundSync::stop(bool resetLastFetchedOptime) {
 
 void BackgroundSync::start(OperationContext* opCtx) {
     OpTimeWithHash lastAppliedOpTimeWithHash;
-    ShouldNotConflictWithSecondaryBatchApplicationBlock noConflict(opCtx->lockState());
+    ShouldConflictWithSecondaryBatchApplicationBlock noConflict(opCtx->lockState(), false);
 
     // Explicitly start read transactions without a timestamp.
     opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kNoTimestamp);

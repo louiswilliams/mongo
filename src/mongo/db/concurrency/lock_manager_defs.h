@@ -57,7 +57,7 @@ struct PartitionedLockHead;
  * | MODE_IX        |      +       |    +    |     +    |        |          |
  * | MODE_S         |      +       |    +    |          |    +   |          |
  * | MODE_X         |      +       |         |          |        |          |
-*/
+ */
 enum LockMode {
     /** None */
     MODE_NONE = 0,
@@ -70,8 +70,10 @@ enum LockMode {
     /** Exclusive */
     MODE_X = 4,
 
-    /** Counts the lock modes. Used for array size allocations, etc. Always insert new lock modes
-       above this entry. */
+    /**
+     * Counts the lock modes. Used for array size allocations, etc. Always insert new lock modes
+     * above this entry.
+     */
     LockModesCount
 };
 

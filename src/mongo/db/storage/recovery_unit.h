@@ -105,8 +105,6 @@ public:
      * true, unless the storage engine cannot guarantee durability, which should never happen when
      * isDurable() returned true. This cannot be called from inside a unit of work, and should
      * fail if it is.
-     *
-     * @return Whether or not the storage engine can guarantee durability.
      */
     virtual bool waitUntilDurable() = 0;
 
@@ -118,8 +116,6 @@ public:
      *
      * This must not be called by a system taking user writes until after a stable timestamp is
      * passed to the storage engine.
-     *
-     * @return Whether or not the storage engine can guarantee durability.
      */
     virtual bool waitUntilUnjournaledWritesDurable() {
         return waitUntilDurable();
@@ -193,8 +189,6 @@ public:
      *
      * setTimestamp() will fail if a commit timestamp is set using setCommitTimestamp() and not
      * yet cleared with clearCommitTimestamp().
-     *
-     * @param[in] timestamp Timestamp to assign to future writes in a transaction
      */
     virtual Status setTimestamp(Timestamp timestamp) {
         return Status::OK();
@@ -204,8 +198,6 @@ public:
      * Sets a timestamp that will be assigned to all future writes on this RecoveryUnit until
      * clearCommitTimestamp() is called. This must be called outside of a WUOW and setTimestamp()
      * must not be called while a commit timestamp is set.
-     *
-     * @param[in] timestamp Timestamp to assign to future writes in a transaction
      */
     virtual void setCommitTimestamp(Timestamp timestamp) {}
 
@@ -220,8 +212,6 @@ public:
      * prepareUnitOfWork() is expected and required.
      * This cannot be called after setTimestamp or setCommitTimestamp.
      * This must be called inside a WUOW and may only be called once.
-     *
-     * @param[in] timestamp Timestamp to use when calling prepareUnitOfWork
      */
     virtual void setPrepareTimestamp(Timestamp timestamp) {
         uasserted(ErrorCodes::CommandNotSupported,
@@ -233,19 +223,31 @@ public:
      * transactions.
      */
     enum ReadSource {
-        /** Read without a timestamp. This is the default behavior. */
+        /**
+         * Do not read from a timestamp. This is the default.
+         */
         kUnset,
-        /** Read without a timestamp explicitly. */
+        /**
+         * Read without a timestamp explicitly.
+         */
         kNoTimestamp,
-        /** Read from the majority all-commmitted timestamp. */
+        /**
+         * Read from the majority all-commmitted timestamp.
+         */
         kMajorityCommitted,
-        /** Read from the last applied timestamp. New transactions start at the most up-to-date
-           timestamp. */
+        /**
+         * Read from the last applied timestamp. New transactions start at the most up-to-date
+         * timestamp.
+         */
         kLastApplied,
-        /** Read from the last applied timestamp. New transactions will always read from the same
-        timestamp and never advance. */
+        /**
+         * Read from the last applied timestamp. New transactions will always read from the same
+         * timestamp and never advance.
+         */
         kLastAppliedSnapshot,
-        /** Read from the timestamp provided to setTimestampReadSource. */
+        /**
+         * Read from the timestamp provided to setTimestampReadSource.
+         */
         kProvided
     };
 

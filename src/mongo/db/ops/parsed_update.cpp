@@ -139,7 +139,9 @@ Status ParsedUpdate::parseQueryToCQ() {
 
 void ParsedUpdate::parseUpdate() {
     _driver.setCollator(_collator.get());
-    _driver.setLogOp(true);
+    if (repl::ReplicationCoordinator::get(_opCtx)->getReplicationMode() != repl::ReplicationCoordinator::modeNone) {
+        _driver.setLogOp(true);
+    }
     _driver.setFromOplogApplication(_request->isFromOplogApplication());
 
     _driver.parse(_request->getUpdates(), _arrayFilters, _request->isMulti());

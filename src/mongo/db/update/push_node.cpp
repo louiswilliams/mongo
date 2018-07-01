@@ -200,29 +200,37 @@ ModifierNode::ModifyResult PushNode::insertElementsWithPosition(
     auto firstElementToInsert =
         document.makeElementWithNewFieldName(StringData(), valuesToPush.front());
 
-    // We assume that no array has more than std::numerical_limits<long long>::max() elements.
-    long long arraySize = static_cast<long long>(countChildren(*array));
 
     // We insert the first element of 'valuesToPush' at the location requested in the 'position'
     // variable.
     ModifyResult result;
-    if (arraySize == 0) {
-        invariant(array->pushBack(firstElementToInsert));
-        result = ModifyResult::kNormalUpdate;
-    } else if (position > arraySize) {
+
+    // If we don't need to know the array size, don't compute it.
+    if (position == std::numeric_limits<long long>::max() && array->hasChildren()) {
         invariant(array->pushBack(firstElementToInsert));
         result = ModifyResult::kArrayAppendUpdate;
-    } else if (position > 0) {
-        auto insertAfter = getNthChild(*array, position - 1);
-        invariant(insertAfter.addSiblingRight(firstElementToInsert));
-        result = ModifyResult::kNormalUpdate;
-    } else if (position < 0 && -position < arraySize) {
-        auto insertAfter = getNthChild(*array, arraySize - (-position) - 1);
-        invariant(insertAfter.addSiblingRight(firstElementToInsert));
-        result = ModifyResult::kNormalUpdate;
-    } else {
-        invariant(array->pushFront(firstElementToInsert));
-        result = ModifyResult::kNormalUpdate;
+    }
+    else {
+        // We assume that no array has more than std::numerical_limits<long long>::max() elements.
+        long long arraySize = static_cast<long long>(countChildren(*array));
+        if (arraySize == 0) {
+            invariant(array->pushBack(firstElementToInsert));
+            result = ModifyResult::kNormalUpdate;
+        } else if (position > arraySize) {
+            invariant(array->pushBack(firstElementToInsert));
+            result = ModifyResult::kArrayAppendUpdate;
+        } else if (position > 0) {
+            auto insertAfter = getNthChild(*array, position - 1);
+            invariant(insertAfter.addSiblingRight(firstElementToInsert));
+            result = ModifyResult::kNormalUpdate;
+        } else if (position < 0 && -position < arraySize) {
+            auto insertAfter = getNthChild(*array, arraySize - (-position) - 1);
+            invariant(insertAfter.addSiblingRight(firstElementToInsert));
+            result = ModifyResult::kNormalUpdate;
+        } else {
+            invariant(array->pushFront(firstElementToInsert));
+            result = ModifyResult::kNormalUpdate;
+        }
     }
 
     // We insert all the rest of the elements after the one we just inserted.
@@ -260,7 +268,12 @@ ModifierNode::ModifyResult PushNode::performPush(mutablebson::Element* element,
         sortChildren(*element, *_sort);
     }
 
-    while (static_cast<long long>(countChildren(*element)) > std::abs(_slice)) {
+    // Early return if there is no size limit, so we don't have to count children.
+    long long maxChildren = std::abs(_slice);
+    if (maxChildren == std::numeric_limits<long long>::max())
+        return result;
+
+    while (static_cast<long long>(countChildren(*element)) > maxChildren) {
         result = ModifyResult::kNormalUpdate;
         if (_slice >= 0) {
             invariant(element->popBack());

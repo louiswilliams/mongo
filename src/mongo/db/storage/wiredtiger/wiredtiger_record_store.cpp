@@ -1396,6 +1396,115 @@ Status WiredTigerRecordStore::insertRecordsWithDocWriter(OperationContext* opCtx
     return s;
 }
 
+namespace {
+const int compareBlockSize = 8;
+bool equalBlocks(const char* left, const char* right) {
+    uint64_t leftBlock;
+    uint64_t rightBlock;
+    memcpy(&leftBlock, left, sizeof(uint64_t));
+    memcpy(&rightBlock, right, sizeof(uint64_t));
+    return leftBlock == rightBlock;
+}
+
+size_t commonTailLength(WT_ITEM first, WT_ITEM second) {
+    const auto maxTailLen = std::min(first.size, second.size);
+    const auto firstEnd = static_cast<const char*>(first.data) + first.size;
+    const auto firstBegin = firstEnd - maxTailLen;
+    auto firstIt = firstEnd;
+    auto secondIt = static_cast<const char*>(second.data) + second.size;
+    while (firstIt != firstBegin) {
+        firstIt--;
+        secondIt--;
+        if (*firstIt != *secondIt) {
+            return firstEnd - firstIt - 1;
+        }
+    }
+    return firstEnd - firstIt;
+}
+bool tryModifyRecord(WT_CURSOR* cursor, WT_ITEM old, WT_ITEM modified) {
+    // Opportunistically attempt to do a partial update.
+    std::vector<WT_MODIFY> mods;
+    mods.reserve(15);
+
+    // We can ignore any common tail for modification, this helps for inserts/deletions.
+    const auto tailLen = commonTailLength(old, modified);
+    size_t compareLen = std::min(old.size, modified.size) - tailLen;
+    const int maxDiffSize = (compareLen + tailLen) / 4 * 3;
+    int diffSize = 0;
+    int partialBlockLen = compareLen % compareBlockSize;
+    auto compareBegin = static_cast<const char*>(old.data);
+    auto compareEnd = compareBegin + compareLen - partialBlockLen;
+    auto compareIt = compareBegin;
+    auto modifiedIt = static_cast<const char*>(modified.data);
+    do {
+        // Skip over identical blocks.
+        while (compareIt != compareEnd && equalBlocks(compareIt, modifiedIt)) {
+            compareIt += compareBlockSize;
+            modifiedIt += compareBlockSize;
+        }
+        // Find end of differing blocks.
+        auto modifiedBegin = modifiedIt;
+        while (compareIt != compareEnd && !equalBlocks(compareIt, modifiedIt)) {
+            compareIt += compareBlockSize;
+            modifiedIt += compareBlockSize;
+        }
+
+        // Record the modification.
+        if (modifiedIt != modifiedBegin) {
+            auto modifiedSize = modifiedIt - modifiedBegin;
+            WT_MODIFY modification;
+            modification.data.size = modifiedSize;
+            modification.data.data = modifiedIt - modifiedSize;
+            modification.offset = (compareIt - compareBegin) - modifiedSize;
+            modification.size = modifiedSize;
+            mods.emplace_back(modification);
+
+            // The size of the difference includes approximate per-change overhead.
+            diffSize += modifiedSize + sizeof(WT_MODIFY);
+            modifiedBegin = modifiedIt;
+        }
+    } while (compareIt != compareEnd && diffSize <= maxDiffSize);
+
+    // If there was too much difference, fail.
+    if (diffSize > maxDiffSize)
+        return false;
+
+    // Set end pointers to include partial block, but exclude common tail.
+    compareEnd = static_cast<const char*>(old.data) + old.size - tailLen;
+    auto modifiedEnd = static_cast<const char*>(modified.data) + modified.size - tailLen;
+
+
+    // Deal with any remaining difference: this may be a difference in the partial block,
+    // a deletion, or an insertion.
+    if (compareIt != compareEnd || modifiedIt != modifiedEnd) {
+        auto modifiedSize = modifiedEnd - modifiedIt;
+        auto compareSize = compareEnd - compareIt;
+        WT_MODIFY modification;
+        modification.data.size = modifiedSize;
+        modification.data.data = modifiedIt;
+        modification.size = compareSize;
+        modification.offset = compareIt - compareBegin;
+        diffSize += modifiedSize + sizeof(WT_MODIFY);
+        mods.emplace_back(modification);
+        log() << "final mod of auto in-place update goes from " << compareSize << " to "
+              << modifiedSize;
+    }
+    if (mods.size())
+        invariantWTOK(WT_OP_CHECK(cursor->modify(cursor, mods.data(), mods.size())));
+
+    DEV {
+        log() << "auto in place update: " << mods.size() << " mods, diffSize = " << diffSize
+              << ", taillen = " << tailLen << ", rec size " << old.size << " -> " << modified.size;
+        WT_ITEM check;
+        invariantWTOK(cursor->get_value(cursor, &check));
+        invariant(check.size = modified.size);
+        invariant(!memcmp(check.data, modified.data, check.size));
+    }
+
+    return true;
+}
+}  // namespace
+
 Status WiredTigerRecordStore::updateRecord(OperationContext* opCtx,
                                            const RecordId& id,
                                            const char* data,
@@ -1421,10 +1530,14 @@ Status WiredTigerRecordStore::updateRecord(OperationContext* opCtx,
         return {ErrorCodes::IllegalOperation, "Cannot change the size of a document in the oplog"};
     }
 
+
     WiredTigerItem value(data, len);
     c->set_value(c, value.Get());
-    ret = WT_OP_CHECK(c->insert(c));
-    invariantWTOK(ret);
+
+    if (!tryModifyRecord(c, old_value, *value.Get())) {
+        ret = WT_OP_CHECK(c->insert(c));
+        invariantWTOK(ret);
+    }
 
     _increaseDataSize(opCtx, len - old_length);
     if (!_oplogStones) {
@@ -1446,8 +1559,8 @@ StatusWith<RecordData> WiredTigerRecordStore::updateWithDamages(
     const mutablebson::DamageVector& damages) {
 
     const int nentries = damages.size();
-    mutablebson::DamageVector::const_iterator where = damages.begin();
-    const mutablebson::DamageVector::const_iterator end = damages.cend();
+    auto where = damages.begin();
+    const auto end = damages.cend();
     std::vector<WT_MODIFY> entries(nentries);
     for (u_int i = 0; where != end; ++i, ++where) {
         entries[i].data.data = damageSource + where->sourceOffset;

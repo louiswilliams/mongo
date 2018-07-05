@@ -209,8 +209,7 @@ ModifierNode::ModifyResult PushNode::insertElementsWithPosition(
     if (position == std::numeric_limits<long long>::max() && array->hasChildren()) {
         invariant(array->pushBack(firstElementToInsert));
         result = ModifyResult::kArrayAppendUpdate;
-    }
-    else {
+    } else {
         // We assume that no array has more than std::numerical_limits<long long>::max() elements.
         long long arraySize = static_cast<long long>(countChildren(*array));
         if (arraySize == 0) {

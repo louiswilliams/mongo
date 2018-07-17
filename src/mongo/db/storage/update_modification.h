@@ -40,9 +40,8 @@ class UpdateModification {
 public:
     class Buffer {
     public:
-        explicit Buffer(size_t size) {
+        explicit Buffer(size_t size) : _size(size), _owned(true) {
             _data = (char*)mongoMalloc(size);
-            _size = size;
         }
 
         // Allocate and copy.
@@ -51,13 +50,16 @@ public:
         }
 
         Buffer(const Buffer& buf) = delete;
-        Buffer(const Buffer&& buf) {
-            _data = buf._data;
-            _size = buf._size;
+        Buffer(Buffer&& buf) : _data(buf._data), _size(buf._size), _owned(buf._owned) {
+            buf._data = nullptr;
+            buf._size = 0;
+            buf._owned = false;
         }
 
         ~Buffer() {
-            std::free(_data);
+            if (_data && _size) {
+                std::free(_data);
+            }
         }
 
         char* get() {
@@ -68,14 +70,16 @@ public:
             return _size;
         }
 
+    private:
         char* _data;
         size_t _size;
+        bool _owned;
     };
 
     explicit UpdateModification(Buffer buffer, std::size_t offset, std::size_t replaceSize)
         : _buffer(std::move(buffer)), _offset(offset), _replace(replaceSize){};
 
-    Buffer getOwned() const {
+    Buffer& getOwned() const {
         return std::move(_buffer);
     }
 

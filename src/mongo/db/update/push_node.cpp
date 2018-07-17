@@ -264,24 +264,28 @@ ModifierNode::ModifyResult PushNode::performPushWithMods(
     }
 
     std::map<std::string, const BSONElement*> pushMap;
-    for (auto& value : _valuesToPush) {
+    for (const BSONElement& value : _valuesToPush) {
         pushMap[value.fieldName()] = &value;
     }
 
     for (auto& bsonElem : *document) {
+
+        if (bsonElem.type() != BSONType::Array)
+            continue;
+
+
         if (auto pushElem = pushMap[bsonElem.fieldName()]) {
-            // Create modify structure.
+
+            int insertIndex = bsonElem.Array().size();
 
             std::size_t offset = bsonElem.rawdata() + bsonElem.size() - document->objdata();
             invariant(offset > 0);
-            UpdateModification mod(pushElem->rawdata(), pushElem->size(), offset, 0);
 
-            printf("data: ");
-            for (int i = 0; i < pushElem->size(); i++) {
-                printf("%hhx", pushElem->rawdata()[i]);
-            }
-            printf("\n");
-            mods->emplace_back(mod);
+            // Create modify structure at the end.
+            mods->emplace_back(offset, 0);
+
+            BSONObjBuilder& bob = mods->back().getBSONObjBuilder();
+            bob.appendAs(*pushElem, ItoA(insertIndex));
         }
     }
 

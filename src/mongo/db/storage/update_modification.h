@@ -30,36 +30,30 @@
 
 #pragma once
 
+#include "mongo/bson/bsonobjbuilder.h"
+
 namespace mongo {
 
 class UpdateModification {
 public:
-    explicit UpdateModification(const char* data,
-                                std::size_t dataSize,
-                                std::size_t offset,
-                                std::size_t size)
-        : _data(data), _dataSize(dataSize), _offset(offset), _size(size){};
+    explicit UpdateModification(std::size_t offset, std::size_t replace)
+        : _offset(offset), _replace(replace){};
 
-    const char* getData() const {
-        return _data;
-    }
-
-    std::size_t getDataSize() const {
-        return _dataSize;
+    BSONObjBuilder& getBSONObjBuilder() {
+        return _bob;
     }
 
     std::size_t getOffset() const {
         return _offset;
     }
-    std::size_t getSize() const {
-        return _size;
+    std::size_t getReplaceSize() const {
+        return _replace;
     }
 
 private:
-    const char* _data;
-    std::size_t _dataSize;
+    BSONObjBuilder _bob;
     std::size_t _offset;
-    std::size_t _size;
+    std::size_t _replace;
 };
 
 }  // namespace mongo

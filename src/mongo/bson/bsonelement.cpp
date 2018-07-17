@@ -593,6 +593,7 @@ BSONElement BSONElement::operator[](StringData field) const {
 namespace {
 NOINLINE_DECL void msgAssertedBadType[[noreturn]](int8_t type) {
     msgasserted(10320, str::stream() << "BSONElement: bad type " << (int)type);
+    invariant(false);
 }
 }  // namespace
 int BSONElement::computeSize() const {

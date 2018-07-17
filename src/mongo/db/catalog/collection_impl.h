@@ -231,7 +231,7 @@ public:
         OperationContext* const opCtx,
         const RecordId& loc,
         const Snapshotted<RecordData>& oldRec,
-        const std::vector<UpdateModification>& mods,
+        std::vector<UpdateModification>& mods,
         OplogUpdateEntryArgs* const args);
     // -----------
 

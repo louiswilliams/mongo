@@ -732,18 +732,20 @@ StatusWith<RecordData> CollectionImpl::updateDocumentWithModifications(
     OperationContext* const opCtx,
     const RecordId& loc,
     const Snapshotted<RecordData>& oldRec,
-    const std::vector<UpdateModification>& mods,
+    std::vector<UpdateModification>& mods,
     OplogUpdateEntryArgs* const args) {
 
     for (auto& mod : mods) {
-        printf("mod: (%p,%zu) @ %zu + %zu\n",
-               mod.getData(),
-               mod.getDataSize(),
+
+        BSONObjBuilder& bob = mod.getBSONObjBuilder();
+        BSONObj newObj = bob.obj();
+        printf("mod: (%s) @ %zu + %zu\n",
+               newObj.toString().c_str(),
                mod.getOffset(),
-               mod.getSize());
+               mod.getReplaceSize());
     }
 
-    return Status::OK();
+    return {ErrorCodes::NotImplemented, "Not implemented"};
 }
 
 bool CollectionImpl::isCapped() const {

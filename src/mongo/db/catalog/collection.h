@@ -267,7 +267,7 @@ public:
             OperationContext* const opCtx,
             const RecordId& loc,
             const Snapshotted<RecordData>& oldRec,
-            const std::vector<UpdateModification>& mods,
+            std::vector<UpdateModification>& mods,
             OplogUpdateEntryArgs* const args) = 0;
 
         virtual StatusWith<CompactStats> compact(OperationContext* opCtx,
@@ -557,7 +557,7 @@ public:
         OperationContext* const opCtx,
         const RecordId& loc,
         const Snapshotted<RecordData>& oldRec,
-        const std::vector<UpdateModification>& mods,
+        std::vector<UpdateModification>& mods,
         OplogUpdateEntryArgs* const args) {
         return this->_impl().updateDocumentWithModifications(opCtx, loc, oldRec, mods, args);
     }

@@ -227,24 +227,39 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
         }
         immutablePaths.keepShortest(&idFieldRef);
     }
-    if (!driver->needMatchDetails()) {
-        // If we don't need match details, avoid doing the rematch
-        status = driver->update(
-            StringData(), &_doc, validateForStorage, immutablePaths, &logObj, &docWasModified);
-    } else {
-        // If there was a matched field, obtain it.
-        MatchDetails matchDetails;
-        matchDetails.requestElemMatchKey();
 
-        dassert(cq);
-        verify(cq->root()->matchesBSON(oldObj.value(), &matchDetails));
+    std::vector<UpdateModification> mods;
+    status = driver->tryUpdateAppend(StringData(),
+                                     &_doc,
+                                     &newObj,
+                                     &mods,
+                                     validateForStorage,
+                                     immutablePaths,
+                                     &logObj,
+                                     &docWasModified);
 
-        string matchedField;
-        if (matchDetails.hasElemMatchKey())
-            matchedField = matchDetails.elemMatchKey();
+    if (!status.isOK()) {
+        printf("tryUpdateAppend status: %s\n", status.toString().c_str());
 
-        status = driver->update(
-            matchedField, &_doc, validateForStorage, immutablePaths, &logObj, &docWasModified);
+        if (!driver->needMatchDetails()) {
+            // If we don't need match details, avoid doing the rematch
+            status = driver->update(
+                StringData(), &_doc, validateForStorage, immutablePaths, &logObj, &docWasModified);
+        } else {
+            // If there was a matched field, obtain it.
+            MatchDetails matchDetails;
+            matchDetails.requestElemMatchKey();
+
+            dassert(cq);
+            verify(cq->root()->matchesBSON(oldObj.value(), &matchDetails));
+
+            string matchedField;
+            if (matchDetails.hasElemMatchKey())
+                matchedField = matchDetails.elemMatchKey();
+
+            status = driver->update(
+                matchedField, &_doc, validateForStorage, immutablePaths, &logObj, &docWasModified);
+        }
     }
 
     if (!status.isOK()) {
@@ -306,7 +321,19 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
             }
         }
 
-        if (inPlace) {
+        if (!mods.empty()) {
+            newObj = oldObj.value();
+            const RecordData oldRec(oldObj.value().objdata(), oldObj.value().objsize());
+
+            Snapshotted<RecordData> snap(oldObj.snapshotId(), oldRec);
+
+            StatusWith<RecordData> newRecStatus = _collection->updateDocumentWithModifications(
+                getOpCtx(), recordId, std::move(snap), mods, &args);
+
+            newObj = uassertStatusOK(std::move(newRecStatus)).releaseToBson();
+            newRecordId = recordId;
+
+        } else if (inPlace) {
             if (!request->isExplain()) {
                 newObj = oldObj.value();
                 const RecordData oldRec(oldObj.value().objdata(), oldObj.value().objsize());

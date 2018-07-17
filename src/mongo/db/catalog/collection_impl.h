@@ -227,6 +227,12 @@ public:
                                                      const mutablebson::DamageVector& damages,
                                                      OplogUpdateEntryArgs* args) final;
 
+    inline StatusWith<RecordData> updateDocumentWithModifications(
+        OperationContext* const opCtx,
+        const RecordId& loc,
+        const Snapshotted<RecordData>& oldRec,
+        const std::vector<UpdateModification>& mods,
+        OplogUpdateEntryArgs* const args);
     // -----------
 
     StatusWith<CompactStats> compact(OperationContext* opCtx, const CompactOptions* options) final;

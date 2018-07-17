@@ -33,6 +33,7 @@
 #include "mongo/bson/bsonelement.h"
 #include "mongo/bson/mutable/element.h"
 #include "mongo/db/field_ref_set.h"
+#include "mongo/db/storage/update_modification.h"
 #include "mongo/db/update/log_builder.h"
 #include "mongo/db/update_index_data.h"
 #include "mongo/util/assert_util.h"
@@ -84,8 +85,16 @@ public:
         ApplyParams(mutablebson::Element element, const FieldRefSet& immutablePaths)
             : element(element), immutablePaths(immutablePaths) {}
 
+        ApplyParams(mutablebson::Element element,
+                    const BSONObj* document,
+                    const FieldRefSet& immutablePaths)
+            : element(element), document(document), immutablePaths(immutablePaths) {}
+
         // The element to update.
         mutablebson::Element element;
+
+        // The BSON object.
+        const BSONObj* document;
 
         // UpdateNode::apply uasserts if it modifies an immutable path.
         const FieldRefSet& immutablePaths;
@@ -121,6 +130,8 @@ public:
 
         // If provided, UpdateNode::apply will log the update here.
         LogBuilder* logBuilder = nullptr;
+
+        std::vector<UpdateModification>* updateMods;
     };
 
     /**

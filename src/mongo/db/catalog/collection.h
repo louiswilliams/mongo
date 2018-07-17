@@ -53,6 +53,7 @@
 #include "mongo/db/storage/capped_callback.h"
 #include "mongo/db/storage/record_store.h"
 #include "mongo/db/storage/snapshot.h"
+#include "mongo/db/storage/update_modification.h"
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/stdx/mutex.h"
@@ -261,6 +262,13 @@ public:
             const char* damageSource,
             const mutablebson::DamageVector& damages,
             OplogUpdateEntryArgs* args) = 0;
+
+        virtual StatusWith<RecordData> updateDocumentWithModifications(
+            OperationContext* const opCtx,
+            const RecordId& loc,
+            const Snapshotted<RecordData>& oldRec,
+            const std::vector<UpdateModification>& mods,
+            OplogUpdateEntryArgs* const args) = 0;
 
         virtual StatusWith<CompactStats> compact(OperationContext* opCtx,
                                                  const CompactOptions* options) = 0;
@@ -543,6 +551,15 @@ public:
         OplogUpdateEntryArgs* const args) {
         return this->_impl().updateDocumentWithDamages(
             opCtx, loc, oldRec, damageSource, damages, args);
+    }
+
+    inline StatusWith<RecordData> updateDocumentWithModifications(
+        OperationContext* const opCtx,
+        const RecordId& loc,
+        const Snapshotted<RecordData>& oldRec,
+        const std::vector<UpdateModification>& mods,
+        OplogUpdateEntryArgs* const args) {
+        return this->_impl().updateDocumentWithModifications(opCtx, loc, oldRec, mods, args);
     }
 
     // -----------

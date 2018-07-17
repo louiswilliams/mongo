@@ -37,6 +37,7 @@
 #include "mongo/db/field_ref_set.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/query/canonical_query.h"
+#include "mongo/db/storage/update_modification.h"
 #include "mongo/db/update/modifier_table.h"
 #include "mongo/db/update/update_object_node.h"
 #include "mongo/db/update_index_data.h"
@@ -100,6 +101,16 @@ public:
                   const FieldRefSet& immutablePaths,
                   BSONObj* logOpRec = nullptr,
                   bool* docWasModified = nullptr);
+
+
+    Status tryUpdateAppend(StringData matchedField,
+                           mutablebson::Document* doc,
+                           const BSONObj* obj,
+                           std::vector<UpdateModification>* mods,
+                           bool validateForStorage,
+                           const FieldRefSet& immutablePaths,
+                           BSONObj* logOpRec = nullptr,
+                           bool* docWasModified = nullptr);
 
     //
     // Accessors

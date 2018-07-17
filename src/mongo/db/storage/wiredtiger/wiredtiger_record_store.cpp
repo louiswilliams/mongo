@@ -1486,8 +1486,8 @@ bool tryModifyRecord(WT_CURSOR* cursor, WT_ITEM old, WT_ITEM modified) {
         modification.offset = compareIt - compareBegin;
         diffSize += modifiedSize + sizeof(WT_MODIFY);
         mods.emplace_back(modification);
-        log() << "final mod of auto in-place update goes from " << compareSize << " to "
-              << modifiedSize;
+        LOG(2) << "final mod of auto in-place update goes from " << compareSize << " to "
+               << modifiedSize;
     }
     if (mods.size())
         invariantWTOK(WT_OP_CHECK(cursor->modify(cursor, mods.data(), mods.size())));

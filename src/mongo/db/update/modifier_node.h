@@ -78,6 +78,14 @@ protected:
     virtual ModifyResult updateExistingElement(mutablebson::Element* element,
                                                std::shared_ptr<FieldRef> elementPath) const = 0;
 
+    virtual ModifyResult updateExistingElementWithMods(
+        const BSONObj* document,
+        const mutablebson::Element* element,
+        std::shared_ptr<FieldRef> elementPath,
+        std::vector<UpdateModification>* mods) const {
+        uasserted(ErrorCodes::NotImplemented, "Not implemented");
+    };
+
     /**
      * ModifierNode::apply() calls this method when applying an update to a path that does not yet
      * exist and should be created. The child's implementation of this method is responsible for

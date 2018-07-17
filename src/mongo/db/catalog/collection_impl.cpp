@@ -727,6 +727,25 @@ StatusWith<RecordData> CollectionImpl::updateDocumentWithDamages(
     return newRecStatus;
 }
 
+
+StatusWith<RecordData> CollectionImpl::updateDocumentWithModifications(
+    OperationContext* const opCtx,
+    const RecordId& loc,
+    const Snapshotted<RecordData>& oldRec,
+    const std::vector<UpdateModification>& mods,
+    OplogUpdateEntryArgs* const args) {
+
+    for (auto& mod : mods) {
+        printf("mod: (%p,%zu) @ %zu + %zu\n",
+               mod.getData(),
+               mod.getDataSize(),
+               mod.getOffset(),
+               mod.getSize());
+    }
+
+    return Status::OK();
+}
+
 bool CollectionImpl::isCapped() const {
     return _cappedNotifier.get();
 }

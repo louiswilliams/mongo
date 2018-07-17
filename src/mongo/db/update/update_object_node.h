@@ -95,6 +95,10 @@ public:
 
     UpdateNode* getChild(const std::string& field) const final;
 
+    const std::map<std::string, clonable_ptr<UpdateNode>>& getChildren() const {
+        return _children;
+    }
+
     void setChild(std::string field, std::unique_ptr<UpdateNode> child) final;
 
 private:

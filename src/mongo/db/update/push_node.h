@@ -32,6 +32,7 @@
 #include <limits>
 #include <vector>
 
+#include "mongo/db/storage/update_modification.h"
 #include "mongo/db/update/modifier_node.h"
 #include "mongo/db/update/push_sorter.h"
 #include "mongo/stdx/memory.h"
@@ -59,6 +60,10 @@ public:
 protected:
     ModifyResult updateExistingElement(mutablebson::Element* element,
                                        std::shared_ptr<FieldRef> elementPath) const final;
+    ModifyResult updateExistingElementWithMods(const BSONObj* document,
+                                               const mutablebson::Element* element,
+                                               std::shared_ptr<FieldRef> elementPath,
+                                               std::vector<UpdateModification>* mods) const final;
     void setValueForNewElement(mutablebson::Element* element) const final;
     void logUpdate(LogBuilder* logBuilder,
                    StringData pathTaken,
@@ -79,7 +84,8 @@ private:
     /**
      * Inserts the elements from '_valuesToPush' in the 'element' array using '_position' to
      * determine where to insert. This function also applies any '_slice' and or '_sort' that is
-     * specified. The return value of this function will indicate to logUpdate() what kind of oplog
+     * specified. The return value of this function will indicate to logUpdate() what kind of
+     * oplog
      * entries should be generated.
      *
      * Returns:
@@ -91,6 +97,11 @@ private:
      *     performed.
      */
     ModifyResult performPush(mutablebson::Element* element, FieldRef* elementPath) const;
+
+    ModifyResult performPushWithMods(const BSONObj* document,
+                                     const mutablebson::Element* element,
+                                     FieldRef* elementPath,
+                                     std::vector<UpdateModification>* mods) const;
 
     static const StringData kEachClauseName;
     static const StringData kSliceClauseName;

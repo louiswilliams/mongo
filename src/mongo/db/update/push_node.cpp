@@ -200,7 +200,6 @@ ModifierNode::ModifyResult PushNode::insertElementsWithPosition(
     auto firstElementToInsert =
         document.makeElementWithNewFieldName(StringData(), valuesToPush.front());
 
-
     // We insert the first element of 'valuesToPush' at the location requested in the 'position'
     // variable.
     ModifyResult result;
@@ -246,6 +245,43 @@ ModifierNode::ModifyResult PushNode::insertElementsWithPosition(
     return result;
 }
 
+ModifierNode::ModifyResult PushNode::performPushWithMods(
+    const BSONObj* document,
+    const mutablebson::Element* element,
+    FieldRef* elementPath,
+    std::vector<UpdateModification>* mods) const {
+
+    invariant(mods);
+    if (element->getType() != BSONType::Array) {
+        auto idElem = mutablebson::findFirstChildNamed(element->getDocument().root(), "_id");
+        uasserted(ErrorCodes::BadValue,
+                  str::stream() << "The field '" << element->getFieldName() << "'"
+                                << " must be an array but is of type "
+                                << typeName(element->getType())
+                                << " in document {"
+                                << (idElem.ok() ? idElem.toString() : "no id")
+                                << "}");
+    }
+
+    std::map<std::string, const BSONElement*> pushMap;
+    for (auto& value : _valuesToPush) {
+        pushMap[value.fieldName()] = &value;
+    }
+
+    for (auto& bsonElem : *document) {
+        if (auto pushElem = pushMap[bsonElem.fieldName()]) {
+            // Create modify structure.
+
+            std::size_t offset = bsonElem.rawdata() + bsonElem.size() - document->objdata();
+            invariant(offset > 0);
+            UpdateModification mod(pushElem->value(), pushElem->valuesize(), offset, 0);
+            mods->emplace_back(mod);
+        }
+    }
+
+    return ModifyResult::kArrayAppendUpdate;
+}
+
 ModifierNode::ModifyResult PushNode::performPush(mutablebson::Element* element,
                                                  FieldRef* elementPath) const {
     if (element->getType() != BSONType::Array) {
@@ -284,6 +320,14 @@ ModifierNode::ModifyResult PushNode::performPush(mutablebson::Element* element,
     }
 
     return result;
+}
+
+ModifierNode::ModifyResult PushNode::updateExistingElementWithMods(
+    const BSONObj* document,
+    const mutablebson::Element* element,
+    std::shared_ptr<FieldRef> elementPath,
+    std::vector<UpdateModification>* mods) const {
+    return performPushWithMods(document, element, elementPath.get(), mods);
 }
 
 ModifierNode::ModifyResult PushNode::updateExistingElement(

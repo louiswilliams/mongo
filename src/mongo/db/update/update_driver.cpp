@@ -38,10 +38,12 @@
 #include "mongo/db/matcher/expression_leaf.h"
 #include "mongo/db/matcher/extensions_callback_noop.h"
 #include "mongo/db/server_options.h"
+#include "mongo/db/storage/update_modification.h"
 #include "mongo/db/update/log_builder.h"
 #include "mongo/db/update/modifier_table.h"
 #include "mongo/db/update/object_replace_node.h"
 #include "mongo/db/update/path_support.h"
+#include "mongo/db/update/push_node.h"
 #include "mongo/db/update/storage_validation.h"
 #include "mongo/util/embedded_builder.h"
 #include "mongo/util/mongoutils/str.h"
@@ -236,6 +238,31 @@ Status UpdateDriver::populateDocumentWithQueryFields(const CanonicalQuery& query
 
     status = pathsupport::addEqualitiesToDoc(equalities, &doc);
     return status;
+}
+
+Status UpdateDriver::tryUpdateAppend(StringData matchedField,
+                                     mutablebson::Document* doc,
+                                     const BSONObj* obj,
+                                     std::vector<UpdateModification>* mods,
+                                     bool validateForStorage,
+                                     const FieldRefSet& immutablePaths,
+                                     BSONObj* logOpRec,
+                                     bool* docWasModified) {
+
+    UpdateNode::ApplyParams applyParams(doc->root(), obj, immutablePaths);
+    applyParams.matchedField = matchedField;
+    applyParams.insert = _insert;
+    applyParams.fromOplogApplication = _fromOplogApplication;
+    applyParams.validateForStorage = validateForStorage;
+    applyParams.indexData = _indexedFields;
+    applyParams.updateMods = mods;
+
+    auto applyResult = _root->apply(applyParams);
+    if (docWasModified) {
+        *docWasModified = !applyResult.noop;
+    }
+
+    return Status::OK();
 }
 
 Status UpdateDriver::update(StringData matchedField,

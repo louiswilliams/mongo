@@ -178,7 +178,14 @@ UpdateNode::ApplyResult ModifierNode::applyToExistingElement(ApplyParams applyPa
         checkImmutablePathsNotModifiedFromOriginal(
             applyParams.element, applyParams.pathTaken.get(), applyParams.immutablePaths, original);
     } else {
-        updateResult = updateExistingElement(&applyParams.element, applyParams.pathTaken);
+        if (applyParams.updateMods) {
+            updateResult = updateExistingElementWithMods(applyParams.document,
+                                                         &applyParams.element,
+                                                         applyParams.pathTaken,
+                                                         applyParams.updateMods);
+        } else {
+            updateResult = updateExistingElement(&applyParams.element, applyParams.pathTaken);
+        }
         if (updateResult == ModifyResult::kNoOp) {
             return ApplyResult::noopResult();
         }

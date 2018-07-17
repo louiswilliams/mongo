@@ -275,6 +275,12 @@ ModifierNode::ModifyResult PushNode::performPushWithMods(
             std::size_t offset = bsonElem.rawdata() + bsonElem.size() - document->objdata();
             invariant(offset > 0);
             UpdateModification mod(pushElem->rawdata(), pushElem->size(), offset, 0);
+
+            printf("data: ");
+            for (int i = 0; i < pushElem->size(); i++) {
+                printf("%hhx", pushElem->rawdata()[i]);
+            }
+            printf("\n");
             mods->emplace_back(mod);
         }
     }

@@ -79,7 +79,7 @@ public:
     explicit UpdateModification(Buffer buffer, std::size_t offset, std::size_t replaceSize)
         : _buffer(std::move(buffer)), _offset(offset), _replace(replaceSize){};
 
-    Buffer& getOwned() const {
+    Buffer getOwned() {
         return std::move(_buffer);
     }
 

@@ -739,16 +739,20 @@ StatusWith<RecordData> CollectionImpl::updateDocumentWithModifications(
 
     _cursorManager.invalidateDocument(opCtx, loc, INVALIDATION_MUTATION);
 
-    for (auto& mod : mods) {
+    // for (auto& mod : mods) {
 
-        UpdateModification::Buffer buf = mod.getOwned();
-        printf("mod: (%lu) @ %zu + %zu\n", buf.size(), mod.getOffset(), mod.getReplaceSize());
+    //    UpdateModification::Buffer buf = mod.getOwned();
+    //    printf("mod: (%lu) @ %zu + %zu\n", buf.size(), mod.getOffset(), mod.getReplaceSize());
+    //}
+
+    auto newRecStatus = _recordStore->updateWithModifications(opCtx, loc, oldRec.value(), mods);
+
+    if (newRecStatus.isOK()) {
+        args->updatedDoc = newRecStatus.getValue().toBson();
+
+        getGlobalServiceContext()->getOpObserver()->onUpdate(opCtx, *args);
     }
-
-    Status updateStatus =
-        _recordStore->updateRecord(opCtx, loc, oldRec.value().data(), oldRec.value().size(), this);
-
-    return oldRec.value();
+    return newRecStatus;
 }
 
 bool CollectionImpl::isCapped() const {

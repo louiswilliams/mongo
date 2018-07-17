@@ -1551,6 +1551,44 @@ bool WiredTigerRecordStore::updateWithDamagesSupported() const {
     return true;
 }
 
+StatusWith<RecordData> WiredTigerRecordStore::updateWithModifications(
+    OperationContext* opCtx,
+    const RecordId& id,
+    const RecordData& oldRec,
+    std::vector<UpdateModification>& mods) {
+    const int nentries = mods.size();
+    auto where = mods.begin();
+    const auto end = mods.cend();
+    std::vector<WT_MODIFY> entries(nentries);
+    std::vector<UpdateModification::Buffer> bufs;
+
+    bufs.reserve(nentries);
+    for (u_int i = 0; where != end; ++i, ++where) {
+        auto buf = where->getOwned();
+        entries[i].data.data = buf.get();
+        entries[i].data.size = buf.size();
+        entries[i].offset = where->getOffset();
+        entries[i].size = where->getReplaceSize();
+        bufs.emplace_back(std::move(buf));
+    }
+
+    WiredTigerCursor curwrap(_uri, _tableId, true, opCtx);
+    curwrap.assertInActiveTxn();
+    WT_CURSOR* c = curwrap.get();
+    invariant(c);
+    setKey(c, id);
+
+    if (nentries == 0)
+        invariantWTOK(WT_OP_CHECK(c->search(c)));
+    else
+        invariantWTOK(WT_OP_CHECK(c->modify(c, entries.data(), nentries)));
+
+    WT_ITEM value;
+    invariantWTOK(c->get_value(c, &value));
+
+    return RecordData(static_cast<const char*>(value.data), value.size).getOwned();
+}
+
 StatusWith<RecordData> WiredTigerRecordStore::updateWithDamages(
     OperationContext* opCtx,
     const RecordId& id,

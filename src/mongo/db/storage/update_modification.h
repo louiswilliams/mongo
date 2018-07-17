@@ -30,17 +30,53 @@
 
 #pragma once
 
+#include <cstring>
+
 #include "mongo/bson/bsonobjbuilder.h"
 
 namespace mongo {
 
 class UpdateModification {
 public:
-    explicit UpdateModification(std::size_t offset, std::size_t replace)
-        : _offset(offset), _replace(replace){};
+    class Buffer {
+    public:
+        explicit Buffer(size_t size) {
+            _data = (char*)mongoMalloc(size);
+            _size = size;
+        }
 
-    BSONObjBuilder& getBSONObjBuilder() {
-        return _bob;
+        // Allocate and copy.
+        explicit Buffer(const void* source, size_t size) : Buffer(size) {
+            std::memcpy(_data, source, _size);
+        }
+
+        Buffer(const Buffer& buf) = delete;
+        Buffer(const Buffer&& buf) {
+            _data = buf._data;
+            _size = buf._size;
+        }
+
+        ~Buffer() {
+            std::free(_data);
+        }
+
+        char* get() {
+            return _data;
+        }
+
+        size_t size() {
+            return _size;
+        }
+
+        char* _data;
+        size_t _size;
+    };
+
+    explicit UpdateModification(Buffer buffer, std::size_t offset, std::size_t replaceSize)
+        : _buffer(std::move(buffer)), _offset(offset), _replace(replaceSize){};
+
+    Buffer getOwned() const {
+        return std::move(_buffer);
     }
 
     std::size_t getOffset() const {
@@ -51,7 +87,7 @@ public:
     }
 
 private:
-    BSONObjBuilder _bob;
+    Buffer _buffer;
     std::size_t _offset;
     std::size_t _replace;
 };

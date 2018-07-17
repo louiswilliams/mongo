@@ -734,18 +734,21 @@ StatusWith<RecordData> CollectionImpl::updateDocumentWithModifications(
     const Snapshotted<RecordData>& oldRec,
     std::vector<UpdateModification>& mods,
     OplogUpdateEntryArgs* const args) {
+    dassert(opCtx->lockState()->isCollectionLockedForMode(ns().toString(), MODE_IX));
+    invariant(oldRec.snapshotId() == opCtx->recoveryUnit()->getSnapshotId());
+
+    _cursorManager.invalidateDocument(opCtx, loc, INVALIDATION_MUTATION);
 
     for (auto& mod : mods) {
 
-        BSONObjBuilder& bob = mod.getBSONObjBuilder();
-        BSONObj newObj = bob.obj();
-        printf("mod: (%s) @ %zu + %zu\n",
-               newObj.toString().c_str(),
-               mod.getOffset(),
-               mod.getReplaceSize());
+        UpdateModification::Buffer buf = mod.getOwned();
+        printf("mod: (%lu) @ %zu + %zu\n", buf.size(), mod.getOffset(), mod.getReplaceSize());
     }
 
-    return {ErrorCodes::NotImplemented, "Not implemented"};
+    Status updateStatus =
+        _recordStore->updateRecord(opCtx, loc, oldRec.value().data(), oldRec.value().size(), this);
+
+    return oldRec.value();
 }
 
 bool CollectionImpl::isCapped() const {

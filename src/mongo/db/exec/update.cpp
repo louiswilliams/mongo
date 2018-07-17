@@ -285,7 +285,7 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
     const char* source = NULL;
     const bool inPlace = _doc.getInPlaceUpdates(&_damages, &source);
 
-    if (inPlace && _damages.empty()) {
+    if (inPlace && _damages.empty() && mods.empty()) {
         // An interesting edge case. A modifier didn't notice that it was really a no-op
         // during its 'prepare' phase. That represents a missed optimization, but we still
         // shouldn't do any real work. Toggle 'docWasModified' to 'false'.

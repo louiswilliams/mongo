@@ -1569,6 +1569,10 @@ StatusWith<RecordData> WiredTigerRecordStore::updateWithModifications(
         entries[i].data.size = buf.size();
         entries[i].offset = where->getOffset();
         entries[i].size = where->getReplaceSize();
+        //        printf("mod: %lu bytes at off %lu + %lu\n",
+        //               buf.size(),
+        //               where->getOffset(),
+        //               where->getReplaceSize());
         bufs.emplace_back(std::move(buf));
     }
 

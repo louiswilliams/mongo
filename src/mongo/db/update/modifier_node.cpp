@@ -183,6 +183,7 @@ UpdateNode::ApplyResult ModifierNode::applyToExistingElement(ApplyParams applyPa
                                                          &applyParams.element,
                                                          applyParams.pathTaken,
                                                          applyParams.updateMods);
+            applyParams.validateForStorage = false;
         } else {
             updateResult = updateExistingElement(&applyParams.element, applyParams.pathTaken);
         }

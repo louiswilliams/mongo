@@ -280,8 +280,10 @@ ModifierNode::ModifyResult PushNode::performPushWithMods(
                 insertIndex++;
             }
 
-            std::size_t elemStart = bsonElem.rawdata() - document->objdata();
-            std::size_t elemEnd = elemStart + bsonElem.size();
+            // Start of the value section (size + data)
+            std::size_t elemStart = bsonElem.value() - document->objdata();
+            // End of the value section
+            std::size_t elemEnd = elemStart + bsonElem.valuesize() - 1;
             invariant(elemStart > 0);
             invariant(elemEnd > 0);
 
@@ -302,7 +304,7 @@ ModifierNode::ModifyResult PushNode::performPushWithMods(
             BSONObj arrayObj = bob.obj();
             // Skip the first 4 bytes.
             const char* arrayElems = arrayObj.objdata() + sizeLen;
-            std::uint32_t arrayElemsLen = arrayObj.objsize() - sizeLen;
+            std::uint32_t arrayElemsLen = arrayObj.objsize() - sizeLen - 1;
 
             // Create modify structure to replace the entire document size with the added size of
             // the new elements.
@@ -310,10 +312,9 @@ ModifierNode::ModifyResult PushNode::performPushWithMods(
                 arrayElemsLen + *reinterpret_cast<const std::uint32_t*>(document->objdata());
             mods->emplace_back(UpdateModification::Buffer(&newDocSize, sizeLen), 0, sizeLen);
 
-            // Create modify structure to replace the array document size with the added size of the
             // new elements.
             std::uint32_t newArraySize =
-                arrayElemsLen + *reinterpret_cast<const std::uint32_t*>(bsonElem.rawdata());
+                arrayElemsLen + *reinterpret_cast<const std::uint32_t*>(bsonElem.value());
             mods->emplace_back(
                 UpdateModification::Buffer(&newArraySize, sizeLen), elemStart, sizeLen);
 

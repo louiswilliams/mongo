@@ -133,28 +133,33 @@ class WiredTigerKVEngineRepairTest : public WiredTigerKVEngineTest {
 };
 
 TEST_F(WiredTigerKVEngineRepairTest, OrphanedDataFilesCanBeRecovered) {
-    auto opCtxPtr = makeOperationContext();
 
     std::string ns = "a.b";
     std::string ident = "collection-1234";
     std::string record = "abcd";
     CollectionOptions options;
 
-    std::unique_ptr<RecordStore> rs;
-    ASSERT_OK(_engine->createRecordStore(opCtxPtr.get(), ns, ident, options));
-    rs = _engine->getRecordStore(opCtxPtr.get(), ns, ident, options);
-    ASSERT(rs);
-
     RecordId loc;
     {
+        auto opCtxPtr = makeOperationContext();
+        std::unique_ptr<RecordStore> rs;
+        ASSERT_OK(_engine->createRecordStore(opCtxPtr.get(), ns, ident, options));
+        rs = _engine->getRecordStore(opCtxPtr.get(), ns, ident, options);
+        ASSERT(rs);
+
         WriteUnitOfWork uow(opCtxPtr.get());
-        StatusWith<RecordId> res = rs->insertRecord(
-            opCtxPtr.get(), record.c_str(), record.length() + 1, Timestamp(), false);
+        StatusWith<RecordId> res =
+            rs->insertRecord(opCtxPtr.get(), record.c_str(), record.length() + 1, Timestamp());
         ASSERT_OK(res.getStatus());
         loc = res.getValue();
         uow.commit();
+
+        // Force a checkpoint to guarantee the data is written to disk. This will also prevent any
+        // EBUSY errors when dropping the ident later on.
+        _engine->flushAllFiles(opCtxPtr.get(), true /* sync */);
     }
 
+    // Copy the data file to a temporary location so the ident can be dropped.
     const boost::optional<boost::filesystem::path> dataFilePath =
         _engine->getDataFilePathForIdent(ident);
     ASSERT(dataFilePath);
@@ -164,46 +169,58 @@ TEST_F(WiredTigerKVEngineRepairTest, OrphanedDataFilesCanBeRecovered) {
     const boost::filesystem::path tmpFile{dataFilePath->string() + ".tmp"};
     ASSERT(!boost::filesystem::exists(tmpFile));
 
-    // Move the data file out of the way so the ident can be dropped.
+    // Copy instead of move because the file may still be open by the storage engine.
     boost::system::error_code err;
-    boost::filesystem::rename(*dataFilePath, tmpFile, err);
+    boost::filesystem::copy_file(*dataFilePath, tmpFile, err);
     ASSERT(!err) << err.message();
 
-    ASSERT_OK(_engine->dropIdent(opCtxPtr.get(), ident));
+    {
+        auto opCtxPtr = makeOperationContext();
+        ASSERT_OK(_engine->dropIdent(opCtxPtr.get(), ident));
+    }
+
+    // The file should be deleted for good.
+    ASSERT(!boost::filesystem::exists(*dataFilePath, err));
 
     // The data file is moved back in place so that it becomes an "orphan" of the storage
     // engine and the restoration process can be tested.
     boost::filesystem::rename(tmpFile, *dataFilePath, err);
     ASSERT(!err) << err.message();
 
-    ASSERT_OK(_engine->recoverOrphanedIdent(opCtxPtr.get(), ns, ident, options));
+    {
+        auto opCtxPtr = makeOperationContext();
+        ASSERT_OK(_engine->recoverOrphanedIdent(opCtxPtr.get(), ns, ident, options));
 
-    // The existing RecordStore is still usable with a different OperationContext and
-    // RecoveryUnit because a new session with new cursors will be opened.
-    ASSERT_EQUALS(record, rs->dataFor(opCtxPtr.get(), loc).data());
+        // The original record should still be around.
+        std::unique_ptr<RecordStore> rs;
+        rs = _engine->getRecordStore(opCtxPtr.get(), ns, ident, options);
+        ASSERT_EQUALS(record, rs->dataFor(opCtxPtr.get(), loc).data());
+    }
 }
 
 TEST_F(WiredTigerKVEngineRepairTest, UnrecoverableOrphanedDataFilesFailGracefully) {
-    auto opCtxPtr = makeOperationContext();
 
     std::string ns = "a.b";
     std::string ident = "collection-1234";
     std::string record = "abcd";
     CollectionOptions options;
 
-    std::unique_ptr<RecordStore> rs;
-    ASSERT_OK(_engine->createRecordStore(opCtxPtr.get(), ns, ident, options));
-    rs = _engine->getRecordStore(opCtxPtr.get(), ns, ident, options);
-    ASSERT(rs);
-
-    RecordId loc;
     {
+        auto opCtxPtr = makeOperationContext();
+        std::unique_ptr<RecordStore> rs;
+        ASSERT_OK(_engine->createRecordStore(opCtxPtr.get(), ns, ident, options));
+        rs = _engine->getRecordStore(opCtxPtr.get(), ns, ident, options);
+        ASSERT(rs);
+
         WriteUnitOfWork uow(opCtxPtr.get());
-        StatusWith<RecordId> res = rs->insertRecord(
-            opCtxPtr.get(), record.c_str(), record.length() + 1, Timestamp(), false);
+        StatusWith<RecordId> res =
+            rs->insertRecord(opCtxPtr.get(), record.c_str(), record.length() + 1, Timestamp());
         ASSERT_OK(res.getStatus());
-        loc = res.getValue();
         uow.commit();
+
+        // Force a checkpoint to guarantee the data is written to disk. This will also prevent any
+        // EBUSY errors when dropping the ident later on.
+        _engine->flushAllFiles(opCtxPtr.get(), true /* sync */);
     }
 
     const boost::optional<boost::filesystem::path> dataFilePath =
@@ -212,12 +229,12 @@ TEST_F(WiredTigerKVEngineRepairTest, UnrecoverableOrphanedDataFilesFailGracefull
 
     ASSERT(boost::filesystem::exists(*dataFilePath));
 
-    ASSERT_OK(_engine->dropIdent(opCtxPtr.get(), ident));
+    {
+        auto opCtxPtr = makeOperationContext();
+        ASSERT_OK(_engine->dropIdent(opCtxPtr.get(), ident));
+    }
 
-    // The ident may not get immediately dropped, so ensure it is completely gone.
-    boost::system::error_code err;
-    boost::filesystem::remove(*dataFilePath, err);
-    ASSERT(!err) << err.message();
+    ASSERT(!boost::filesystem::exists(*dataFilePath));
 
     // Create an empty data file. The subsequent call to recreate the collection will fail because
     // it is unsalvageable.
@@ -228,7 +245,10 @@ TEST_F(WiredTigerKVEngineRepairTest, UnrecoverableOrphanedDataFilesFailGracefull
     ASSERT(boost::filesystem::exists(*dataFilePath));
 
     // This should fail gracefully and not cause any crashing.
-    ASSERT_NOT_OK(_engine->recoverOrphanedIdent(opCtxPtr.get(), ns, ident, options));
+    {
+        auto opCtxPtr = makeOperationContext();
+        ASSERT_NOT_OK(_engine->recoverOrphanedIdent(opCtxPtr.get(), ns, ident, options));
+    }
 }
 
 std::unique_ptr<KVHarnessHelper> makeHelper() {

@@ -207,12 +207,19 @@ bool KVStorageEngine::_recoverOrDropOrphanedCollection(OperationContext* opCtx,
               << "' from its metadata. Attempting to locate and recover the data for "
               << collectionIdent;
 
-        WriteUnitOfWork wuow(opCtx);
+
         const auto metadata = _catalog->getMetaData(opCtx, collectionName);
+
+        // This operation may restart the storage engine, which may fail if there is an uncommitted
+        // WriteUnitOfWork.
+        opCtx->recoveryUnit()->abandonSnapshot();
         auto status =
             _engine->recoverOrphanedIdent(opCtx, collectionName, collectionIdent, metadata.options);
+
+        // Regardless of the result, this is necessary if the storage engine restarted.
+        opCtx->setRecoveryUnit(_engine->newRecoveryUnit(), WriteUnitOfWork::kNotInUnitOfWork);
+
         if (status.isOK()) {
-            wuow.commit();
             return true;
         }
 

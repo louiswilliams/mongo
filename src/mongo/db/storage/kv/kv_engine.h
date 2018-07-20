@@ -168,6 +168,13 @@ public:
      * but may still exist on disk if this is a durable storage engine. Returns Status::OK if a new
      * record store was successfully created.
      *
+     * Preconditions:
+     * - The RecoveryUnit on the OperationContext must not be active.
+     *
+     * Postconditions:
+     * - WARNING: This will invalidate the RecoveryUnit on the OperationContext when successful and
+     *   it may not be used again.
+     *
      * This may return an error if a storage engine chooses not to implement recovery, is unable to
      * implement recovery because it is not durable, or if the storage engine attempted to recover
      * the file and failed. A storage engine that is not durable may choose to return an OK status

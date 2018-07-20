@@ -456,11 +456,26 @@ WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
       _canonicalName(canonicalName),
       _path(path),
       _sizeStorerSyncTracker(cs, 100000, Seconds(60)),
+      _extraOpenOptions(extraOpenOptions),
+      _cacheSizeMB(cacheSizeMB),
       _durable(durable),
       _ephemeral(ephemeral),
       _inRepairMode(repair),
       _readOnly(readOnly) {
-    boost::filesystem::path journalPath = path;
+    _startUp();
+}
+
+
+WiredTigerKVEngine::~WiredTigerKVEngine() {
+    if (_conn) {
+        cleanShutdown();
+    }
+
+    _sessionCache.reset(NULL);
+}
+
+void WiredTigerKVEngine::_startUp() {
+    boost::filesystem::path journalPath = _path;
     journalPath /= "journal";
     if (_durable) {
         if (!boost::filesystem::exists(journalPath)) {
@@ -477,7 +492,7 @@ WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
 
     std::stringstream ss;
     ss << "create,";
-    ss << "cache_size=" << cacheSizeMB << "M,";
+    ss << "cache_size=" << _cacheSizeMB << "M,";
     ss << "session_max=20000,";
     ss << "eviction=(threads_min=4,threads_max=4),";
     ss << "config_base=false,";
@@ -506,7 +521,7 @@ WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
     ss << WiredTigerCustomizationHooks::get(getGlobalServiceContext())
               ->getTableCreateConfig("system");
     ss << WiredTigerExtensions::get(getGlobalServiceContext())->getOpenExtensionsConfig();
-    ss << extraOpenOptions;
+    ss << _extraOpenOptions;
     if (_readOnly) {
         invariant(!_durable);
         ss << "readonly=true,";
@@ -520,7 +535,7 @@ WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
             log() << "Detected WT journal files.  Running recovery from last checkpoint.";
             log() << "journal to nojournal transition config: " << config;
             int ret = wiredtiger_open(
-                path.c_str(), _eventHandler.getWtEventHandler(), config.c_str(), &_conn);
+                _path.c_str(), _eventHandler.getWtEventHandler(), config.c_str(), &_conn);
             if (ret == EINVAL) {
                 fassertFailedNoTrace(28717);
             } else if (ret != 0) {
@@ -542,7 +557,7 @@ WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
 
     string config = ss.str();
     log() << "wiredtiger_open config: " << config;
-    openWiredTiger(path, _eventHandler.getWtEventHandler(), config, &_conn, &_fileVersion);
+    openWiredTiger(_path, _eventHandler.getWtEventHandler(), config, &_conn, &_fileVersion);
     _eventHandler.setStartupSuccessful();
     _wtOpenConfig = config;
 
@@ -566,6 +581,7 @@ WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
     if (!_readOnly && !_ephemeral) {
         _checkpointThread = stdx::make_unique<WiredTigerCheckpointThread>(_sessionCache.get());
         if (!_recoveryTimestamp.isNull()) {
+            invariant(_checkpointThread);
             _checkpointThread->setInitialDataTimestamp(_recoveryTimestamp);
             setStableTimestamp(_recoveryTimestamp);
         }
@@ -574,7 +590,7 @@ WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
 
     _sizeStorerUri = _uri("sizeStorer");
     WiredTigerSession session(_conn);
-    if (!_readOnly && repair && _hasUri(session.getSession(), _sizeStorerUri)) {
+    if (!_readOnly && _inRepairMode && _hasUri(session.getSession(), _sizeStorerUri)) {
         log() << "Repairing size cache";
         fassertNoTrace(28577, _salvageIfNeeded(_sizeStorerUri.c_str()));
     }
@@ -582,15 +598,6 @@ WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
     _sizeStorer = std::make_unique<WiredTigerSizeStorer>(_conn, _sizeStorerUri, _readOnly);
 
     Locker::setGlobalThrottling(&openReadTransaction, &openWriteTransaction);
-}
-
-
-WiredTigerKVEngine::~WiredTigerKVEngine() {
-    if (_conn) {
-        cleanShutdown();
-    }
-
-    _sessionCache.reset(NULL);
 }
 
 void WiredTigerKVEngine::appendGlobalStats(BSONObjBuilder& b) {
@@ -811,8 +818,18 @@ Status WiredTigerKVEngine::createGroupedRecordStore(OperationContext* opCtx,
                                                     StringData ident,
                                                     const CollectionOptions& options,
                                                     KVPrefix prefix) {
-    _ensureIdentPath(ident);
     WiredTigerSession session(_conn);
+    WT_SESSION* s = session.getSession();
+
+    return _createGroupedRecordStore(s, ns, ident, options, prefix);
+}
+
+Status WiredTigerKVEngine::_createGroupedRecordStore(WT_SESSION* session,
+                                                     StringData ns,
+                                                     StringData ident,
+                                                     const CollectionOptions& options,
+                                                     KVPrefix prefix) {
+    _ensureIdentPath(ident);
 
     const bool prefixed = prefix.isPrefixed();
     StatusWith<std::string> result = WiredTigerRecordStore::generateCreateString(
@@ -823,10 +840,9 @@ Status WiredTigerKVEngine::createGroupedRecordStore(OperationContext* opCtx,
     std::string config = result.getValue();
 
     string uri = _uri(ident);
-    WT_SESSION* s = session.getSession();
     LOG(2) << "WiredTigerKVEngine::createRecordStore ns: " << ns << " uri: " << uri
            << " config: " << config;
-    return wtRCToStatus(s->create(s, uri.c_str(), config.c_str()));
+    return wtRCToStatus(session->create(session, uri.c_str(), config.c_str()));
 }
 
 Status WiredTigerKVEngine::recoverOrphanedIdent(OperationContext* opCtx,
@@ -834,6 +850,17 @@ Status WiredTigerKVEngine::recoverOrphanedIdent(OperationContext* opCtx,
                                                 StringData ident,
                                                 const CollectionOptions& options) {
     invariant(_inRepairMode);
+    if (_readOnly || _ephemeral) {
+        return {ErrorCodes::CommandNotSupported,
+                "Orphaned idents cannot be recovered when using an ephemeral or read-only "
+                "storage engine"};
+    }
+    invariant(_checkpointThread);
+
+    // An idle session on the OperationContext could prevent the storage engine from shutting down
+    // cleanly, so ensure it is completely closed.
+    WiredTigerRecoveryUnit* ru = WiredTigerRecoveryUnit::get(opCtx);
+    ru->closeSession();
 
     // Moves the data file to a temporary name so that a new RecordStore can be created with the
     // same ident name. We will delete the new empty collection and rename the data file back so it
@@ -866,13 +893,19 @@ Status WiredTigerKVEngine::recoverOrphanedIdent(OperationContext* opCtx,
     log() << "Creating new RecordStore for collection " + ns + " with UUID: " +
             (options.uuid ? options.uuid->toString() : "none");
 
-    auto status = createGroupedRecordStore(opCtx, ns, ident, options, KVPrefix::kNotPrefixed);
-    if (!status.isOK()) {
-        return status;
+    {
+        WiredTigerSession sessionWrapper(_conn);
+        auto status = _createGroupedRecordStore(
+            sessionWrapper.getSession(), ns, ident, options, KVPrefix::kNotPrefixed);
+        if (!status.isOK()) {
+            return status;
+        }
     }
 
-    log() << "Moving orphaned data file back as " + identFilePath->string();
+    // The storage engine must be shut down so that the data file can be modified.
+    cleanShutdown();
 
+    log() << "Moving orphaned data file back as " + identFilePath->string();
     boost::filesystem::remove(*identFilePath, ec);
     if (ec) {
         return {ErrorCodes::UnknownError, "Error deleting empty data file: " + ec.message()};
@@ -883,6 +916,8 @@ Status WiredTigerKVEngine::recoverOrphanedIdent(OperationContext* opCtx,
         return {ErrorCodes::FileRenameFailed,
                 "Error renaming data file back from temporary file: " + ec.message()};
     }
+
+    _startUp();
 
     log() << "Salvaging ident " + ident;
 

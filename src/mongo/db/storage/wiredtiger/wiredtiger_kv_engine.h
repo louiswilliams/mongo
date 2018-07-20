@@ -294,6 +294,13 @@ private:
     class WiredTigerJournalFlusher;
     class WiredTigerCheckpointThread;
 
+    void _startUp();
+    Status _createGroupedRecordStore(WT_SESSION* session,
+                                     StringData ns,
+                                     StringData ident,
+                                     const CollectionOptions& options,
+                                     KVPrefix prefix);
+
     Status _salvageIfNeeded(const char* uri);
     void _ensureIdentPath(StringData ident);
 
@@ -336,6 +343,8 @@ private:
     std::string _sizeStorerUri;
     mutable ElapsedTracker _sizeStorerSyncTracker;
 
+    const std::string _extraOpenOptions;
+    const size_t _cacheSizeMB;
     bool _durable;
     bool _ephemeral;
     const bool _inRepairMode;

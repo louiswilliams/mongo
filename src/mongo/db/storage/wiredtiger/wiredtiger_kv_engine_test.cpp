@@ -190,7 +190,10 @@ TEST_F(WiredTigerKVEngineRepairTest, OrphanedDataFilesCanBeRecovered) {
     {
         auto opCtxPtr = makeOperationContext();
         ASSERT_OK(_engine->recoverOrphanedIdent(opCtxPtr.get(), ns, ident, options));
+    }
 
+    {
+        auto opCtxPtr = makeOperationContext();
         // The original record should still be around.
         std::unique_ptr<RecordStore> rs;
         rs = _engine->getRecordStore(opCtxPtr.get(), ns, ident, options);

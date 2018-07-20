@@ -129,6 +129,12 @@ public:
     WiredTigerSessionCache* getSessionCache() {
         return _sessionCache;
     }
+
+    void closeSession() {
+        invariant(!_active);
+        _session.reset(nullptr);
+    }
+
     bool inActiveTxn() const {
         return _active;
     }

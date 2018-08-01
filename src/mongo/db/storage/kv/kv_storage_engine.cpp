@@ -37,6 +37,7 @@
 #include "mongo/db/catalog/catalog_control.h"
 #include "mongo/db/logical_clock.h"
 #include "mongo/db/operation_context_noop.h"
+#include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/storage/kv/kv_catalog_feature_tracker.h"
 #include "mongo/db/storage/kv/kv_database_catalog_entry.h"
 #include "mongo/db/storage/kv/kv_engine.h"
@@ -98,7 +99,16 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
     if (_options.forRepair && catalogExists) {
         log() << "Repairing catalog metadata";
         // TODO should also validate all BSON in the catalog.
-        _engine->repairIdent(opCtx, catalogInfo).transitional_ignore();
+        StatusWith<bool> status = _engine->repairIdent(opCtx, catalogInfo);
+
+        // All hope is lost if the catalog can't be repaired.
+        fassertNoTrace(50893, status.getStatus());
+
+        // At this point, we may not know if we are repairing a node that was part of a replica set,
+        // so always invalidate the configuration if the catalog was repaired and modified.
+        if (status.getValue()) {
+            repl::ReplicationCoordinator::get(opCtx)->invalidateConfigDueToRepair(opCtx);
+        }
     }
 
     if (!catalogExists) {
@@ -571,13 +581,14 @@ SnapshotManager* KVStorageEngine::getSnapshotManager() const {
     return _engine->getSnapshotManager();
 }
 
-Status KVStorageEngine::repairRecordStore(OperationContext* opCtx, const std::string& ns) {
-    Status status = _engine->repairIdent(opCtx, _catalog->getCollectionIdent(ns));
-    if (!status.isOK())
-        return status;
+StatusWith<bool> KVStorageEngine::repairRecordStore(OperationContext* opCtx,
+                                                    const std::string& ns) {
+    StatusWith<bool> swModified = _engine->repairIdent(opCtx, _catalog->getCollectionIdent(ns));
+    if (swModified.isOK()) {
+        _dbs[nsToDatabase(ns)]->reinitCollectionAfterRepair(opCtx, ns);
+    }
 
-    _dbs[nsToDatabase(ns)]->reinitCollectionAfterRepair(opCtx, ns);
-    return Status::OK();
+    return swModified;
 }
 
 void KVStorageEngine::setJournalListener(JournalListener* jl) {

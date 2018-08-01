@@ -683,19 +683,19 @@ int64_t WiredTigerKVEngine::getIdentSize(OperationContext* opCtx, StringData ide
     return WiredTigerUtil::getIdentSize(session->getSession(), _uri(ident));
 }
 
-Status WiredTigerKVEngine::repairIdent(OperationContext* opCtx, StringData ident) {
+StatusWith<bool> WiredTigerKVEngine::repairIdent(OperationContext* opCtx, StringData ident) {
     WiredTigerSession* session = WiredTigerRecoveryUnit::get(opCtx)->getSession();
     string uri = _uri(ident);
     session->closeAllCursors(uri);
     _sessionCache->closeAllCursors(uri);
     if (isEphemeral()) {
-        return Status::OK();
+        return false;
     }
     _ensureIdentPath(ident);
     return _salvageIfNeeded(uri.c_str());
 }
 
-Status WiredTigerKVEngine::_salvageIfNeeded(const char* uri) {
+StatusWith<bool> WiredTigerKVEngine::_salvageIfNeeded(const char* uri) {
     // Using a side session to avoid transactional issues
     WiredTigerSession sessionWrapper(_conn);
     WT_SESSION* session = sessionWrapper.getSession();
@@ -703,7 +703,7 @@ Status WiredTigerKVEngine::_salvageIfNeeded(const char* uri) {
     int rc = (session->verify)(session, uri, NULL);
     if (rc == 0) {
         log() << "Verify succeeded on uri " << uri << ". Not salvaging.";
-        return Status::OK();
+        return false;
     }
 
     if (rc == EBUSY) {
@@ -714,7 +714,7 @@ Status WiredTigerKVEngine::_salvageIfNeeded(const char* uri) {
             << "Verify on " << uri << " failed with EBUSY. "
             << "This means the collection was being accessed. No repair is necessary unless other "
                "errors are reported.";
-        return Status::OK();
+        return false;
     }
 
     if (rc == ENOENT) {
@@ -739,12 +739,16 @@ Status WiredTigerKVEngine::_salvageIfNeeded(const char* uri) {
             return wtRCToStatus(rc);
         }
         log() << "Successfully re-created " << uri << ".";
-        return Status::OK();
+        return true;
     }
 
     // TODO need to cleanup the sizeStorer cache after salvaging.
     log() << "Verify failed on uri " << uri << ". Running a salvage operation.";
-    return wtRCToStatus(session->salvage(session, uri, NULL), "Salvage failed:");
+    auto status = wtRCToStatus(session->salvage(session, uri, NULL), "Salvage failed:");
+    if (status.isOK()) {
+        return true;
+    }
+    return status;
 }
 
 int WiredTigerKVEngine::flushAllFiles(OperationContext* opCtx, bool sync) {

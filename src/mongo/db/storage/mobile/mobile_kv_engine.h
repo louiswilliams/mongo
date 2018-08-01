@@ -105,7 +105,7 @@ public:
 
     int64_t getIdentSize(OperationContext* opCtx, StringData ident) override;
 
-    Status repairIdent(OperationContext* opCtx, StringData ident) override {
+    StatusWith<bool> repairIdent(OperationContext* opCtx, StringData ident) override {
         return Status::OK();
     }
 

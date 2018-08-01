@@ -118,7 +118,8 @@ public:
 
     virtual bool isEphemeral() const;
 
-    virtual Status repairRecordStore(OperationContext* opCtx, const std::string& ns);
+    virtual StatusWith<bool> repairRecordStore(OperationContext* opCtx,
+                                               const std::string& ns) override;
 
     virtual void cleanShutdown();
 

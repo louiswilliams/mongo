@@ -72,6 +72,10 @@ Status rebuildIndexesOnCollection(OperationContext* opCtx,
  * Repairs a database using a storage engine-specific, best-effort process.
  * Some data may be lost or modified in the process but the output will
  * be structurally valid on successful return.
+ *
+ * Returns a value of 'true' if data has been or may have been modified.
  */
-Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std::string& dbName);
+StatusWith<bool> repairDatabase(OperationContext* opCtx,
+                                StorageEngine* engine,
+                                const std::string& dbName);
 }

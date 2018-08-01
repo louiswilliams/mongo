@@ -263,6 +263,10 @@ ReplSetConfig ReplicationCoordinatorEmbedded::getConfig() const {
     UASSERT_NOT_IMPLEMENTED;
 }
 
+void ReplicationCoordinatorEmbedded::invalidateConfigDueToRepair(OperationContext* opCtx) {
+    UASSERT_NOT_IMPLEMENTED;
+}
+
 void ReplicationCoordinatorEmbedded::processReplSetGetConfig(BSONObjBuilder*) {
     UASSERT_NOT_IMPLEMENTED;
 }

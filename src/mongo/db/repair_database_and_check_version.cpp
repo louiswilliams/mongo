@@ -186,16 +186,16 @@ const NamespaceString kSystemReplSetCollection("local.system.replset");
  * @returns the number of documents in local.system.replset or 0 if this was started with
  *          --replset.
  */
-unsigned long long checkIfReplMissingFromCommandLine(OperationContext* opCtx) {
+bool hasReplSetConfig(OperationContext* opCtx) {
     // This is helpful for the query below to work as you can't open files when readlocked
     Lock::GlobalWrite lk(opCtx);
     if (!repl::ReplicationCoordinator::get(getGlobalServiceContext())
              ->getSettings()
              .usingReplSets()) {
         DBDirectClient c(opCtx);
-        return c.count(kSystemReplSetCollection.ns());
+        return c.count(kSystemReplSetCollection.ns()) > 0;
     }
-    return 0;
+    return false;
 }
 
 /**
@@ -301,12 +301,18 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
 
     bool repairVerifiedAllCollectionsHaveUUIDs = false;
 
+    bool nonLocalDatabasesModified = false;
+
     // Repair all databases first, so that we do not try to open them if they are in bad shape
     if (storageGlobalParams.repair) {
         invariant(!storageGlobalParams.readOnly);
         for (const auto& dbName : dbNames) {
             LOG(1) << "    Repairing database: " << dbName;
-            fassert(18506, repairDatabase(opCtx, storageEngine, dbName));
+            auto swModified = repairDatabase(opCtx, storageEngine, dbName);
+            fassert(18506, swModified.getStatus());
+
+            if (dbName != "local")
+                nonLocalDatabasesModified |= swModified.getValue();
         }
 
         // All collections must have UUIDs before restoring the FCV document to a version that
@@ -344,14 +350,21 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     }
 
     if (!storageGlobalParams.readOnly) {
-        // We open the "local" database before calling checkIfReplMissingFromCommandLine() to
-        // ensure the in-memory catalog entries for the 'kSystemReplSetCollection' collection have
-        // been populated if the collection exists. If the "local" database didn't exist at this
-        // point yet, then it will be created. If the mongod is running in a read-only mode, then
-        // it is fine to not open the "local" database and populate the catalog entries because we
-        // won't attempt to drop the temporary collections anyway.
+        // We open the "local" database before calling hasReplSetConfig() to ensure the in-memory
+        // catalog entries for the 'kSystemReplSetCollection' collection have been populated if the
+        // collection exists. If the "local" database didn't exist at this point yet, then it will
+        // be created. If the mongod is running in a read-only mode, then it is fine to not open the
+        // "local" database and populate the catalog entries because we won't attempt to drop the
+        // temporary collections anyway.
         Lock::DBLock dbLock(opCtx, kSystemReplSetCollection.db(), MODE_X);
         DatabaseHolder::getDatabaseHolder().openDb(opCtx, kSystemReplSetCollection.db());
+    }
+
+    if (nonLocalDatabasesModified && hasReplSetConfig(opCtx)) {
+        warning()
+            << "Repair may have modified data that was part of a replicated collection. This node "
+               "will no longer be able to join its replica set without a full re-sync";
+        repl::ReplicationCoordinator::get(opCtx)->invalidateConfigDueToRepair(opCtx);
     }
 
     const repl::ReplSettings& replSettings =
@@ -362,7 +375,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     // to. The local DB is special because it is not replicated.  See SERVER-10927 for more
     // details.
     const bool shouldClearNonLocalTmpCollections =
-        !(checkIfReplMissingFromCommandLine(opCtx) || replSettings.usingReplSets());
+        !(hasReplSetConfig(opCtx) || replSettings.usingReplSets());
 
     // To check whether a featureCompatibilityVersion document exists.
     bool fcvDocumentExists = false;

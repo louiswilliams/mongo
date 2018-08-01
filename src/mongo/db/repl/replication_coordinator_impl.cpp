@@ -2072,6 +2072,19 @@ ReplSetConfig ReplicationCoordinatorImpl::getConfig() const {
     return _rsConfig;
 }
 
+void ReplicationCoordinatorImpl::invalidateConfigDueToRepair(OperationContext* opCtx) {
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
+    invariant(_rsConfigState == kConfigPreStart);
+
+    StatusWith<BSONObj> config = _externalState->loadLocalConfigDocument(opCtx);
+    if (!config.isOK()) {
+        return;
+    }
+    BSONObjBuilder configBuilder(config.getValue());
+    configBuilder.append("repaired", true);
+    fassert(50894, _externalState->storeLocalConfigDocument(opCtx, configBuilder.obj()));
+}
+
 void ReplicationCoordinatorImpl::processReplSetGetConfig(BSONObjBuilder* result) {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
     result->append("config", _rsConfig.toBSON());

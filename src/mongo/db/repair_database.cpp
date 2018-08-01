@@ -229,7 +229,9 @@ Status rebuildIndexesOnCollection(OperationContext* opCtx,
     return Status::OK();
 }
 
-Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std::string& dbName) {
+StatusWith<bool> repairDatabase(OperationContext* opCtx,
+                                StorageEngine* engine,
+                                const std::string& dbName) {
     DisableDocumentValidation validationDisabler(opCtx);
 
     // We must hold some form of lock here
@@ -274,6 +276,8 @@ Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std:
     std::list<std::string> colls;
     dbce->getCollectionNamespaces(&colls);
 
+    bool dataModified = false;
+
     for (std::list<std::string>::const_iterator it = colls.begin(); it != colls.end(); ++it) {
         // Don't check for interrupt after starting to repair a collection otherwise we can
         // leave data in an inconsistent state. Interrupting between collections is ok, however.
@@ -281,16 +285,18 @@ Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std:
 
         log() << "Repairing collection " << *it;
 
-        Status status = engine->repairRecordStore(opCtx, *it);
-        if (!status.isOK())
-            return status;
+        auto swModified = engine->repairRecordStore(opCtx, *it);
+        if (!swModified.isOK())
+            return swModified.getStatus();
+
+        dataModified |= swModified.getValue();
 
         CollectionCatalogEntry* cce = dbce->getCollectionCatalogEntry(*it);
         auto swIndexNameObjs = getIndexNameObjs(opCtx, dbce, cce);
         if (!swIndexNameObjs.isOK())
             return swIndexNameObjs.getStatus();
 
-        status = rebuildIndexesOnCollection(opCtx, dbce, cce, swIndexNameObjs.getValue());
+        Status status = rebuildIndexesOnCollection(opCtx, dbce, cce, swIndexNameObjs.getValue());
         if (!status.isOK())
             return status;
 
@@ -298,6 +304,6 @@ Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std:
         // engine->flushAllFiles(true);
     }
 
-    return Status::OK();
+    return dataModified;
 }
 }

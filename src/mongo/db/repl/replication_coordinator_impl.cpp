@@ -494,10 +494,19 @@ bool ReplicationCoordinatorImpl::_startLoadLocalConfig(OperationContext* opCtx) 
     ReplSetConfig localConfig;
     status = localConfig.initialize(cfg.getValue());
     if (!status.isOK()) {
+        error() << "Got \"" << status << "\" while parsing " << cfg.getValue();
+        if (status.code() == ErrorCodes::RepairedReplicaSetConfig) {
+            error()
+                << "This database has been repaired and potentially modified replicated data that "
+                   "could corrupt your replica set. To see your repaired data, start MongoDB "
+                   "without the --replSet option. When you are finished recovering your data and "
+                   "would like to perform a complete re-sync, please refer to the documentation "
+                   "here: https://docs.mongodb.com/manual/tutorial/resync-replica-set-member/";
+            fassertFailedNoTrace(50895);
+        }
         error() << "Locally stored replica set configuration does not parse; See "
                    "http://www.mongodb.org/dochub/core/recover-replica-set-from-invalid-config "
-                   "for information on how to recover from this. Got \""
-                << status << "\" while parsing " << cfg.getValue();
+                   "for information on how to recover from this.";
         fassertFailedNoTrace(28545);
     }
 
@@ -2081,7 +2090,7 @@ void ReplicationCoordinatorImpl::invalidateConfigDueToRepair(OperationContext* o
         return;
     }
     BSONObjBuilder configBuilder(config.getValue());
-    configBuilder.append("repaired", true);
+    configBuilder.append(ReplSetConfig::kRepairedFieldName, true);
     fassert(50894, _externalState->storeLocalConfigDocument(opCtx, configBuilder.obj()));
 }
 

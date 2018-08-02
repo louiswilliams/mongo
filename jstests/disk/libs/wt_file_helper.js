@@ -44,6 +44,10 @@ let assertErrorOnStartupWhenFilesAreCorruptOrMissing = function(
     assert.gte(rawMongoProgramOutput().indexOf(errmsg), 0);
 };
 
+let assertRepairSucceeds = function(port, dbpath) {
+    assert.eq(0, runMongoProgram("mongod", "--repair", "--port", port, "--dbpath", dbpath));
+};
+
 /**
  * Assert certain error messages are thrown on a specific request when files are missing or corrupt.
  */

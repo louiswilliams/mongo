@@ -107,7 +107,8 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
         // At this point, we may not know if we are repairing a node that was part of a replica set,
         // so always invalidate the configuration if the catalog was repaired and modified.
         if (status.getValue()) {
-            repl::ReplicationCoordinator::get(opCtx)->invalidateConfigDueToRepair(opCtx);
+            repl::ReplicationCoordinator::get(opCtx->getServiceContext())
+                ->invalidateConfigDueToRepair(opCtx);
         }
     }
 

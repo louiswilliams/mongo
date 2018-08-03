@@ -24,6 +24,35 @@ let corruptFile = function(file) {
 };
 
 /**
+ * Assert that running MongoDB with --repair on the provided dbpath exits cleanly.
+ */
+let assertRepairSucceeds = function(port, dbpath) {
+    assert.eq(0, runMongoProgram("mongod", "--repair", "--port", port, "--dbpath", dbpath));
+};
+
+/**
+ * Assert that starting MongoDB with --replSet on an existing data path exits with a specific
+ * error.
+ */
+let assertErrorOnStartupWhenStartingAsReplSet = function(dbpath, port, rsName) {
+    clearRawMongoProgramOutput();
+
+    let node = MongoRunner.runMongod(
+        {dbpath: dbpath, port: port, replSet: rsName, noCleanData: true, waitForConnect: false});
+    assert.soon(function() {
+        return rawMongoProgramOutput().indexOf("Fatal Assertion 50895") >= 0;
+    });
+    MongoRunner.stopMongod(node, null, {allowedExitCode: MongoRunner.EXIT_ABRUPT});
+};
+
+let assertStartStandaloneOnExistingDbpath = function(dbpath, port, testFunc) {
+    let node = MongoRunner.runMongod({dbpath: dbpath, port: port, noCleanData: true});
+    assert(node);
+    testFunc(node);
+    MongoRunner.stopMongod(node);
+};
+
+/**
  * Assert certain error messages are thrown on startup when files are missing or corrupt.
  */
 let assertErrorOnStartupWhenFilesAreCorruptOrMissing = function(
@@ -42,10 +71,6 @@ let assertErrorOnStartupWhenFilesAreCorruptOrMissing = function(
     assert.eq(MongoRunner.EXIT_ABRUPT,
               runMongoProgram("mongod", "--port", mongod.port, "--dbpath", dbpath));
     assert.gte(rawMongoProgramOutput().indexOf(errmsg), 0);
-};
-
-let assertRepairSucceeds = function(port, dbpath) {
-    assert.eq(0, runMongoProgram("mongod", "--repair", "--port", port, "--dbpath", dbpath));
 };
 
 /**

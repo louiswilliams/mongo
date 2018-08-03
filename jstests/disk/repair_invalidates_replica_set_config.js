@@ -46,13 +46,11 @@
     // Starting up without --replSet should not fail, and the collection should exist with its data.
     jsTestLog(
         "The repaired secondary should start up and serve reads without the --replSet option");
-    secondary =
-        MongoRunner.runMongod({dbpath: secondaryDbpath, port: secondaryPort, noCleanData: true});
-    assert(secondary);
-    secondaryDB = secondary.getDB(dbName);
-    assert(secondaryDB[collName].exists());
-    assert.eq(secondaryDB[collName].find().itcount(), 1);
-    MongoRunner.stopMongod(secondary);
+    assertStartStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
+        let nodeDB = node.getDB(dbName);
+        assert(nodeDB[collName].exists());
+        assert.eq(nodeDB[collName].find().itcount(), 1);
+    });
 
     // Starting the secondary with a wiped data directory should force an initial sync.
     jsTestLog("The secondary with a wiped data directory should resync successfully");
@@ -84,29 +82,17 @@
 
     // Starting up with --replSet should fail with a specific error.
     jsTestLog("The repaired secondary should fail to start up with the --replSet option");
-    clearRawMongoProgramOutput();
-    secondary = MongoRunner.runMongod({
-        dbpath: secondaryDbpath,
-        port: secondaryPort,
-        replSet: replSet.getReplSetConfig()._id,
-        noCleanData: true,
-        waitForConnect: false
-    });
-    assert.soon(function() {
-        return rawMongoProgramOutput().indexOf("Fatal Assertion 50895") >= 0;
-    });
-    MongoRunner.stopMongod(secondary, null, {allowedExitCode: MongoRunner.EXIT_ABRUPT});
+    assertErrorOnStartupWhenStartingAsReplSet(
+        secondaryDbpath, secondaryPort, replSet.getReplSetConfig()._id);
 
     // Starting up without --replSet should not fail, but the collection should exist with no data.
     jsTestLog(
         "The repaired secondary should start up and serve reads without the --replSet option");
-    secondary =
-        MongoRunner.runMongod({dbpath: secondaryDbpath, port: secondaryPort, noCleanData: true});
-    assert(secondary);
-    secondaryDB = secondary.getDB(dbName);
-    assert(secondaryDB[collName].exists());
-    assert.eq(secondaryDB[collName].find().itcount(), 0);
-    MongoRunner.stopMongod(secondary);
+    assertStartStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
+        let nodeDB = node.getDB(dbName);
+        assert(nodeDB[collName].exists());
+        assert.eq(nodeDB[collName].find().itcount(), 0);
+    });
 
     // Starting the secondary with a wiped data directory should force an initial sync.
     jsTestLog("The secondary with a wiped data directory should resync successfully");
@@ -136,28 +122,16 @@
 
     // Starting up with --replSet should fail with a specific error.
     jsTestLog("The repaired secondary should fail to start up with the --replSet option");
-    clearRawMongoProgramOutput();
-    secondary = MongoRunner.runMongod({
-        dbpath: secondaryDbpath,
-        port: secondaryPort,
-        replSet: replSet.getReplSetConfig()._id,
-        noCleanData: true,
-        waitForConnect: false
-    });
-    assert.soon(function() {
-        return rawMongoProgramOutput().indexOf("Fatal Assertion 50895") >= 0;
-    });
-    MongoRunner.stopMongod(secondary, null, {allowedExitCode: MongoRunner.EXIT_ABRUPT});
+    assertErrorOnStartupWhenStartingAsReplSet(
+        secondaryDbpath, secondaryPort, replSet.getReplSetConfig()._id);
 
     // Starting up without --replSet should not fail, but the collection should exist with no data.
     jsTestLog(
         "The repaired secondary should start up and serve reads without the --replSet option");
-    secondary =
-        MongoRunner.runMongod({dbpath: secondaryDbpath, port: secondaryPort, noCleanData: true});
-    assert(secondary);
-    secondaryDB = secondary.getDB(dbName);
-    assert(!secondaryDB[collName].exists());
-    MongoRunner.stopMongod(secondary);
+    assertStartStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
+        let nodeDB = node.getDB(dbName);
+        assert(!nodeDB[collName].exists());
+    });
 
     // Starting the secondary with a wiped data directory should force an initial sync.
     jsTestLog("The secondary with a wiped data directory should resync successfully");

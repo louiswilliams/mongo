@@ -65,10 +65,11 @@ let assertStartAndStopStandaloneOnExistingDbpath = function(dbpath, port, testFu
  *
  * Returns the started node.
  */
-let assertStartAndResync = function(replSet, originalNode, testFunc) {
+let assertStartAndResync = function(replSet, originalNode, cleanData, testFunc) {
     jsTestLog("The node with a wiped data directory should resync successfully");
     let node = replSet.start(
-        originalNode, {dbpath: originalNode.dbpath, port: originalNode.port, startClean: true});
+        originalNode,
+        {dbpath: originalNode.dbpath, port: originalNode.port, startClean: cleanData});
     assert(node);
     replSet.awaitSecondaryNodes();
     testFunc(node);

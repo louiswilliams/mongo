@@ -27,6 +27,7 @@ let corruptFile = function(file) {
  * Assert that running MongoDB with --repair on the provided dbpath exits cleanly.
  */
 let assertRepairSucceeds = function(port, dbpath) {
+    jsTestLog("Repairing the node");
     assert.eq(0, runMongoProgram("mongod", "--repair", "--port", port, "--dbpath", dbpath));
 };
 
@@ -35,8 +36,9 @@ let assertRepairSucceeds = function(port, dbpath) {
  * error.
  */
 let assertErrorOnStartupWhenStartingAsReplSet = function(dbpath, port, rsName) {
-    clearRawMongoProgramOutput();
+    jsTestLog("The repaired node should fail to start up with the --replSet option");
 
+    clearRawMongoProgramOutput();
     let node = MongoRunner.runMongod(
         {dbpath: dbpath, port: port, replSet: rsName, noCleanData: true, waitForConnect: false});
     assert.soon(function() {
@@ -45,13 +47,33 @@ let assertErrorOnStartupWhenStartingAsReplSet = function(dbpath, port, rsName) {
     MongoRunner.stopMongod(node, null, {allowedExitCode: MongoRunner.EXIT_ABRUPT});
 };
 
-let assertStartStandaloneOnExistingDbpath = function(dbpath, port, testFunc) {
+/**
+ * Assert that starting MongoDB as a standalone on an existing data path succeeds. Uses a provided
+ * testFunc to run any caller-provided checks on the started node.
+ */
+let assertStartAndStopStandaloneOnExistingDbpath = function(dbpath, port, testFunc) {
+    jsTestLog("The repaired node should start up and serve reads without the --replSet option");
     let node = MongoRunner.runMongod({dbpath: dbpath, port: port, noCleanData: true});
     assert(node);
     testFunc(node);
     MongoRunner.stopMongod(node);
 };
 
+/**
+ * Assert that starting MongoDB with --replSet on a clean data directory succeeds. Uses a provided
+ * testFunc to run any caller-provided checks on the started node.
+ *
+ * Returns the started node.
+ */
+let assertStartAndResync = function(replSet, originalNode, testFunc) {
+    jsTestLog("The node with a wiped data directory should resync successfully");
+    let node = replSet.start(
+        originalNode, {dbpath: originalNode.dbpath, port: originalNode.port, startClean: true});
+    assert(node);
+    replSet.awaitSecondaryNodes();
+    testFunc(node);
+    return node;
+};
 /**
  * Assert certain error messages are thrown on startup when files are missing or corrupt.
  */

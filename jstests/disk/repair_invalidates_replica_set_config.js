@@ -40,27 +40,21 @@
     MongoRunner.stopMongod(secondary);
 
     // Ensure the secondary can be repaired successfully.
-    jsTestLog("Repairing the secondary");
     assertRepairSucceeds(secondaryPort, secondaryDbpath);
 
     // Starting up without --replSet should not fail, and the collection should exist with its data.
-    jsTestLog(
-        "The repaired secondary should start up and serve reads without the --replSet option");
-    assertStartStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
+    assertStartAndStopStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
         let nodeDB = node.getDB(dbName);
         assert(nodeDB[collName].exists());
         assert.eq(nodeDB[collName].find().itcount(), 1);
     });
 
     // Starting the secondary with a wiped data directory should force an initial sync.
-    jsTestLog("The secondary with a wiped data directory should resync successfully");
-    secondary = replSet.start(originalSecondary,
-                              {dbpath: secondaryDbpath, port: secondaryPort, startClean: false});
+    secondary = assertStartAndResync(replSet, originalSecondary, function(node) {
+        let nodeDB = node.getDB(dbName);
+        assert.eq(nodeDB[collName].find().itcount(), 1);
+    });
     secondaryDB = secondary.getDB(dbName);
-
-    // Wait for the secondary to catch up.
-    replSet.awaitSecondaryNodes();
-    assert.eq(secondaryDB[collName].find().itcount(), 1);
 
     //
     //
@@ -77,31 +71,25 @@
     removeFile(secondaryCollFile);
 
     // Ensure the secondary can be repaired successfully.
-    jsTestLog("Repairing the secondary");
     assertRepairSucceeds(secondaryPort, secondaryDbpath);
 
     // Starting up with --replSet should fail with a specific error.
-    jsTestLog("The repaired secondary should fail to start up with the --replSet option");
     assertErrorOnStartupWhenStartingAsReplSet(
         secondaryDbpath, secondaryPort, replSet.getReplSetConfig()._id);
 
     // Starting up without --replSet should not fail, but the collection should exist with no data.
-    jsTestLog(
-        "The repaired secondary should start up and serve reads without the --replSet option");
-    assertStartStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
+    assertStartAndStopStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
         let nodeDB = node.getDB(dbName);
         assert(nodeDB[collName].exists());
         assert.eq(nodeDB[collName].find().itcount(), 0);
     });
 
     // Starting the secondary with a wiped data directory should force an initial sync.
-    jsTestLog("The secondary with a wiped data directory should resync successfully");
-    secondary = replSet.start(originalSecondary, {dbpath: secondaryDbpath, port: secondaryPort});
+    secondary = assertStartAndResync(replSet, originalSecondary, function(node) {
+        let nodeDB = node.getDB(dbName);
+        assert.eq(nodeDB[collName].find().itcount(), 1);
+    });
     secondaryDB = secondary.getDB(dbName);
-
-    // Wait for the secondary to catch up.
-    replSet.awaitSecondaryNodes();
-    assert.eq(secondaryDB[collName].find().itcount(), 1);
 
     //
     //
@@ -117,30 +105,23 @@
     removeFile(mdbCatalogFile);
 
     // Ensure the secondary can be repaired successfully.
-    jsTestLog("Repairing the secondary");
     assertRepairSucceeds(secondaryPort, secondaryDbpath);
 
     // Starting up with --replSet should fail with a specific error.
-    jsTestLog("The repaired secondary should fail to start up with the --replSet option");
     assertErrorOnStartupWhenStartingAsReplSet(
         secondaryDbpath, secondaryPort, replSet.getReplSetConfig()._id);
 
     // Starting up without --replSet should not fail, but the collection should exist with no data.
-    jsTestLog(
-        "The repaired secondary should start up and serve reads without the --replSet option");
-    assertStartStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
+    assertStartAndStopStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
         let nodeDB = node.getDB(dbName);
         assert(!nodeDB[collName].exists());
     });
 
     // Starting the secondary with a wiped data directory should force an initial sync.
-    jsTestLog("The secondary with a wiped data directory should resync successfully");
-    secondary = replSet.start(originalSecondary, {dbpath: secondaryDbpath, port: secondaryPort});
-    secondaryDB = secondary.getDB(dbName);
-
-    // Wait for the secondary to catch up.
-    replSet.awaitSecondaryNodes();
-    assert.eq(secondaryDB[collName].find().itcount(), 1);
+    secondary = assertStartAndResync(replSet, originalSecondary, function(node) {
+        let nodeDB = node.getDB(dbName);
+        assert.eq(nodeDB[collName].find().itcount(), 1);
+    });
 
     replSet.stopSet();
 

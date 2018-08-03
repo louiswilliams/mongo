@@ -200,6 +200,14 @@ DEATH_TEST_F(ReplCoordTest,
     getReplCoord()->startup(opCtx.get());
 }
 
+DEATH_TEST_F(ReplCoordTest,
+             NodeDiesWhenStartingUpAfterRepairAndNoLocalConfig,
+             "Fatal Assertion 50895") {
+    init("mySet");
+    auto opCtx = makeOperationContext();
+    getReplCoord()->invalidateConfigDueToRepair(opCtx.get());
+    getReplCoord()->startup(opCtx.get());
+}
 TEST_F(ReplCoordTest, NodeReturnsInvalidReplicaSetConfigWhenInitiatedWithAnEmptyConfig) {
     init("mySet");
     start(HostAndPort("node1", 12345));

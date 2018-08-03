@@ -104,7 +104,7 @@ public:
     }
 
     virtual StatusWith<bool> repairIdent(OperationContext* opCtx, StringData ident) override {
-        return StatusWith<bool>(false);
+        return false;
     }
 
     virtual bool hasIdent(OperationContext* opCtx, StringData ident) const {

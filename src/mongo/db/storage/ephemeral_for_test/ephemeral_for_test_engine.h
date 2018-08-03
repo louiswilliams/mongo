@@ -93,7 +93,7 @@ public:
     virtual int64_t getIdentSize(OperationContext* opCtx, StringData ident);
 
     virtual StatusWith<bool> repairIdent(OperationContext* opCtx, StringData ident) override {
-        return StatusWith<bool>(false);
+        return false;
     }
 
     virtual void cleanShutdown() override{};

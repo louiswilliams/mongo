@@ -301,7 +301,9 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
 
     bool repairVerifiedAllCollectionsHaveUUIDs = false;
 
-    bool nonLocalDatabasesModified = false;
+    // If the catalog data was modified by a repair operation, the data on this node is no longer
+    // consistent with the rest of the replica set, and its config should be invalidated.
+    bool invalidateReplSetConfig = storageEngine->catalogModifiedByRepair();
 
     // Repair all databases first, so that we do not try to open them if they are in bad shape
     if (storageGlobalParams.repair) {
@@ -312,7 +314,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
             fassert(18506, swModified.getStatus());
 
             if (dbName != "local")
-                nonLocalDatabasesModified |= swModified.getValue();
+                invalidateReplSetConfig |= swModified.getValue();
         }
 
         // All collections must have UUIDs before restoring the FCV document to a version that
@@ -360,10 +362,14 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         DatabaseHolder::getDatabaseHolder().openDb(opCtx, kSystemReplSetCollection.db());
     }
 
-    if (nonLocalDatabasesModified && hasReplSetConfig(opCtx)) {
+    if (invalidateReplSetConfig) {
+        if (!hasReplSetConfig(opCtx)) {
+            warning() << "No replica set config found, but invalidating anyways. If this node was "
+                         "never part of a replica set, this message can be safely ignored.";
+        }
         warning()
             << "Repair may have modified data that was part of a replicated collection. This node "
-               "will no longer be able to join its replica set without a full re-sync";
+               "will no longer be able to join a replica set without a full re-sync";
         repl::ReplicationCoordinator::get(opCtx)->invalidateConfigDueToRepair(opCtx);
     }
 

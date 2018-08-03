@@ -96,6 +96,7 @@ KVStorageEngine::KVStorageEngine(
 
 void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
     bool catalogExists = _engine->hasIdent(opCtx, catalogInfo);
+    bool catalogModifiedByRepair = false;
     if (_options.forRepair && catalogExists) {
         log() << "Repairing catalog metadata";
         // TODO should also validate all BSON in the catalog.
@@ -104,12 +105,7 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
         // All hope is lost if the catalog can't be repaired.
         fassertNoTrace(50893, status.getStatus());
 
-        // At this point, we may not know if we are repairing a node that was part of a replica set,
-        // so always invalidate the configuration if the catalog was repaired and modified.
-        if (status.getValue()) {
-            repl::ReplicationCoordinator::get(opCtx->getServiceContext())
-                ->invalidateConfigDueToRepair(opCtx);
-        }
+        catalogModifiedByRepair = status.getValue();
     }
 
     if (!catalogExists) {
@@ -134,8 +130,10 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
         _dumpCatalog(opCtx);
     }
 
-    _catalog.reset(new KVCatalog(
-        _catalogRecordStore.get(), _options.directoryPerDB, _options.directoryForIndexes));
+    _catalog.reset(new KVCatalog(_catalogRecordStore.get(),
+                                 _options.directoryPerDB,
+                                 _options.directoryForIndexes,
+                                 catalogModifiedByRepair));
     _catalog->init(opCtx);
 
     // We populate 'identsKnownToStorageEngine' only if we are loading after an unclean shutdown or

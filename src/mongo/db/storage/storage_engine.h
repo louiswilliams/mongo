@@ -217,6 +217,11 @@ public:
     virtual void closeCatalog(OperationContext* opCtx) {}
 
     /**
+     * If 'true', catalog data was potentially modified by a repair operation.
+     */
+    virtual bool catalogModifiedByRepair() const = 0;
+
+    /**
      * Closes all file handles associated with a database.
      */
     virtual Status closeDatabase(OperationContext* opCtx, StringData db) = 0;

@@ -2085,11 +2085,12 @@ void ReplicationCoordinatorImpl::invalidateConfigDueToRepair(OperationContext* o
     stdx::unique_lock<stdx::mutex> lk(_mutex);
     invariant(_rsConfigState == kConfigPreStart);
 
-    StatusWith<BSONObj> config = _externalState->loadLocalConfigDocument(opCtx);
-    if (!config.isOK()) {
-        return;
+    // Always invalidates, even if the config doesn't exist.
+    StatusWith<BSONObj> swConfig = _externalState->loadLocalConfigDocument(opCtx);
+    BSONObjBuilder configBuilder;
+    if (swConfig.isOK()) {
+        configBuilder.appendElements(swConfig.getValue());
     }
-    BSONObjBuilder configBuilder(config.getValue());
     configBuilder.append(ReplSetConfig::kRepairedFieldName, true);
     fassert(50894, _externalState->storeLocalConfigDocument(opCtx, configBuilder.obj()));
 }

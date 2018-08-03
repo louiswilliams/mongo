@@ -183,6 +183,10 @@ public:
 
     void closeCatalog(OperationContext* opCtx) final;
 
+    bool catalogModifiedByRepair() const final {
+        return _catalog->dataModifiedByRepair();
+    }
+
 private:
     using CollIter = std::list<std::string>::iterator;
 

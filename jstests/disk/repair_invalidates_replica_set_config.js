@@ -156,8 +156,7 @@
         MongoRunner.runMongod({dbpath: secondaryDbpath, port: secondaryPort, noCleanData: true});
     assert(secondary);
     secondaryDB = secondary.getDB(dbName);
-    assert(secondaryDB[collName].exists());
-    assert.eq(secondaryDB[collName].find().itcount(), 0);
+    assert(!secondaryDB[collName].exists());
     MongoRunner.stopMongod(secondary);
 
     // Starting the secondary with a wiped data directory should force an initial sync.

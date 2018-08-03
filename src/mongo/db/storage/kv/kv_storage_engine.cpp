@@ -37,7 +37,6 @@
 #include "mongo/db/catalog/catalog_control.h"
 #include "mongo/db/logical_clock.h"
 #include "mongo/db/operation_context_noop.h"
-#include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/storage/kv/kv_catalog_feature_tracker.h"
 #include "mongo/db/storage/kv/kv_database_catalog_entry.h"
 #include "mongo/db/storage/kv/kv_engine.h"
@@ -100,12 +99,14 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
     if (_options.forRepair && catalogExists) {
         log() << "Repairing catalog metadata";
         // TODO should also validate all BSON in the catalog.
-        StatusWith<bool> status = _engine->repairIdent(opCtx, catalogInfo);
+        Status status = _engine->repairIdent(opCtx, catalogInfo);
 
-        // All hope is lost if the catalog can't be repaired.
-        fassertNoTrace(50893, status.getStatus());
-
-        catalogModifiedByRepair = status.getValue();
+        if (status.code() == ErrorCodes::DataModifiedByRepair) {
+            log() << "Catalog data modified by repair: " << status.reason();
+            catalogModifiedByRepair = true;
+        } else {
+            fassertNoTrace(50893, status);
+        }
     }
 
     if (!catalogExists) {
@@ -580,14 +581,13 @@ SnapshotManager* KVStorageEngine::getSnapshotManager() const {
     return _engine->getSnapshotManager();
 }
 
-StatusWith<bool> KVStorageEngine::repairRecordStore(OperationContext* opCtx,
-                                                    const std::string& ns) {
-    StatusWith<bool> swModified = _engine->repairIdent(opCtx, _catalog->getCollectionIdent(ns));
-    if (swModified.isOK()) {
+Status KVStorageEngine::repairRecordStore(OperationContext* opCtx, const std::string& ns) {
+    Status status = _engine->repairIdent(opCtx, _catalog->getCollectionIdent(ns));
+    if (status.isOK() || status.code() == ErrorCodes::DataModifiedByRepair) {
         _dbs[nsToDatabase(ns)]->reinitCollectionAfterRepair(opCtx, ns);
     }
 
-    return swModified;
+    return status;
 }
 
 void KVStorageEngine::setJournalListener(JournalListener* jl) {

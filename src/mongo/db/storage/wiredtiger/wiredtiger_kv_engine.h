@@ -308,7 +308,7 @@ private:
     class WiredTigerJournalFlusher;
     class WiredTigerCheckpointThread;
 
-    StatusWith<bool> _salvageIfNeeded(const char* uri);
+    Status _salvageIfNeeded(const char* uri);
     void _ensureIdentPath(StringData ident);
 
     bool _hasUri(WT_SESSION* session, const std::string& uri) const;

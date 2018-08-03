@@ -165,10 +165,10 @@ public:
     virtual int64_t getIdentSize(OperationContext* opCtx, StringData ident) = 0;
 
     /**
-     * Repair an ident. If data has been or could have been modified, returns 'true'. Returns
-     * 'false' if no data was modified. Returns an error status if repair fails.
+     * Repair an ident. Returns Status::OK if repair did not modify data. Returns a non-fatal status
+     * of DataModifiedByRepair if a repair operation succeeded, but may have modified data.
      */
-    virtual StatusWith<bool> repairIdent(OperationContext* opCtx, StringData ident) = 0;
+    virtual Status repairIdent(OperationContext* opCtx, StringData ident) = 0;
 
     virtual Status dropIdent(OperationContext* opCtx, StringData ident) = 0;
 

@@ -73,9 +73,8 @@ Status rebuildIndexesOnCollection(OperationContext* opCtx,
  * Some data may be lost or modified in the process but the output will
  * be structurally valid on successful return.
  *
- * Returns a value of 'true' if data has been or may have been modified.
+ * Returns a non-fatal status of DataModifiedByRepair if data has been or may have been
+ * modified.
  */
-StatusWith<bool> repairDatabase(OperationContext* opCtx,
-                                StorageEngine* engine,
-                                const std::string& dbName);
+Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std::string& dbName);
 }

@@ -284,13 +284,13 @@ public:
      * Recover as much data as possible from a potentially corrupt RecordStore.
      * This only recovers the record data, not indexes or anything else.
      *
-     * If data has been or could have been modified, returns 'true'. Returns 'false' if no data was
-     * modified. Returns an error status if repair fails.
+     * If data has been or could have been modified, returns DataModifiedByRepair, which indicates a
+     * non-fatal modification of data.
      *
      * Generally, this method should not be called directly except by the repairDatabase()
      * free function.
      */
-    virtual StatusWith<bool> repairRecordStore(OperationContext* opCtx, const std::string& ns) = 0;
+    virtual Status repairRecordStore(OperationContext* opCtx, const std::string& ns) = 0;
 
     /**
      * This method will be called before there is a clean shutdown.  Storage engines should

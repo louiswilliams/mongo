@@ -229,9 +229,7 @@ Status rebuildIndexesOnCollection(OperationContext* opCtx,
     return Status::OK();
 }
 
-StatusWith<bool> repairDatabase(OperationContext* opCtx,
-                                StorageEngine* engine,
-                                const std::string& dbName) {
+Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std::string& dbName) {
     DisableDocumentValidation validationDisabler(opCtx);
 
     // We must hold some form of lock here
@@ -285,18 +283,22 @@ StatusWith<bool> repairDatabase(OperationContext* opCtx,
 
         log() << "Repairing collection " << *it;
 
-        auto swModified = engine->repairRecordStore(opCtx, *it);
-        if (!swModified.isOK())
-            return swModified.getStatus();
+        Status status = engine->repairRecordStore(opCtx, *it);
+        bool modified = status.code() == ErrorCodes::DataModifiedByRepair;
+        if (!status.isOK() && !modified)
+            return status;
 
-        dataModified |= swModified.getValue();
+        if (modified) {
+            log() << "Data modified by repair for collection " << *it << ": " << status.reason();
+            dataModified = true;
+        }
 
         CollectionCatalogEntry* cce = dbce->getCollectionCatalogEntry(*it);
         auto swIndexNameObjs = getIndexNameObjs(opCtx, dbce, cce);
         if (!swIndexNameObjs.isOK())
             return swIndexNameObjs.getStatus();
 
-        Status status = rebuildIndexesOnCollection(opCtx, dbce, cce, swIndexNameObjs.getValue());
+        status = rebuildIndexesOnCollection(opCtx, dbce, cce, swIndexNameObjs.getValue());
         if (!status.isOK())
             return status;
 
@@ -304,6 +306,7 @@ StatusWith<bool> repairDatabase(OperationContext* opCtx,
         // engine->flushAllFiles(true);
     }
 
-    return dataModified;
+    return (dataModified) ? Status(ErrorCodes::DataModifiedByRepair, "Data modified by repair")
+                          : Status::OK();
 }
 }

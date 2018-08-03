@@ -92,18 +92,18 @@ public:
 
     virtual int64_t getIdentSize(OperationContext* opCtx, StringData ident);
 
-    virtual StatusWith<bool> repairIdent(OperationContext* opCtx, StringData ident) override {
-        return false;
+    virtual Status repairIdent(OperationContext* opCtx, StringData ident) {
+        return Status::OK();
     }
 
-    virtual void cleanShutdown() override{};
+    virtual void cleanShutdown(){};
 
-    virtual bool hasIdent(OperationContext* opCtx, StringData ident) const override {
+    virtual bool hasIdent(OperationContext* opCtx, StringData ident) const {
         return _dataMap.find(ident) != _dataMap.end();
         ;
     }
 
-    std::vector<std::string> getAllIdents(OperationContext* opCtx) const override;
+    std::vector<std::string> getAllIdents(OperationContext* opCtx) const;
 
     void setJournalListener(JournalListener* jl) final {
         stdx::unique_lock<stdx::mutex> lk(_mutex);

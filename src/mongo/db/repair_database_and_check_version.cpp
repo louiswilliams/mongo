@@ -310,11 +310,16 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         invariant(!storageGlobalParams.readOnly);
         for (const auto& dbName : dbNames) {
             LOG(1) << "    Repairing database: " << dbName;
-            auto swModified = repairDatabase(opCtx, storageEngine, dbName);
-            fassert(18506, swModified.getStatus());
+            auto status = repairDatabase(opCtx, storageEngine, dbName);
+            bool modified = status.code() == ErrorCodes::DataModifiedByRepair;
+            if (!modified)
+                fassert(18506, status);
 
-            if (dbName != "local")
-                invalidateReplSetConfig |= swModified.getValue();
+            if (modified && dbName != "local") {
+                log() << "Data modified on non-local database " << dbName << ": "
+                      << status.reason();
+                invalidateReplSetConfig = true;
+            }
         }
 
         // All collections must have UUIDs before restoring the FCV document to a version that

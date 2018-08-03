@@ -103,8 +103,8 @@ public:
         return 1;
     }
 
-    virtual StatusWith<bool> repairIdent(OperationContext* opCtx, StringData ident) override {
-        return false;
+    virtual Status repairIdent(OperationContext* opCtx, StringData ident) {
+        return Status::OK();
     }
 
     virtual bool hasIdent(OperationContext* opCtx, StringData ident) const {

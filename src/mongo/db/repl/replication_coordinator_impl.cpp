@@ -2081,37 +2081,6 @@ ReplSetConfig ReplicationCoordinatorImpl::getConfig() const {
     return _rsConfig;
 }
 
-void ReplicationCoordinatorImpl::setConfigRepaired(OperationContext* opCtx) {
-    stdx::unique_lock<stdx::mutex> lk(_mutex);
-    invariant(_rsConfigState == kConfigPreStart);
-
-    // Always invalidates, even if the config doesn't exist.
-    StatusWith<BSONObj> swConfig = _externalState->loadLocalConfigDocument(opCtx);
-    BSONObjBuilder configBuilder;
-    if (swConfig.isOK()) {
-        configBuilder.appendElements(swConfig.getValue());
-    }
-    configBuilder.append(ReplSetConfig::kRepairedFieldName, true);
-    fassert(50894, _externalState->storeLocalConfigDocument(opCtx, configBuilder.obj()));
-}
-
-void ReplicationCoordinatorImpl::unsetConfigRepaired(OperationContext* opCtx) {
-    stdx::unique_lock<stdx::mutex> lk(_mutex);
-    invariant(_rsConfigState == kConfigPreStart);
-
-    StatusWith<BSONObj> swConfig = _externalState->loadLocalConfigDocument(opCtx);
-    BSONObjBuilder configBuilder;
-    // Append everything except the repaired field.
-    if (swConfig.isOK()) {
-        for (auto& elem : swConfig.getValue()) {
-            if (elem.fieldName() != ReplSetConfig::kRepairedFieldName) {
-                configBuilder.append(elem);
-            }
-        }
-    }
-    fassert(50897, _externalState->storeLocalConfigDocument(opCtx, configBuilder.obj()));
-}
-
 void ReplicationCoordinatorImpl::processReplSetGetConfig(BSONObjBuilder* result) {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
     result->append("config", _rsConfig.toBSON());

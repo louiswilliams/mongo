@@ -189,6 +189,8 @@ DEATH_TEST_F(ReplCoordTest,
     ASSERT_OK(getExternalState()->storeLocalConfigDocument(opCtx.get(),
                                                            BSON("_id"
                                                                 << "mySet"
+                                                                << "repaired"
+                                                                << true
                                                                 << "version"
                                                                 << 2
                                                                 << "members"
@@ -196,7 +198,6 @@ DEATH_TEST_F(ReplCoordTest,
                                                                        "_id" << 1 << "host"
                                                                              << "node1:12345")))));
 
-    getReplCoord()->setConfigRepaired(opCtx.get());
     getReplCoord()->startup(opCtx.get());
 }
 
@@ -205,7 +206,6 @@ DEATH_TEST_F(ReplCoordTest,
              "Fatal Assertion 50895") {
     init("mySet");
     auto opCtx = makeOperationContext();
-    getReplCoord()->setConfigRepaired(opCtx.get());
     getReplCoord()->startup(opCtx.get());
 }
 TEST_F(ReplCoordTest, NodeReturnsInvalidReplicaSetConfigWhenInitiatedWithAnEmptyConfig) {

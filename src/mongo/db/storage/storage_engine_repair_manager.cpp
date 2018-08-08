@@ -28,15 +28,29 @@
 
 #include "mongo/db/storage/storage_engine_repair_manager.h"
 
+#include "mongo/db/dbhelpers.h"
+#include "mongo/db/repl/repl_set_config.h"
 #include "mongo/db/service_context.h"
 
 namespace mongo {
 
 namespace {
+static const NamespaceString kConfigNss("local.system.replset");
+static const std::string kRepairIncompleteFileName = "_repair_incomplete";
+
+
 const auto getRepairManager =
     ServiceContext::declareDecoration<std::unique_ptr<StorageEngineRepairManager>>();
 }  // namespace
 
+StorageEngineRepairManager::StorageEngineRepairManager(const std::string& dbpath)
+    : _dataAlreadyModified(false) {
+
+    _repairIncompleteFilePath = boost::filesystem::path(dbpath + kRepairIncompleteFileName);
+    _repairState = boost::filesystem::exists(_repairIncompleteFilePath) ? RepairState::kIncomplete
+                                                                        : RepairState::kStartup;
+}
+StorageEngineRepairManager::~StorageEngineRepairManager() {}
 
 StorageEngineRepairManager* StorageEngineRepairManager::get(ServiceContext* service) {
     return getRepairManager(service).get();
@@ -46,6 +60,84 @@ void StorageEngineRepairManager::set(ServiceContext* service,
                                      std::unique_ptr<StorageEngineRepairManager> repairManager) {
     auto& manager = getRepairManager(service);
     manager = std::move(repairManager);
+}
+
+void StorageEngineRepairManager::updateStateFromReplConfig(OperationContext* opCtx) {
+    invariant(_repairState == RepairState::kIncomplete);
+
+    BSONObj config;
+    if (Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {
+        if (config.hasField(repl::ReplSetConfig::kRepairedFieldName)) {
+            _dataAlreadyModified = true;
+            _repairState = RepairState::kDataModified;
+            return;
+        }
+    }
+
+    _dataAlreadyModified = false;
+    _repairState = RepairState::kDataUnmodified;
+}
+
+void StorageEngineRepairManager::markIncomplete() {
+    invariant(_repairState == RepairState::kStartup);
+    _touchRepairIncompleteFile();
+    _repairState = RepairState::kIncomplete;
+}
+
+void StorageEngineRepairManager::markDataModified(OperationContext* opCtx, bool modified) {
+    invariant(_repairState == RepairState::kDataModified || modified);
+    invariant(_repairState == RepairState::kIncomplete || !modified);
+
+    if (modified) {
+        _setReplConfigInvalid(opCtx);
+        _removeRepairIncompleteFile();
+        return;
+    }
+    _unsetReplConfigInvalid(opCtx);
+
+    _repairState = modified ? RepairState::kDataModified : RepairState::kDataUnmodified;
+}
+
+void StorageEngineRepairManager::_touchRepairIncompleteFile() {
+    boost::filesystem::ofstream file(_repairIncompleteFilePath);
+    file << "";
+    file.close();
+    invariant(boost::filesystem::exists(_repairIncompleteFilePath));
+}
+
+void StorageEngineRepairManager::_removeRepairIncompleteFile() {
+    invariant(boost::filesystem::exists(_repairIncompleteFilePath));
+
+    boost::filesystem::remove(_repairIncompleteFilePath);
+}
+
+void StorageEngineRepairManager::_setReplConfigInvalid(OperationContext* opCtx) {
+    BSONObjBuilder configBuilder;
+    BSONObj config;
+    if (Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {
+        configBuilder.appendElements(config);
+    }
+    if (config.hasField(repl::ReplSetConfig::kRepairedFieldName)) {
+        return;
+    }
+    configBuilder.append(repl::ReplSetConfig::kRepairedFieldName, true);
+    Helpers::putSingleton(opCtx, kConfigNss.ns().c_str(), configBuilder.obj());
+}
+
+void StorageEngineRepairManager::_unsetReplConfigInvalid(OperationContext* opCtx) {
+    invariant(!_dataAlreadyModified);
+
+    BSONObjBuilder configBuilder;
+    BSONObj config;
+    if (Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {
+        // Append everything except the repaired field.
+        for (auto& elem : config) {
+            if (elem.fieldName() != repl::ReplSetConfig::kRepairedFieldName) {
+                configBuilder.append(elem);
+            }
+        }
+    }
+    Helpers::putSingleton(opCtx, kConfigNss.ns().c_str(), configBuilder.obj());
 }
 
 }  // namespace mongo

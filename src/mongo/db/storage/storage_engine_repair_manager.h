@@ -30,6 +30,7 @@
 
 #include "mongo/platform/basic.h"
 
+#include "boost/filesystem.hpp"
 #include "mongo/base/disallow_copying.h"
 #include "mongo/db/service_context.h"
 
@@ -44,9 +45,8 @@ class StorageEngineRepairManager {
 public:
     MONGO_DISALLOW_COPYING(StorageEngineRepairManager);
 
-    StorageEngineRepairManager() : _repairState(RepairState::kStable) {}
-
-    virtual ~StorageEngineRepairManager() {}
+    StorageEngineRepairManager(const std::string& dbpath);
+    ~StorageEngineRepairManager();
 
     static StorageEngineRepairManager* get(ServiceContext* service);
     static void set(ServiceContext* service,
@@ -54,10 +54,11 @@ public:
 
     enum class RepairState {
         /**
-         * No data has been modified. If the process were to exit, the server may be started again
-         * safely.
+         * No data has been modified, but the state of the replica set configuration is still
+         * unknown. If the process were to exit in this state the server will be able to start up
+         * normally, except if the replica set configuration is invalidated.
          */
-        kStable,
+        kStartup,
         /**
          * Data is in the act of being repaired. Data may or may not have been modified by
          * repair, but if the process were to exit in this state, we do not know. The server should
@@ -65,56 +66,48 @@ public:
          */
         kIncomplete,
         /**
-         * Repair has completed and modified data. This node will be unable to rejoin its original
-         * replica set.
+         * Repair has modified data. If the process were to exit, the server may be started again
+         * safely, but not rejoin a replica set.
          */
-        kIncompleteMetadataRepaired,
-        kRepairedDataModified,
-        kRepairedDataUnmodified,
+        kDataModified,
+        /**
+         * No data has been modified. If the process were to exit, the server may be started again
+         * safely.
+         */
+        kDataUnmodified,
 
     };
 
-    void setIncomplete() {
-        _setState(RepairState::kIncomplete);
-    }
+    void markIncomplete();
 
-    void setMetadataRepaired() {
-        _setState(RepairState::kIncompleteMetadataRepaired);
-    }
+    void markDataModified(OperationContext* opCtx, bool modified);
 
-    void setDataRepaired(bool modified) {
-        _setState(modified ? RepairState::kRepairedDataModified
-                           : RepairState::kRepairedDataUnmodified);
-    }
+    void updateStateFromReplConfig(OperationContext* opCtx);
 
-    bool isIncomplete() const {
+    bool incomplete() const {
         return _repairState == RepairState::kIncomplete;
     }
 
-    bool getDataModifiedByRepair() {
-        return _repairState == RepairState::kRepairedDataModified;
+    bool dataModified() const {
+        return _repairState == RepairState::kDataModified;
     }
 
-    bool isModified() const {
-        return _repairState == RepairState::kRepairedDataUnmodified;
+    bool dataAlreadyModifiedByRepair() const {
+        return _dataAlreadyModified;
     }
 
 
 private:
-    void _setState(RepairState state) {
-        switch (state) {
-            case RepairState::kStable:
-            case RepairState::kIncomplete:
-            case RepairState::kIncompleteMetadataRepaired:
-            case RepairState::kRepairedDataModified:
-            case RepairState::kRepairedDataUnmodified:
-            default:
-                break;
-        }
-        _repairState = state;
-    }
+    void _touchRepairIncompleteFile();
+    void _removeRepairIncompleteFile();
+
+    void _setReplConfigInvalid(OperationContext* opCtx);
+    void _unsetReplConfigInvalid(OperationContext* opCtx);
+
+    boost::filesystem::path _repairIncompleteFilePath;
 
     RepairState _repairState;
+    bool _dataAlreadyModified;
 };
 
 }  // namespace mongo

@@ -68,9 +68,12 @@ void initializeStorageEngine(ServiceContext* service, const StorageEngineInitFla
         createLockFile(service);
     }
 
-    // Only initialize RepairManager if necessary.
+    const std::string dbpath = storageGlobalParams.dbpath;
+
+    // Only initialize RepairManager if starting with repair.
     if (storageGlobalParams.repair) {
-        StorageEngineRepairManager::set(service, std::make_unique<StorageEngineRepairManager>());
+        StorageEngineRepairManager::set(service,
+                                        std::make_unique<StorageEngineRepairManager>(dbpath));
     }
 
     auto repairManager = StorageEngineRepairManager::get(service);
@@ -79,16 +82,11 @@ void initializeStorageEngine(ServiceContext* service, const StorageEngineInitFla
                 str::stream() << "An incomplete repair has been detected! This is likely because "
                                  "a repair operation unexpectedly failed before completing. "
                                  "MongoDB will not start up again without --repair.",
-                !repairManager->isIncomplete());
+                !repairManager->incomplete());
 
-        repairManager->setState(StorageEngineRepairManager::RepairState::kIncomplete);
+        repairManager->markIncomplete();
     }
 
-    if (storageGlobalParams.repair) {
-        // TODO: Touch incomplete_repair file.
-    }
-
-    const std::string dbpath = storageGlobalParams.dbpath;
     if (auto existingStorageEngine = StorageEngineMetadata::getStorageEngineForPath(dbpath)) {
         if (*existingStorageEngine == "mmapv1" ||
             (storageGlobalParams.engineSetByUser && storageGlobalParams.engine == "mmapv1")) {

@@ -289,7 +289,6 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
 
     auto const storageEngine = opCtx->getServiceContext()->getStorageEngine();
     auto repairManager = StorageEngineRepairManager::get(opCtx->getServiceContext());
-    invariant(repairManager);
 
     Lock::GlobalWrite lk(opCtx);
 
@@ -307,10 +306,8 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
 
     // Set the replica set config as repaired before repairing so that it stays in an invalidated
     // state in case of an unexpected crash.
-    bool replConfigAlreadyRepaired = false;
-    if (!replConfigAlreadyRepaired) {
-        repl::ReplicationCoordinator::get(opCtx)->setConfigRepaired(opCtx);
-        // TODO: Remove incomplete repair file.
+    if (repairManager) {
+        repairManager->markDataModified(opCtx, true);
     }
 
     // If the catalog data was modified by a repair operation, the data on this node is no longer
@@ -379,8 +376,9 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         DatabaseHolder::getDatabaseHolder().openDb(opCtx, kSystemReplSetCollection.db());
     }
 
-    if (!replConfigAlreadyRepaired && !invalidateReplSetConfig) {
-        repl::ReplicationCoordinator::get(opCtx)->unsetConfigRepaired(opCtx);
+    if (repairManager && !repairManager->dataAlreadyModifiedByRepair() &&
+        !invalidateReplSetConfig) {
+        repairManager->markDataModified(opCtx, false);
     } else {
         warning()
             << "Repair may have modified data that was part of a replicated collection. This node "

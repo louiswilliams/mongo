@@ -191,10 +191,6 @@ public:
 
     virtual ReplSetConfig getConfig() const override;
 
-    virtual void setConfigRepaired(OperationContext* opCtx) override;
-
-    virtual void unsetConfigRepaired(OperationContext* opCtx) override;
-
     virtual void processReplSetGetConfig(BSONObjBuilder* result) override;
 
     virtual void processReplSetMetadata(const rpc::ReplSetMetadata& replMetadata) override;

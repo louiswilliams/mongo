@@ -303,7 +303,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
 
     // If the catalog data was modified by a repair operation, the data on this node is no longer
     // consistent with the rest of the replica set, and its config should be invalidated.
-    bool invalidateReplSetConfig = storageEngine->catalogModifiedByRepair();
+    bool dataModified = storageEngine->catalogModifiedByRepair();
 
     // Repair all databases first, so that we do not try to open them if they are in bad shape
     if (storageGlobalParams.repair) {
@@ -315,10 +315,9 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
             if (!modified)
                 fassert(18506, status);
 
-            if (modified && dbName != "local") {
-                log() << "Data modified on non-local database " << dbName << ": "
-                      << status.reason();
-                invalidateReplSetConfig = true;
+            if (modified) {
+                log() << "Data modified on database " << dbName << ": " << status.reason();
+                dataModified = true;
             }
         }
 
@@ -367,13 +366,17 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         DatabaseHolder::getDatabaseHolder().openDb(opCtx, kSystemReplSetCollection.db());
     }
 
+    // This must be done after opening the "local" database as it modifies the replica set config.
     if (storageGlobalParams.repair) {
+        const auto dataState = dataModified ? StorageEngineRepairManager::DataState::kModified
+                                            : StorageEngineRepairManager::DataState::kUnmodified;
+
         auto repairManager = StorageEngineRepairManager::get(opCtx->getServiceContext());
-        repairManager->repairDone(opCtx, invalidateReplSetConfig);
-        if (invalidateReplSetConfig) {
+        repairManager->repairDone(opCtx, dataState);
+        if (dataModified) {
             warning()
-                << "Repair may have modified data that was part of a replicated collection. "
-                   "This node will no longer be able to join a replica set without a full re-sync";
+                << "WARNING: Repair may have modified data. This node will no longer be able to "
+                   "join a replica set without a full re-sync";
         }
     }
 

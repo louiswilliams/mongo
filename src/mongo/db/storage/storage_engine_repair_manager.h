@@ -52,6 +52,53 @@ public:
     static void set(ServiceContext* service,
                     std::unique_ptr<StorageEngineRepairManager> repairManager);
 
+    enum class DataState {
+        /**
+         * Repair has modified data. The server may be started again safely, but not rejoin a
+         * replica set.
+         */
+        kModified,
+        /**
+         * No data has been modified. The server may be started again safely.
+         */
+        kUnmodified
+    };
+
+    /**
+     * Notify the repair manager that a database repair operation is about to begin.
+     */
+    void repairStarted();
+
+    /**
+     * This must be called to notify the repair manager that a database repair operation completed
+     * successfully. If dataState is 'kModified', this invalidates the replica set configuration so
+     * this node will be unable to rejoin a replica set.
+     *
+     * Failure to call this will leave the node in an incomplete repaired state, and subsequent
+     * restarts will require to the node to run repair again.
+     *
+     * May only be called after a call to repairStarted().
+     */
+    void repairDone(OperationContext* opCtx, DataState dataState);
+
+    /**
+     * Returns 'true' if this node is an incomplete repair state.
+     */
+    bool incomplete() const {
+        return _repairState == RepairState::kIncomplete;
+    }
+
+    /**
+     * Returns 'true' if repair modified data.
+     *
+     * May only be called after a call to repairDone().
+     */
+    bool dataModified() const {
+        invariant(_repairState == RepairState::kDone);
+        return _dataState == DataState::kModified;
+    }
+
+private:
     enum class RepairState {
         /**
          * No data has been modified, but the state of the replica set configuration is still
@@ -66,38 +113,19 @@ public:
          */
         kIncomplete,
         /**
-         * Repair has modified data. If the process were to exit, the server may be started again
-         * safely, but not rejoin a replica set.
+         * Repair has completed. The server can be started normally unless data was modified and the
+         * server is started as a a replica set.
          */
-        kDataModified,
-        /**
-         * No data has been modified. If the process were to exit, the server may be started again
-         * safely.
-         */
-        kDataUnmodified,
+        kDone
     };
 
-    void repairStarted();
-
-    void repairDone(OperationContext* opCtx, bool modified);
-
-    bool incomplete() const {
-        return _repairState == RepairState::kIncomplete;
-    }
-
-    bool dataModified() const {
-        return _repairState == RepairState::kDataModified;
-    }
-
-private:
     void _touchRepairIncompleteFile();
     void _removeRepairIncompleteFile();
-
     void _setReplConfigRepaired(OperationContext* opCtx);
 
     boost::filesystem::path _repairIncompleteFilePath;
-
     RepairState _repairState;
+    DataState _dataState;
 };
 
 }  // namespace mongo

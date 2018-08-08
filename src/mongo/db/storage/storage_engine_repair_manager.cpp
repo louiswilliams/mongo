@@ -26,11 +26,14 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
+
 #include "mongo/db/storage/storage_engine_repair_manager.h"
 
 #include "mongo/db/dbhelpers.h"
 #include "mongo/db/repl/repl_set_config.h"
 #include "mongo/db/service_context.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 
@@ -48,6 +51,7 @@ StorageEngineRepairManager::StorageEngineRepairManager(const std::string& dbpath
     _repairState = boost::filesystem::exists(_repairIncompleteFilePath) ? RepairState::kIncomplete
                                                                         : RepairState::kPreStart;
 }
+
 StorageEngineRepairManager::~StorageEngineRepairManager() {}
 
 StorageEngineRepairManager* StorageEngineRepairManager::get(ServiceContext* service) {
@@ -66,21 +70,18 @@ void StorageEngineRepairManager::repairStarted() {
     _repairState = RepairState::kIncomplete;
 }
 
-void StorageEngineRepairManager::repairDone(OperationContext* opCtx, bool modified) {
+void StorageEngineRepairManager::repairDone(OperationContext* opCtx, DataState dataState) {
     invariant(_repairState == RepairState::kIncomplete);
 
-    if (modified) {
-        // The order below is imporant. The repair incomplete file can only be removed once the
-        // replica set configuration has been invalidated successfully.
+    // This ordering is imporant. The incomplete file should only be removed once the
+    // replica set configuration has been invalidated successfully.
+    if (dataState == DataState::kModified) {
         _setReplConfigRepaired(opCtx);
-        _removeRepairIncompleteFile();
-
-        _repairState = RepairState::kDataModified;
-        return;
     }
-
     _removeRepairIncompleteFile();
-    _repairState = RepairState::kDataUnmodified;
+
+    _dataState = dataState;
+    _repairState = RepairState::kDone;
 }
 
 void StorageEngineRepairManager::_touchRepairIncompleteFile() {

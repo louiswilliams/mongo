@@ -146,8 +146,6 @@ public:
 
     repl::ReplSetConfig getConfig() const override;
 
-    void setConfigRepaired(OperationContext* opCtx) override;
-
     void processReplSetGetConfig(BSONObjBuilder*) override;
 
     void processReplSetMetadata(const rpc::ReplSetMetadata&) override;

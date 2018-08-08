@@ -65,7 +65,6 @@
 #include "mongo/stdx/future.h"
 #include "mongo/stdx/thread.h"
 #include "mongo/unittest/barrier.h"
-#include "mongo/unittest/death_test.h"
 #include "mongo/unittest/unittest.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
@@ -181,33 +180,6 @@ TEST_F(ReplCoordTest, NodeEntersStartupStateWhenStartingUpWithNoLocalConfig) {
     ASSERT_EQUALS(MemberState::RS_STARTUP, getReplCoord()->getMemberState().s);
 }
 
-DEATH_TEST_F(ReplCoordTest,
-             NodeDiesWhenStartingUpWithRepairedLocalConfig,
-             "Fatal Assertion 50895") {
-    init("mySet");
-    auto opCtx = makeOperationContext();
-    ASSERT_OK(getExternalState()->storeLocalConfigDocument(opCtx.get(),
-                                                           BSON("_id"
-                                                                << "mySet"
-                                                                << "repaired"
-                                                                << true
-                                                                << "version"
-                                                                << 2
-                                                                << "members"
-                                                                << BSON_ARRAY(BSON(
-                                                                       "_id" << 1 << "host"
-                                                                             << "node1:12345")))));
-
-    getReplCoord()->startup(opCtx.get());
-}
-
-DEATH_TEST_F(ReplCoordTest,
-             NodeDiesWhenStartingUpAfterRepairAndNoLocalConfig,
-             "Fatal Assertion 50895") {
-    init("mySet");
-    auto opCtx = makeOperationContext();
-    getReplCoord()->startup(opCtx.get());
-}
 TEST_F(ReplCoordTest, NodeReturnsInvalidReplicaSetConfigWhenInitiatedWithAnEmptyConfig) {
     init("mySet");
     start(HostAndPort("node1", 12345));

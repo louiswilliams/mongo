@@ -494,7 +494,6 @@ bool ReplicationCoordinatorImpl::_startLoadLocalConfig(OperationContext* opCtx) 
     ReplSetConfig localConfig;
     status = localConfig.initialize(cfg.getValue());
     if (!status.isOK()) {
-        error() << "Got \"" << status << "\" while parsing " << cfg.getValue();
         if (status.code() == ErrorCodes::RepairedReplicaSetConfig) {
             error()
                 << "This database has been repaired and potentially modified replicated data that "
@@ -506,7 +505,8 @@ bool ReplicationCoordinatorImpl::_startLoadLocalConfig(OperationContext* opCtx) 
         }
         error() << "Locally stored replica set configuration does not parse; See "
                    "http://www.mongodb.org/dochub/core/recover-replica-set-from-invalid-config "
-                   "for information on how to recover from this.";
+                   "for information on how to recover from this. Got \""
+                << status << "\" while parsing " << cfg.getValue();
         fassertFailedNoTrace(28545);
     }
 

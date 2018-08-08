@@ -199,6 +199,7 @@ env.Library(
         '$BUILD_DIR/mongo/db/service_context',
         '$BUILD_DIR/mongo/db/concurrency/lock_manager',
         'storage_engine_lock_file',
+        'storage_engine_repair_manager',
         'storage_engine_metadata',
         'storage_options',
     ],
@@ -246,6 +247,18 @@ env.Library(
         '$BUILD_DIR/mongo/db/bson/dotted_path_support',
     ],
 )
+
+env.Library(
+    target='storage_engine_repair_manager',
+    source=[
+        'storage_engine_repair_manager.cpp',
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/base',
+        '$BUILD_DIR/mongo/db/service_context',
+    ],
+)
+
 
 env.Library(
     target='backup_cursor_service',

@@ -196,7 +196,7 @@ DEATH_TEST_F(ReplCoordTest,
                                                                        "_id" << 1 << "host"
                                                                              << "node1:12345")))));
 
-    getReplCoord()->invalidateConfigDueToRepair(opCtx.get());
+    getReplCoord()->setConfigRepaired(opCtx.get());
     getReplCoord()->startup(opCtx.get());
 }
 
@@ -205,7 +205,7 @@ DEATH_TEST_F(ReplCoordTest,
              "Fatal Assertion 50895") {
     init("mySet");
     auto opCtx = makeOperationContext();
-    getReplCoord()->invalidateConfigDueToRepair(opCtx.get());
+    getReplCoord()->setConfigRepaired(opCtx.get());
     getReplCoord()->startup(opCtx.get());
 }
 TEST_F(ReplCoordTest, NodeReturnsInvalidReplicaSetConfigWhenInitiatedWithAnEmptyConfig) {

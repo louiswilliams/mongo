@@ -50,6 +50,7 @@
 #include "mongo/db/repl/drop_pending_collection_reaper.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/server_options.h"
+#include "mongo/db/storage/storage_engine_repair_manager.h"
 #include "mongo/util/exit.h"
 #include "mongo/util/log.h"
 #include "mongo/util/quick_exit.h"
@@ -287,6 +288,8 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     LOG(1) << "enter repairDatabases (to check pdfile version #)";
 
     auto const storageEngine = opCtx->getServiceContext()->getStorageEngine();
+    auto repairManager = StorageEngineRepairManager::get(opCtx->getServiceContext());
+    invariant(repairManager);
 
     Lock::GlobalWrite lk(opCtx);
 
@@ -300,6 +303,15 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     }
 
     bool repairVerifiedAllCollectionsHaveUUIDs = false;
+
+
+    // Set the replica set config as repaired before repairing so that it stays in an invalidated
+    // state in case of an unexpected crash.
+    bool replConfigAlreadyRepaired = false;
+    if (!replConfigAlreadyRepaired) {
+        repl::ReplicationCoordinator::get(opCtx)->setConfigRepaired(opCtx);
+        // TODO: Remove incomplete repair file.
+    }
 
     // If the catalog data was modified by a repair operation, the data on this node is no longer
     // consistent with the rest of the replica set, and its config should be invalidated.
@@ -367,15 +379,12 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         DatabaseHolder::getDatabaseHolder().openDb(opCtx, kSystemReplSetCollection.db());
     }
 
-    if (invalidateReplSetConfig) {
-        if (!hasReplSetConfig(opCtx)) {
-            warning() << "No replica set config found, but invalidating anyways. If this node was "
-                         "never part of a replica set, this message can be safely ignored.";
-        }
+    if (!replConfigAlreadyRepaired && !invalidateReplSetConfig) {
+        repl::ReplicationCoordinator::get(opCtx)->unsetConfigRepaired(opCtx);
+    } else {
         warning()
             << "Repair may have modified data that was part of a replicated collection. This node "
                "will no longer be able to join a replica set without a full re-sync";
-        repl::ReplicationCoordinator::get(opCtx)->invalidateConfigDueToRepair(opCtx);
     }
 
     const repl::ReplSettings& replSettings =

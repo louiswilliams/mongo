@@ -528,7 +528,13 @@ public:
      * Invalidates the replica set config because a database repair may have modified data. This
      * should prevent a node from re-joining its replica set without an initial sync.
      */
-    virtual void invalidateConfigDueToRepair(OperationContext* opCtx) = 0;
+    virtual void setConfigRepaired(OperationContext* opCtx) = 0;
+
+    /**
+     * Invalidates the replica set config because a database repair may have modified data. This
+     * should prevent a node from re-joining its replica set without an initial sync.
+     */
+    virtual void unsetConfigRepaired(OperationContext* opCtx) = 0;
 
     /**
      * Handles an incoming replSetGetConfig command. Adds BSON to 'result'.

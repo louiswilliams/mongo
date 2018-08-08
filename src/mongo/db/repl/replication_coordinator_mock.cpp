@@ -268,7 +268,7 @@ ReplSetConfig ReplicationCoordinatorMock::getConfig() const {
     return _getConfigReturnValue;
 }
 
-void ReplicationCoordinatorMock::invalidateConfigDueToRepair(OperationContext* opCtx) {}
+void ReplicationCoordinatorMock::setConfigRepaired(OperationContext* opCtx) {}
 
 void ReplicationCoordinatorMock::setGetConfigReturnValue(ReplSetConfig returnValue) {
     _getConfigReturnValue = std::move(returnValue);

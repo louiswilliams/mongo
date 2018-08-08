@@ -191,7 +191,9 @@ public:
 
     virtual ReplSetConfig getConfig() const override;
 
-    virtual void invalidateConfigDueToRepair(OperationContext* opCtx) override;
+    virtual void setConfigRepaired(OperationContext* opCtx) override;
+
+    virtual void unsetConfigRepaired(OperationContext* opCtx) override;
 
     virtual void processReplSetGetConfig(BSONObjBuilder* result) override;
 

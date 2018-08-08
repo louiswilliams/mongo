@@ -43,12 +43,10 @@ const auto getRepairManager =
     ServiceContext::declareDecoration<std::unique_ptr<StorageEngineRepairManager>>();
 }  // namespace
 
-StorageEngineRepairManager::StorageEngineRepairManager(const std::string& dbpath)
-    : _dataAlreadyModified(false) {
-
+StorageEngineRepairManager::StorageEngineRepairManager(const std::string& dbpath) {
     _repairIncompleteFilePath = boost::filesystem::path(dbpath + kRepairIncompleteFileName);
     _repairState = boost::filesystem::exists(_repairIncompleteFilePath) ? RepairState::kIncomplete
-                                                                        : RepairState::kStartup;
+                                                                        : RepairState::kPreStart;
 }
 StorageEngineRepairManager::~StorageEngineRepairManager() {}
 
@@ -62,40 +60,27 @@ void StorageEngineRepairManager::set(ServiceContext* service,
     manager = std::move(repairManager);
 }
 
-void StorageEngineRepairManager::updateStateFromReplConfig(OperationContext* opCtx) {
-    invariant(_repairState == RepairState::kIncomplete);
-
-    BSONObj config;
-    if (Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {
-        if (config.hasField(repl::ReplSetConfig::kRepairedFieldName)) {
-            _dataAlreadyModified = true;
-            _repairState = RepairState::kDataModified;
-            return;
-        }
-    }
-
-    _dataAlreadyModified = false;
-    _repairState = RepairState::kDataUnmodified;
-}
-
-void StorageEngineRepairManager::markIncomplete() {
-    invariant(_repairState == RepairState::kStartup);
+void StorageEngineRepairManager::repairStarted() {
+    invariant(_repairState == RepairState::kPreStart || _repairState == RepairState::kIncomplete);
     _touchRepairIncompleteFile();
     _repairState = RepairState::kIncomplete;
 }
 
-void StorageEngineRepairManager::markDataModified(OperationContext* opCtx, bool modified) {
-    invariant(_repairState == RepairState::kDataModified || modified);
-    invariant(_repairState == RepairState::kIncomplete || !modified);
+void StorageEngineRepairManager::repairDone(OperationContext* opCtx, bool modified) {
+    invariant(_repairState == RepairState::kIncomplete);
 
     if (modified) {
-        _setReplConfigInvalid(opCtx);
+        // The order below is imporant. The repair incomplete file can only be removed once the
+        // replica set configuration has been invalidated successfully.
+        _setReplConfigRepaired(opCtx);
         _removeRepairIncompleteFile();
+
+        _repairState = RepairState::kDataModified;
         return;
     }
-    _unsetReplConfigInvalid(opCtx);
 
-    _repairState = modified ? RepairState::kDataModified : RepairState::kDataUnmodified;
+    _removeRepairIncompleteFile();
+    _repairState = RepairState::kDataUnmodified;
 }
 
 void StorageEngineRepairManager::_touchRepairIncompleteFile() {
@@ -111,7 +96,7 @@ void StorageEngineRepairManager::_removeRepairIncompleteFile() {
     boost::filesystem::remove(_repairIncompleteFilePath);
 }
 
-void StorageEngineRepairManager::_setReplConfigInvalid(OperationContext* opCtx) {
+void StorageEngineRepairManager::_setReplConfigRepaired(OperationContext* opCtx) {
     BSONObjBuilder configBuilder;
     BSONObj config;
     if (Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {
@@ -121,22 +106,6 @@ void StorageEngineRepairManager::_setReplConfigInvalid(OperationContext* opCtx) 
         return;
     }
     configBuilder.append(repl::ReplSetConfig::kRepairedFieldName, true);
-    Helpers::putSingleton(opCtx, kConfigNss.ns().c_str(), configBuilder.obj());
-}
-
-void StorageEngineRepairManager::_unsetReplConfigInvalid(OperationContext* opCtx) {
-    invariant(!_dataAlreadyModified);
-
-    BSONObjBuilder configBuilder;
-    BSONObj config;
-    if (Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {
-        // Append everything except the repaired field.
-        for (auto& elem : config) {
-            if (elem.fieldName() != repl::ReplSetConfig::kRepairedFieldName) {
-                configBuilder.append(elem);
-            }
-        }
-    }
     Helpers::putSingleton(opCtx, kConfigNss.ns().c_str(), configBuilder.obj());
 }
 

@@ -58,7 +58,7 @@ public:
          * unknown. If the process were to exit in this state the server will be able to start up
          * normally, except if the replica set configuration is invalidated.
          */
-        kStartup,
+        kPreStart,
         /**
          * Data is in the act of being repaired. Data may or may not have been modified by
          * repair, but if the process were to exit in this state, we do not know. The server should
@@ -75,14 +75,11 @@ public:
          * safely.
          */
         kDataUnmodified,
-
     };
 
-    void markIncomplete();
+    void repairStarted();
 
-    void markDataModified(OperationContext* opCtx, bool modified);
-
-    void updateStateFromReplConfig(OperationContext* opCtx);
+    void repairDone(OperationContext* opCtx, bool modified);
 
     bool incomplete() const {
         return _repairState == RepairState::kIncomplete;
@@ -92,22 +89,15 @@ public:
         return _repairState == RepairState::kDataModified;
     }
 
-    bool dataAlreadyModifiedByRepair() const {
-        return _dataAlreadyModified;
-    }
-
-
 private:
     void _touchRepairIncompleteFile();
     void _removeRepairIncompleteFile();
 
-    void _setReplConfigInvalid(OperationContext* opCtx);
-    void _unsetReplConfigInvalid(OperationContext* opCtx);
+    void _setReplConfigRepaired(OperationContext* opCtx);
 
     boost::filesystem::path _repairIncompleteFilePath;
 
     RepairState _repairState;
-    bool _dataAlreadyModified;
 };
 
 }  // namespace mongo

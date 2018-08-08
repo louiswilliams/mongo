@@ -288,8 +288,6 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     LOG(1) << "enter repairDatabases (to check pdfile version #)";
 
     auto const storageEngine = opCtx->getServiceContext()->getStorageEngine();
-    auto repairManager = StorageEngineRepairManager::get(opCtx->getServiceContext());
-
     Lock::GlobalWrite lk(opCtx);
 
     std::vector<std::string> dbNames;
@@ -302,13 +300,6 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     }
 
     bool repairVerifiedAllCollectionsHaveUUIDs = false;
-
-
-    // Set the replica set config as repaired before repairing so that it stays in an invalidated
-    // state in case of an unexpected crash.
-    if (repairManager) {
-        repairManager->markDataModified(opCtx, true);
-    }
 
     // If the catalog data was modified by a repair operation, the data on this node is no longer
     // consistent with the rest of the replica set, and its config should be invalidated.
@@ -376,13 +367,14 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         DatabaseHolder::getDatabaseHolder().openDb(opCtx, kSystemReplSetCollection.db());
     }
 
-    if (repairManager && !repairManager->dataAlreadyModifiedByRepair() &&
-        !invalidateReplSetConfig) {
-        repairManager->markDataModified(opCtx, false);
-    } else {
-        warning()
-            << "Repair may have modified data that was part of a replicated collection. This node "
-               "will no longer be able to join a replica set without a full re-sync";
+    if (storageGlobalParams.repair) {
+        auto repairManager = StorageEngineRepairManager::get(opCtx->getServiceContext());
+        repairManager->repairDone(opCtx, invalidateReplSetConfig);
+        if (invalidateReplSetConfig) {
+            warning()
+                << "Repair may have modified data that was part of a replicated collection. "
+                   "This node will no longer be able to join a replica set without a full re-sync";
+        }
     }
 
     const repl::ReplSettings& replSettings =

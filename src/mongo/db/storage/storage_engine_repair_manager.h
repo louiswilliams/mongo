@@ -89,6 +89,13 @@ public:
     }
 
     /**
+     * Returns 'true' if this node is done with a repair operation.
+     */
+    bool done() const {
+        return _repairState == RepairState::kDone;
+    }
+
+    /**
      * Returns 'true' if repair modified data.
      *
      * May only be called after a call to repairDone().

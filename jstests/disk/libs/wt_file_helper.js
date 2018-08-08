@@ -42,7 +42,7 @@ let assertErrorOnStartupWhenStartingAsReplSet = function(dbpath, port, rsName) {
     let node = MongoRunner.runMongod(
         {dbpath: dbpath, port: port, replSet: rsName, noCleanData: true, waitForConnect: false});
     assert.soon(function() {
-        return rawMongoProgramOutput().indexOf("Fatal Assertion 50895") >= 0;
+        return rawMongoProgramOutput().indexOf("Fatal Assertion 50910") >= 0;
     });
     MongoRunner.stopMongod(node, null, {allowedExitCode: MongoRunner.EXIT_ABRUPT});
 };

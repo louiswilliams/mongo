@@ -76,12 +76,11 @@ void initializeStorageEngine(ServiceContext* service, const StorageEngineInitFla
     if (storageGlobalParams.repair) {
         repairManager->repairStarted();
     } else {
-        uassert(50896,
+        uassert(50909,
                 str::stream() << "An incomplete repair has been detected! This is likely because "
                                  "a repair operation unexpectedly failed before completing. "
                                  "MongoDB will not start up again without --repair.",
                 !repairManager->incomplete());
-        StorageEngineRepairManager::set(service, nullptr);
     }
 
     if (auto existingStorageEngine = StorageEngineMetadata::getStorageEngineForPath(dbpath)) {

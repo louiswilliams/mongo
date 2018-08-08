@@ -253,13 +253,32 @@ env.Library(
     source=[
         'storage_engine_repair_manager.cpp',
     ],
-    LIBDEPS=[
+    LIBDEPS_PRIVATE=[
         '$BUILD_DIR/mongo/base',
         '$BUILD_DIR/mongo/db/dbhelpers',
         '$BUILD_DIR/mongo/db/service_context',
         '$BUILD_DIR/mongo/db/repl/replica_set_messages',
     ],
 )
+
+env.CppUnitTest(
+    target='storage_engine_repair_manager_test',
+    source=[
+        'storage_engine_repair_manager_test.cpp',
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/db/auth/authmocks',
+        '$BUILD_DIR/mongo/db/namespace_string',
+        '$BUILD_DIR/mongo/db/repair_database',
+        '$BUILD_DIR/mongo/db/repl/replmocks',
+        '$BUILD_DIR/mongo/db/service_context_d_test_fixture',
+        '$BUILD_DIR/mongo/db/storage/ephemeral_for_test/storage_ephemeral_for_test_core',
+        '$BUILD_DIR/mongo/executor/network_interface_factory',
+        '$BUILD_DIR/mongo/executor/network_interface_mock',
+        'storage_engine_repair_manager',
+    ],
+)
+
 
 env.Library(
     target='backup_cursor_service',

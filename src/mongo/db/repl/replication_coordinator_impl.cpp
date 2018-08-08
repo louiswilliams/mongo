@@ -501,7 +501,7 @@ bool ReplicationCoordinatorImpl::_startLoadLocalConfig(OperationContext* opCtx) 
                    "without the --replSet option. When you are finished recovering your data and "
                    "would like to perform a complete re-sync, please refer to the documentation "
                    "here: https://docs.mongodb.com/manual/tutorial/resync-replica-set-member/";
-            fassertFailedNoTrace(50895);
+            fassertFailedNoTrace(50910);
         }
         error() << "Locally stored replica set configuration does not parse; See "
                    "http://www.mongodb.org/dochub/core/recover-replica-set-from-invalid-config "

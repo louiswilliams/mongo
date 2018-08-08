@@ -44,7 +44,9 @@ const auto getRepairManager =
 }  // namespace
 
 StorageEngineRepairManager::StorageEngineRepairManager(const std::string& dbpath) {
-    _repairIncompleteFilePath = boost::filesystem::path(dbpath + kRepairIncompleteFileName);
+    using boost::filesystem::path;
+    _repairIncompleteFilePath = path(dbpath) / path(kRepairIncompleteFileName);
+
     _repairState = boost::filesystem::exists(_repairIncompleteFilePath) ? RepairState::kIncomplete
                                                                         : RepairState::kPreStart;
 }

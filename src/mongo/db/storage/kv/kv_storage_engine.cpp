@@ -105,7 +105,7 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
             log() << "Catalog data modified by repair: " << status.reason();
             catalogModifiedByRepair = true;
         } else {
-            fassertNoTrace(50893, status);
+            fassertNoTrace(50911, status);
         }
     }
 

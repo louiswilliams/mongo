@@ -1,7 +1,7 @@
 /**
- *    Copyright (C) 2014 MongoDB Inc.
+ *    Copyright (C) 2018 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or  modify
+ *    This program is free software: you can redistribute it and/or modify
  *    it under the terms of the GNU Affero General Public License, version 3,
  *    as published by the Free Software Foundation.
  *
@@ -26,14 +26,11 @@
  *    it in the license file.
  */
 
-#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
-
 #include "mongo/db/storage/storage_engine_repair_manager.h"
 
 #include "mongo/db/dbhelpers.h"
 #include "mongo/db/repl/repl_set_config.h"
 #include "mongo/db/service_context.h"
-#include "mongo/util/log.h"
 
 namespace mongo {
 

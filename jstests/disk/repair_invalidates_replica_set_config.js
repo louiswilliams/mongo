@@ -9,8 +9,8 @@
 
     load('jstests/disk/libs/wt_file_helper.js');
 
-    const baseName = "wt_repair_missing_files";
-    const dbName = "repair_missing_files";
+    const baseName = "repair_invalidates_replica_set_config";
+    const dbName = "repair_invalidates_replica_set_config";
     const collName = "test";
 
     let replSet = new ReplSetTest({nodes: 2});
@@ -40,7 +40,7 @@
     MongoRunner.stopMongod(secondary);
 
     // Ensure the secondary can be repaired successfully.
-    assertRepairSucceeds(secondaryPort, secondaryDbpath);
+    assertRepairSucceeds(secondaryDbpath, secondaryPort);
 
     // Starting up without --replSet should not fail, and the collection should exist with its data.
     assertStartAndStopStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
@@ -57,10 +57,8 @@
     secondaryDB = secondary.getDB(dbName);
 
     //
-    //
     // 2. This test corrupts WiredTiger data files on a secondary, repairs the data, and asserts
     // that the node is unable to re-join its original replica set without an initial sync.
-    //
     //
 
     let secondaryCollUri = getUriForColl(secondaryDB[collName]);
@@ -71,7 +69,7 @@
     removeFile(secondaryCollFile);
 
     // Ensure the secondary can be repaired successfully.
-    assertRepairSucceeds(secondaryPort, secondaryDbpath);
+    assertRepairSucceeds(secondaryDbpath, secondaryPort);
 
     // Starting up with --replSet should fail with a specific error.
     assertErrorOnStartupWhenStartingAsReplSet(
@@ -92,10 +90,8 @@
     secondaryDB = secondary.getDB(dbName);
 
     //
-    //
     // 3. This test corrupts the _mdb_catalog file on a secondary, repairs the data, and asserts
     // that the node is unable to re-join its original replica set without an initial sync.
-    //
     //
 
     // Shut down the secondary. Delete the catalog file.
@@ -105,7 +101,7 @@
     removeFile(mdbCatalogFile);
 
     // Ensure the secondary can be repaired successfully.
-    assertRepairSucceeds(secondaryPort, secondaryDbpath);
+    assertRepairSucceeds(secondaryDbpath, secondaryPort);
 
     // Starting up with --replSet should fail with a specific error.
     assertErrorOnStartupWhenStartingAsReplSet(

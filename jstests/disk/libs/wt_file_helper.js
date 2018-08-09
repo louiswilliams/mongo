@@ -26,15 +26,24 @@ let corruptFile = function(file) {
 /**
  * Assert that running MongoDB with --repair on the provided dbpath exits cleanly.
  */
-let assertRepairSucceeds = function(port, dbpath) {
+let assertRepairSucceeds = function(dbpath, port) {
     jsTestLog("Repairing the node");
     assert.eq(0, runMongoProgram("mongod", "--repair", "--port", port, "--dbpath", dbpath));
 };
 
+let assertRepairFailsWithFailpoint = function(dbpath, port, failpoint) {
+    const param = "failpoint." + failpoint + "={'mode': 'alwaysOn'}";
+    jsTestLog("The node should fail to complete repair with --setParameter " + param);
+
+    assert.eq(
+        MongoRunner.EXIT_ABRUPT,
+        runMongoProgram(
+            "mongod", "--repair", "--port", port, "--dbpath", dbpath, "--setParameter", param));
+};
 /**
- * Assert that starting MongoDB with --replSet on an existing data path exits with a specific
- * error.
- */
+* Assert that starting MongoDB with --replSet on an existing data path exits with a specific
+* error.
+*/
 let assertErrorOnStartupWhenStartingAsReplSet = function(dbpath, port, rsName) {
     jsTestLog("The repaired node should fail to start up with the --replSet option");
 
@@ -48,11 +57,26 @@ let assertErrorOnStartupWhenStartingAsReplSet = function(dbpath, port, rsName) {
 };
 
 /**
+ * Assert that starting MongoDB as a standalone on an existing data path exits with a specific
+ * error because the previous repair failed.
+ */
+let assertErrorOnStartupAfterIncompleteRepair = function(dbpath, port) {
+    jsTestLog("The node should fail to start up because a previous repair did not complete");
+
+    clearRawMongoProgramOutput();
+    let node = MongoRunner.runMongod(
+        {dbpath: dbpath, port: port, noCleanData: true, waitForConnect: false});
+    assert.soon(function() {
+        return rawMongoProgramOutput().indexOf("Location50909") >= 0;
+    });
+    MongoRunner.stopMongod(node, null, {allowedExitCode: MongoRunner.EXIT_UNCAUGHT});
+};
+/**
  * Assert that starting MongoDB as a standalone on an existing data path succeeds. Uses a provided
  * testFunc to run any caller-provided checks on the started node.
  */
 let assertStartAndStopStandaloneOnExistingDbpath = function(dbpath, port, testFunc) {
-    jsTestLog("The repaired node should start up and serve reads without the --replSet option");
+    jsTestLog("The repaired node should start up and serve reads as a standalone");
     let node = MongoRunner.runMongod({dbpath: dbpath, port: port, noCleanData: true});
     assert(node);
     testFunc(node);

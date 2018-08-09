@@ -52,6 +52,7 @@
 #include "mongo/db/server_options.h"
 #include "mongo/db/storage/storage_engine_repair_manager.h"
 #include "mongo/util/exit.h"
+#include "mongo/util/fail_point.h"
 #include "mongo/util/log.h"
 #include "mongo/util/quick_exit.h"
 #include "mongo/util/version.h"
@@ -64,6 +65,11 @@ namespace mongo {
 
 using logger::LogComponent;
 using std::endl;
+
+// Exit after repair has started, but before data is repaired.
+MONGO_FAIL_POINT_DEFINE(exitBeforeDataRepair);
+// Exit after repairing data, but before the replica set configuration is invalidated.
+MONGO_FAIL_POINT_DEFINE(exitBeforeRepairInvalidatesConfig);
 
 namespace {
 
@@ -308,6 +314,12 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     // Repair all databases first, so that we do not try to open them if they are in bad shape
     if (storageGlobalParams.repair) {
         invariant(!storageGlobalParams.readOnly);
+
+        if (MONGO_FAIL_POINT(exitBeforeDataRepair)) {
+            log() << "Exiting because 'exitBeforeDataRepair' fail point was set.";
+            quickExit(EXIT_ABRUPT);
+        }
+
         for (const auto& dbName : dbNames) {
             LOG(1) << "    Repairing database: " << dbName;
             auto status = repairDatabase(opCtx, storageEngine, dbName);
@@ -366,11 +378,16 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         DatabaseHolder::getDatabaseHolder().openDb(opCtx, kSystemReplSetCollection.db());
     }
 
-    // This must be done after opening the "local" database as it modifies the replica set config.
     if (storageGlobalParams.repair) {
+        if (MONGO_FAIL_POINT(exitBeforeRepairInvalidatesConfig)) {
+            log() << "Exiting because 'exitBeforeRepairInvalidatesConfig' fail point was set.";
+            quickExit(EXIT_ABRUPT);
+        }
         const auto dataState = dataModified ? StorageEngineRepairManager::DataState::kModified
                                             : StorageEngineRepairManager::DataState::kUnmodified;
 
+        // This must be done after opening the "local" database as it modifies the replica set
+        // config.
         auto repairManager = StorageEngineRepairManager::get(opCtx->getServiceContext());
         repairManager->repairDone(opCtx, dataState);
         if (dataModified) {

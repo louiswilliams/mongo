@@ -59,15 +59,26 @@ public:
         _assertRepairIncompleteOnTearDown = true;
     }
 
+    void createMockReplConfig(OperationContext* opCtx) {
+        BSONObj replConfig;
+        Lock::DBLock dbLock(opCtx, "local", MODE_X);
+        Helpers::putSingleton(opCtx, "local.system.replset", replConfig);
+    }
+
     void assertReplConfigValid(OperationContext* opCtx, bool valid) {
         BSONObj replConfig;
-        bool found = Helpers::getSingleton(opCtx, "local.system.replset", replConfig);
+        ASSERT(Helpers::getSingleton(opCtx, "local.system.replset", replConfig));
         if (valid) {
-            ASSERT(!found || !replConfig.hasField("repaired"));
+            ASSERT(!replConfig.hasField("repaired"));
         } else {
-            ASSERT(found);
             ASSERT(replConfig.hasField("repaired"));
         }
+    }
+
+    bool hasReplConfig(OperationContext* opCtx) {
+        BSONObj replConfig;
+        Lock::DBLock dbLock(opCtx, "local", MODE_IS);
+        return Helpers::getSingleton(opCtx, "local.system.replset", replConfig);
     }
 
     path repairFilePath() {
@@ -110,6 +121,8 @@ TEST_F(StorageRepairObserverTest, DataUnmodified) {
     ASSERT(boost::filesystem::exists(repairFile));
 
     auto opCtx = cc().makeOperationContext();
+    createMockReplConfig(opCtx.get());
+
     repairObserver->onRepairDone(opCtx.get(), StorageRepairObserver::DataState::kUnmodified);
     ASSERT(!repairObserver->isIncomplete());
     ASSERT(!boost::filesystem::exists(repairFile));
@@ -134,6 +147,8 @@ TEST_F(StorageRepairObserverTest, DataModified) {
 
     auto opCtx = cc().makeOperationContext();
     Lock::GlobalWrite lock(opCtx.get());
+    createMockReplConfig(opCtx.get());
+
     repairObserver->onRepairDone(opCtx.get(), StorageRepairObserver::DataState::kModified);
     ASSERT(!repairObserver->isIncomplete());
     ASSERT(!boost::filesystem::exists(repairFile));
@@ -141,6 +156,30 @@ TEST_F(StorageRepairObserverTest, DataModified) {
     ASSERT(repairObserver->isDone());
     ASSERT(repairObserver->isDataModified());
     assertReplConfigValid(opCtx.get(), false);
+}
+
+TEST_F(StorageRepairObserverTest, DataModifiedDoesNotCreateReplConfigOnStandalone) {
+    auto repairObserver = getRepairObserver();
+
+    auto repairFile = repairFilePath();
+    ASSERT(!boost::filesystem::exists(repairFile));
+    ASSERT(!repairObserver->isIncomplete());
+
+    repairObserver->onRepairStarted();
+
+    ASSERT(repairObserver->isIncomplete());
+    ASSERT(boost::filesystem::exists(repairFile));
+
+    auto opCtx = cc().makeOperationContext();
+    Lock::GlobalWrite lock(opCtx.get());
+
+    repairObserver->onRepairDone(opCtx.get(), StorageRepairObserver::DataState::kModified);
+    ASSERT(!repairObserver->isIncomplete());
+    ASSERT(!boost::filesystem::exists(repairFile));
+
+    ASSERT(repairObserver->isDone());
+    ASSERT(repairObserver->isDataModified());
+    ASSERT(!hasReplConfig(opCtx.get()));
 }
 
 TEST_F(StorageRepairObserverTest, RepairIsIncompleteOnFailure) {
@@ -181,6 +220,8 @@ TEST_F(StorageRepairObserverTest, RepairCompleteAfterRestart) {
 
     auto opCtx = cc().makeOperationContext();
     Lock::GlobalWrite lock(opCtx.get());
+    createMockReplConfig(opCtx.get());
+
     repairObserver->onRepairDone(opCtx.get(), StorageRepairObserver::DataState::kModified);
     ASSERT(repairObserver->isDone());
 
@@ -196,6 +237,7 @@ DEATH_TEST_F(StorageRepairObserverTest, FailsWhenDoneCalledFirst, "Invariant fai
     ASSERT(!repairObserver->isIncomplete());
 
     auto opCtx = cc().makeOperationContext();
+    createMockReplConfig(opCtx.get());
     repairObserver->onRepairDone(opCtx.get(), StorageRepairObserver::DataState::kUnmodified);
 }
 
@@ -206,6 +248,7 @@ DEATH_TEST_F(StorageRepairObserverTest, FailsWhenStartedCalledAfterDone, "Invari
     ASSERT(repairObserver->isIncomplete());
 
     auto opCtx = cc().makeOperationContext();
+    createMockReplConfig(opCtx.get());
     repairObserver->onRepairDone(opCtx.get(), StorageRepairObserver::DataState::kUnmodified);
     ASSERT(repairObserver->isDone());
     assertReplConfigValid(opCtx.get(), true);

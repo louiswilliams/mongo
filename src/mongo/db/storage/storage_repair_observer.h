@@ -37,20 +37,19 @@
 namespace mongo {
 
 /**
- * A StorageEngineRepairManager is responsible for managing the state of the repair process. It
+ * A StorageRepairObserver is responsible for managing the state of the repair process. It
  * handles state transitions so that failed repairs are recoverable and so that replica set
  * corruption is not possible.
  * */
-class StorageEngineRepairManager {
+class StorageRepairObserver {
 public:
-    MONGO_DISALLOW_COPYING(StorageEngineRepairManager);
+    MONGO_DISALLOW_COPYING(StorageRepairObserver);
 
-    StorageEngineRepairManager(const std::string& dbpath);
-    ~StorageEngineRepairManager();
+    StorageRepairObserver(const std::string& dbpath);
+    ~StorageRepairObserver();
 
-    static StorageEngineRepairManager* get(ServiceContext* service);
-    static void set(ServiceContext* service,
-                    std::unique_ptr<StorageEngineRepairManager> repairManager);
+    static StorageRepairObserver* get(ServiceContext* service);
+    static void set(ServiceContext* service, std::unique_ptr<StorageRepairObserver> repairObserver);
 
     enum class DataState {
         /**
@@ -65,17 +64,17 @@ public:
     };
 
     /**
-     * Notify the repair manager that a database repair operation is about to begin.
+     * Notify the repair observer that a database repair operation is about to begin.
+     *
+     * Failure to call onRepairDone() afterward will leave the node in an incomplete repaired state,
+     * and a subsequent restart will require to the node to run repair again.
      */
     void onRepairStarted();
 
     /**
-     * This must be called to notify the repair manager that a database repair operation completed
+     * This must be called to notify the repair observer that a database repair operation completed
      * successfully. If dataState is 'kModified', this invalidates the replica set configuration so
      * this node will be unable to rejoin a replica set.
-     *
-     * Failure to call this will leave the node in an incomplete repaired state, and subsequent
-     * restarts will require to the node to run repair again.
      *
      * May only be called after a call to onRepairStarted().
      */

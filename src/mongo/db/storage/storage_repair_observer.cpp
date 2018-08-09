@@ -26,7 +26,7 @@
  *    it in the license file.
  */
 
-#include "mongo/db/storage/storage_engine_repair_manager.h"
+#include "mongo/db/storage/storage_repair_observer.h"
 
 #include "mongo/db/dbhelpers.h"
 #include "mongo/db/repl/repl_set_config.h"
@@ -39,11 +39,11 @@ static const NamespaceString kConfigNss("local.system.replset");
 static const std::string kRepairIncompleteFileName = "_repair_incomplete";
 
 
-const auto getRepairManager =
-    ServiceContext::declareDecoration<std::unique_ptr<StorageEngineRepairManager>>();
+const auto getRepairObserver =
+    ServiceContext::declareDecoration<std::unique_ptr<StorageRepairObserver>>();
 }  // namespace
 
-StorageEngineRepairManager::StorageEngineRepairManager(const std::string& dbpath) {
+StorageRepairObserver::StorageRepairObserver(const std::string& dbpath) {
     using boost::filesystem::path;
     _repairIncompleteFilePath = path(dbpath) / path(kRepairIncompleteFileName);
 
@@ -51,25 +51,25 @@ StorageEngineRepairManager::StorageEngineRepairManager(const std::string& dbpath
                                                                         : RepairState::kPreStart;
 }
 
-StorageEngineRepairManager::~StorageEngineRepairManager() {}
+StorageRepairObserver::~StorageRepairObserver() {}
 
-StorageEngineRepairManager* StorageEngineRepairManager::get(ServiceContext* service) {
-    return getRepairManager(service).get();
+StorageRepairObserver* StorageRepairObserver::get(ServiceContext* service) {
+    return getRepairObserver(service).get();
 }
 
-void StorageEngineRepairManager::set(ServiceContext* service,
-                                     std::unique_ptr<StorageEngineRepairManager> repairManager) {
-    auto& manager = getRepairManager(service);
-    manager = std::move(repairManager);
+void StorageRepairObserver::set(ServiceContext* service,
+                                std::unique_ptr<StorageRepairObserver> repairObserver) {
+    auto& manager = getRepairObserver(service);
+    manager = std::move(repairObserver);
 }
 
-void StorageEngineRepairManager::onRepairStarted() {
+void StorageRepairObserver::onRepairStarted() {
     invariant(_repairState == RepairState::kPreStart || _repairState == RepairState::kIncomplete);
     _touchRepairIncompleteFile();
     _repairState = RepairState::kIncomplete;
 }
 
-void StorageEngineRepairManager::onRepairDone(OperationContext* opCtx, DataState dataState) {
+void StorageRepairObserver::onRepairDone(OperationContext* opCtx, DataState dataState) {
     invariant(_repairState == RepairState::kIncomplete);
 
     // This ordering is imporant. The incomplete file should only be removed once the
@@ -83,20 +83,20 @@ void StorageEngineRepairManager::onRepairDone(OperationContext* opCtx, DataState
     _repairState = RepairState::kDone;
 }
 
-void StorageEngineRepairManager::_touchRepairIncompleteFile() {
+void StorageRepairObserver::_touchRepairIncompleteFile() {
     boost::filesystem::ofstream file(_repairIncompleteFilePath);
     file << "";
     file.close();
     invariant(boost::filesystem::exists(_repairIncompleteFilePath));
 }
 
-void StorageEngineRepairManager::_removeRepairIncompleteFile() {
+void StorageRepairObserver::_removeRepairIncompleteFile() {
     invariant(boost::filesystem::exists(_repairIncompleteFilePath));
 
     boost::filesystem::remove(_repairIncompleteFilePath);
 }
 
-void StorageEngineRepairManager::_setReplConfigRepaired(OperationContext* opCtx) {
+void StorageRepairObserver::_setReplConfigRepaired(OperationContext* opCtx) {
     BSONObjBuilder configBuilder;
     BSONObj config;
     if (Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {

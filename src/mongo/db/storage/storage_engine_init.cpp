@@ -40,8 +40,8 @@
 #include "mongo/db/operation_context.h"
 #include "mongo/db/storage/storage_engine_lock_file.h"
 #include "mongo/db/storage/storage_engine_metadata.h"
-#include "mongo/db/storage/storage_engine_repair_manager.h"
 #include "mongo/db/storage/storage_options.h"
+#include "mongo/db/storage/storage_repair_observer.h"
 #include "mongo/db/unclean_shutdown.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/assert_util.h"
@@ -70,17 +70,17 @@ void initializeStorageEngine(ServiceContext* service, const StorageEngineInitFla
 
     const std::string dbpath = storageGlobalParams.dbpath;
 
-    StorageEngineRepairManager::set(service, std::make_unique<StorageEngineRepairManager>(dbpath));
-    auto repairManager = StorageEngineRepairManager::get(service);
+    StorageRepairObserver::set(service, std::make_unique<StorageRepairObserver>(dbpath));
+    auto repairObserver = StorageRepairObserver::get(service);
 
     if (storageGlobalParams.repair) {
-        repairManager->onRepairStarted();
+        repairObserver->onRepairStarted();
     } else {
         uassert(50909,
                 str::stream() << "An incomplete repair has been detected! This is likely because "
                                  "a repair operation unexpectedly failed before completing. "
                                  "MongoDB will not start up again without --repair.",
-                !repairManager->isIncomplete());
+                !repairObserver->isIncomplete());
     }
 
     if (auto existingStorageEngine = StorageEngineMetadata::getStorageEngineForPath(dbpath)) {

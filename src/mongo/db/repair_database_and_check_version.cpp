@@ -50,7 +50,7 @@
 #include "mongo/db/repl/drop_pending_collection_reaper.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/server_options.h"
-#include "mongo/db/storage/storage_engine_repair_manager.h"
+#include "mongo/db/storage/storage_repair_observer.h"
 #include "mongo/util/exit.h"
 #include "mongo/util/fail_point.h"
 #include "mongo/util/log.h"
@@ -383,13 +383,13 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
             log() << "Exiting because 'exitBeforeRepairInvalidatesConfig' fail point was set.";
             quickExit(EXIT_ABRUPT);
         }
-        const auto dataState = dataModified ? StorageEngineRepairManager::DataState::kModified
-                                            : StorageEngineRepairManager::DataState::kUnmodified;
+        const auto dataState = dataModified ? StorageRepairObserver::DataState::kModified
+                                            : StorageRepairObserver::DataState::kUnmodified;
 
         // This must be done after opening the "local" database as it modifies the replica set
         // config.
-        auto repairManager = StorageEngineRepairManager::get(opCtx->getServiceContext());
-        repairManager->onRepairDone(opCtx, dataState);
+        auto repairObserver = StorageRepairObserver::get(opCtx->getServiceContext());
+        repairObserver->onRepairDone(opCtx, dataState);
         if (dataModified) {
             warning()
                 << "WARNING: Repair may have modified data. This node will no longer be able to "

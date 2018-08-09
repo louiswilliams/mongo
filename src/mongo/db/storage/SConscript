@@ -199,7 +199,7 @@ env.Library(
         '$BUILD_DIR/mongo/db/service_context',
         '$BUILD_DIR/mongo/db/concurrency/lock_manager',
         'storage_engine_lock_file',
-        'storage_engine_repair_manager',
+        'storage_repair_observer',
         'storage_engine_metadata',
         'storage_options',
     ],
@@ -249,9 +249,9 @@ env.Library(
 )
 
 env.Library(
-    target='storage_engine_repair_manager',
+    target='storage_repair_observer',
     source=[
-        'storage_engine_repair_manager.cpp',
+        'storage_repair_observer.cpp',
     ],
     LIBDEPS_PRIVATE=[
         '$BUILD_DIR/mongo/base',
@@ -262,9 +262,9 @@ env.Library(
 )
 
 env.CppUnitTest(
-    target='storage_engine_repair_manager_test',
+    target='storage_repair_observer_test',
     source=[
-        'storage_engine_repair_manager_test.cpp',
+        'storage_repair_observer_test.cpp',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/db/auth/authmocks',
@@ -275,7 +275,7 @@ env.CppUnitTest(
         '$BUILD_DIR/mongo/db/storage/ephemeral_for_test/storage_ephemeral_for_test_core',
         '$BUILD_DIR/mongo/executor/network_interface_factory',
         '$BUILD_DIR/mongo/executor/network_interface_mock',
-        'storage_engine_repair_manager',
+        'storage_repair_observer',
     ],
 )
 

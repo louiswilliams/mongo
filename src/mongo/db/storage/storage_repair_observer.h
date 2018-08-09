@@ -127,7 +127,7 @@ private:
 
     void _touchRepairIncompleteFile();
     void _removeRepairIncompleteFile();
-    void _setReplConfigRepaired(OperationContext* opCtx);
+    void _invalidateReplConfigIfNeeded(OperationContext* opCtx);
 
     boost::filesystem::path _repairIncompleteFilePath;
     RepairState _repairState;

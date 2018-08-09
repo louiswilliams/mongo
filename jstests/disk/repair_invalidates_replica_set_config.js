@@ -90,9 +90,9 @@
     secondaryDB = secondary.getDB(dbName);
 
     //
-    // 3. This test corrupts the _mdb_catalog file on a secondary, repairs the data, and asserts
-    // that the node is unable to re-join its original replica set without an initial sync.
-    //
+    // 3. This test corrupts the _mdb_catalog file on a secondary, repairs the data. Because the
+    // node's local.system.replset collection gets deleted, we assert that it is able to start up
+    // and re-sync on the existing data directory immediately.
 
     // Shut down the secondary. Delete the catalog file.
     MongoRunner.stopMongod(secondary);
@@ -103,18 +103,17 @@
     // Ensure the secondary can be repaired successfully.
     assertRepairSucceeds(secondaryDbpath, secondaryPort);
 
-    // Starting up with --replSet should fail with a specific error.
-    assertErrorOnStartupWhenStartingAsReplSet(
-        secondaryDbpath, secondaryPort, replSet.getReplSetConfig()._id);
-
     // Starting up without --replSet should not fail, but the collection should exist with no data.
     assertStartAndStopStandaloneOnExistingDbpath(secondaryDbpath, secondaryPort, function(node) {
         let nodeDB = node.getDB(dbName);
         assert(!nodeDB[collName].exists());
+        assert(!nodeDB.getSiblingDB("local")["system.replset"].exists());
     });
 
-    // Starting the secondary with a wiped data directory should force an initial sync.
-    secondary = assertStartAndResync(replSet, originalSecondary, true, function(node) {
+    // The node's local.system.replset collection has been deleted, so it's perfectly okay that it
+    // is is able to start up and re-sync.
+    // Starting the secondary with the same data directory should force an initial sync.
+    secondary = assertStartAndResync(replSet, originalSecondary, false, function(node) {
         let nodeDB = node.getDB(dbName);
         assert.eq(nodeDB[collName].find().itcount(), 1);
     });

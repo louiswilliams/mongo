@@ -75,7 +75,7 @@ void StorageRepairObserver::onRepairDone(OperationContext* opCtx, DataState data
     // This ordering is imporant. The incomplete file should only be removed once the
     // replica set configuration has been invalidated successfully.
     if (dataState == DataState::kModified) {
-        _setReplConfigRepaired(opCtx);
+        _invalidateReplConfigIfNeeded(opCtx);
     }
     _removeRepairIncompleteFile();
 
@@ -96,15 +96,19 @@ void StorageRepairObserver::_removeRepairIncompleteFile() {
     boost::filesystem::remove(_repairIncompleteFilePath);
 }
 
-void StorageRepairObserver::_setReplConfigRepaired(OperationContext* opCtx) {
-    BSONObjBuilder configBuilder;
+void StorageRepairObserver::_invalidateReplConfigIfNeeded(OperationContext* opCtx) {
+    // If the config doesn't exist, don't invalidate anything. If this node were originally part of
+    // a replica set but lost its config due to a repair, it would automatically perform a resync.
+    // If this node is a standalone, this would lead to a confusing error message if it were
+    // added to a replica set later on.
     BSONObj config;
-    if (Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {
-        configBuilder.appendElements(config);
+    if (!Helpers::getSingleton(opCtx, kConfigNss.ns().c_str(), config)) {
+        return;
     }
     if (config.hasField(repl::ReplSetConfig::kRepairedFieldName)) {
         return;
     }
+    BSONObjBuilder configBuilder(config);
     configBuilder.append(repl::ReplSetConfig::kRepairedFieldName, true);
     Helpers::putSingleton(opCtx, kConfigNss.ns().c_str(), configBuilder.obj());
 }

@@ -390,10 +390,10 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         // config.
         auto repairObserver = StorageRepairObserver::get(opCtx->getServiceContext());
         repairObserver->onRepairDone(opCtx, dataState);
-        if (dataModified) {
-            warning()
-                << "WARNING: Repair may have modified data. This node will no longer be able to "
-                   "join a replica set without a full re-sync";
+
+        if (dataModified && hasReplSetConfig(opCtx)) {
+            warning() << "WARNING: Repair may have modified replicated data. This node will no "
+                         "longer be able to join a replica set without a full re-sync";
         }
     }
 

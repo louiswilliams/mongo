@@ -63,13 +63,13 @@ void StorageEngineRepairManager::set(ServiceContext* service,
     manager = std::move(repairManager);
 }
 
-void StorageEngineRepairManager::repairStarted() {
+void StorageEngineRepairManager::onRepairStarted() {
     invariant(_repairState == RepairState::kPreStart || _repairState == RepairState::kIncomplete);
     _touchRepairIncompleteFile();
     _repairState = RepairState::kIncomplete;
 }
 
-void StorageEngineRepairManager::repairDone(OperationContext* opCtx, DataState dataState) {
+void StorageEngineRepairManager::onRepairDone(OperationContext* opCtx, DataState dataState) {
     invariant(_repairState == RepairState::kIncomplete);
 
     // This ordering is imporant. The incomplete file should only be removed once the

@@ -389,7 +389,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         // This must be done after opening the "local" database as it modifies the replica set
         // config.
         auto repairManager = StorageEngineRepairManager::get(opCtx->getServiceContext());
-        repairManager->repairDone(opCtx, dataState);
+        repairManager->onRepairDone(opCtx, dataState);
         if (dataModified) {
             warning()
                 << "WARNING: Repair may have modified data. This node will no longer be able to "

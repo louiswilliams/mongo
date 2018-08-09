@@ -87,9 +87,9 @@ public:
 
     void tearDown() {
         if (_assertRepairIncompleteOnTearDown) {
-            ASSERT(getRepairManager()->incomplete());
+            ASSERT(getRepairManager()->isIncomplete());
         } else {
-            ASSERT(!getRepairManager()->incomplete());
+            ASSERT(!getRepairManager()->isIncomplete());
         }
     }
 
@@ -102,20 +102,20 @@ TEST_F(RepairManagerTest, DataUnmodified) {
 
     auto repairFile = repairFilePath();
     ASSERT(!boost::filesystem::exists(repairFile));
-    ASSERT(!repairManager->incomplete());
+    ASSERT(!repairManager->isIncomplete());
 
-    repairManager->repairStarted();
+    repairManager->onRepairStarted();
 
-    ASSERT(repairManager->incomplete());
+    ASSERT(repairManager->isIncomplete());
     ASSERT(boost::filesystem::exists(repairFile));
 
     auto opCtx = cc().makeOperationContext();
-    repairManager->repairDone(opCtx.get(), StorageEngineRepairManager::DataState::kUnmodified);
-    ASSERT(!repairManager->incomplete());
+    repairManager->onRepairDone(opCtx.get(), StorageEngineRepairManager::DataState::kUnmodified);
+    ASSERT(!repairManager->isIncomplete());
     ASSERT(!boost::filesystem::exists(repairFile));
 
-    ASSERT(repairManager->done());
-    ASSERT(!repairManager->dataModified());
+    ASSERT(repairManager->isDone());
+    ASSERT(!repairManager->isDataModified());
 
     assertReplConfigValid(opCtx.get(), true);
 }
@@ -125,21 +125,21 @@ TEST_F(RepairManagerTest, DataModified) {
 
     auto repairFile = repairFilePath();
     ASSERT(!boost::filesystem::exists(repairFile));
-    ASSERT(!repairManager->incomplete());
+    ASSERT(!repairManager->isIncomplete());
 
-    repairManager->repairStarted();
+    repairManager->onRepairStarted();
 
-    ASSERT(repairManager->incomplete());
+    ASSERT(repairManager->isIncomplete());
     ASSERT(boost::filesystem::exists(repairFile));
 
     auto opCtx = cc().makeOperationContext();
     Lock::GlobalWrite lock(opCtx.get());
-    repairManager->repairDone(opCtx.get(), StorageEngineRepairManager::DataState::kModified);
-    ASSERT(!repairManager->incomplete());
+    repairManager->onRepairDone(opCtx.get(), StorageEngineRepairManager::DataState::kModified);
+    ASSERT(!repairManager->isIncomplete());
     ASSERT(!boost::filesystem::exists(repairFile));
 
-    ASSERT(repairManager->done());
-    ASSERT(repairManager->dataModified());
+    ASSERT(repairManager->isDone());
+    ASSERT(repairManager->isDataModified());
     assertReplConfigValid(opCtx.get(), false);
 }
 
@@ -148,69 +148,69 @@ TEST_F(RepairManagerTest, RepairIsIncompleteOnFailure) {
 
     auto repairFile = repairFilePath();
     ASSERT(!boost::filesystem::exists(repairFile));
-    ASSERT(!repairManager->incomplete());
+    ASSERT(!repairManager->isIncomplete());
 
-    repairManager->repairStarted();
+    repairManager->onRepairStarted();
 
-    ASSERT(repairManager->incomplete());
+    ASSERT(repairManager->isIncomplete());
     ASSERT(boost::filesystem::exists(repairFile));
 
-    // Assert that a failure to call repairDone does not remove the failure file.
+    // Assert that a failure to call onRepairDone does not remove the failure file.
     assertRepairIncompleteOnTearDown();
 }
 
 TEST_F(RepairManagerTest, RepairIncompleteAfterRestart) {
     auto repairManager = getRepairManager();
-    ASSERT(!repairManager->incomplete());
-    repairManager->repairStarted();
-    ASSERT(repairManager->incomplete());
+    ASSERT(!repairManager->isIncomplete());
+    repairManager->onRepairStarted();
+    ASSERT(repairManager->isIncomplete());
 
     repairManager = reset();
-    ASSERT(repairManager->incomplete());
+    ASSERT(repairManager->isIncomplete());
 
 
-    // Assert that a failure to call repairStarted does not create the failure file.
+    // Assert that a failure to call onRepairStarted does not create the failure file.
     assertRepairIncompleteOnTearDown();
 }
 
 TEST_F(RepairManagerTest, RepairCompleteAfterRestart) {
     auto repairManager = getRepairManager();
-    ASSERT(!repairManager->incomplete());
-    repairManager->repairStarted();
-    ASSERT(repairManager->incomplete());
+    ASSERT(!repairManager->isIncomplete());
+    repairManager->onRepairStarted();
+    ASSERT(repairManager->isIncomplete());
 
     auto opCtx = cc().makeOperationContext();
     Lock::GlobalWrite lock(opCtx.get());
-    repairManager->repairDone(opCtx.get(), StorageEngineRepairManager::DataState::kModified);
-    ASSERT(repairManager->done());
+    repairManager->onRepairDone(opCtx.get(), StorageEngineRepairManager::DataState::kModified);
+    ASSERT(repairManager->isDone());
 
     repairManager = reset();
-    ASSERT(!repairManager->incomplete());
+    ASSERT(!repairManager->isIncomplete());
     // Done is reservered for completed operations.
-    ASSERT(!repairManager->done());
+    ASSERT(!repairManager->isDone());
     assertReplConfigValid(opCtx.get(), false);
 }
 
 DEATH_TEST_F(RepairManagerTest, FailsWhenDoneCalledFirst, "Invariant failure") {
     auto repairManager = getRepairManager();
-    ASSERT(!repairManager->incomplete());
+    ASSERT(!repairManager->isIncomplete());
 
     auto opCtx = cc().makeOperationContext();
-    repairManager->repairDone(opCtx.get(), StorageEngineRepairManager::DataState::kUnmodified);
+    repairManager->onRepairDone(opCtx.get(), StorageEngineRepairManager::DataState::kUnmodified);
 }
 
 DEATH_TEST_F(RepairManagerTest, FailsWhenStartedCalledAfterDone, "Invariant failure") {
     auto repairManager = getRepairManager();
-    ASSERT(!repairManager->incomplete());
-    repairManager->repairStarted();
-    ASSERT(repairManager->incomplete());
+    ASSERT(!repairManager->isIncomplete());
+    repairManager->onRepairStarted();
+    ASSERT(repairManager->isIncomplete());
 
     auto opCtx = cc().makeOperationContext();
-    repairManager->repairDone(opCtx.get(), StorageEngineRepairManager::DataState::kUnmodified);
-    ASSERT(repairManager->done());
+    repairManager->onRepairDone(opCtx.get(), StorageEngineRepairManager::DataState::kUnmodified);
+    ASSERT(repairManager->isDone());
     assertReplConfigValid(opCtx.get(), true);
 
-    repairManager->repairStarted();
+    repairManager->onRepairStarted();
 }
 }  // namespace
 }  // namespace mongo

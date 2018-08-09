@@ -67,7 +67,7 @@ public:
     /**
      * Notify the repair manager that a database repair operation is about to begin.
      */
-    void repairStarted();
+    void onRepairStarted();
 
     /**
      * This must be called to notify the repair manager that a database repair operation completed
@@ -77,21 +77,21 @@ public:
      * Failure to call this will leave the node in an incomplete repaired state, and subsequent
      * restarts will require to the node to run repair again.
      *
-     * May only be called after a call to repairStarted().
+     * May only be called after a call to onRepairStarted().
      */
-    void repairDone(OperationContext* opCtx, DataState dataState);
+    void onRepairDone(OperationContext* opCtx, DataState dataState);
 
     /**
      * Returns 'true' if this node is an incomplete repair state.
      */
-    bool incomplete() const {
+    bool isIncomplete() const {
         return _repairState == RepairState::kIncomplete;
     }
 
     /**
      * Returns 'true' if this node is done with a repair operation.
      */
-    bool done() const {
+    bool isDone() const {
         return _repairState == RepairState::kDone;
     }
 
@@ -100,7 +100,7 @@ public:
      *
      * May only be called after a call to repairDone().
      */
-    bool dataModified() const {
+    bool isDataModified() const {
         invariant(_repairState == RepairState::kDone);
         return _dataState == DataState::kModified;
     }

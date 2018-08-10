@@ -208,13 +208,9 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
                     fassert(50716, _catalog->dropCollection(opCtx, coll));
 
                     if (_options.forRepair) {
-                        opCtx->recoveryUnit()->onCommit(
-                            [opCtx, coll, status](boost::optional<Timestamp>) {
-                                StorageRepairObserver::get(getGlobalServiceContext())
-                                    ->onModification(str::stream() << "Collection " << coll
-                                                                   << " dropped: "
-                                                                   << status.reason());
-                            });
+                        StorageRepairObserver::get(getGlobalServiceContext())
+                            ->onModification(str::stream() << "Collection " << coll << " dropped: "
+                                                           << status.reason());
                     }
                     wuow.commit();
                     continue;
@@ -283,13 +279,9 @@ Status KVStorageEngine::_recoverOrphanedCollection(OperationContext* opCtx,
         return status;
     }
     if (dataModified) {
-        opCtx->recoveryUnit()->onCommit(
-            [opCtx, collectionName, status](boost::optional<Timestamp>) {
-                StorageRepairObserver::get(getGlobalServiceContext())
-                    ->onModification(str::stream() << "Collection " << collectionName.ns()
-                                                   << " recovered: "
-                                                   << status.reason());
-            });
+        StorageRepairObserver::get(getGlobalServiceContext())
+            ->onModification(str::stream() << "Collection " << collectionName.ns() << " recovered: "
+                                           << status.reason());
     }
     wuow.commit();
     return Status::OK();

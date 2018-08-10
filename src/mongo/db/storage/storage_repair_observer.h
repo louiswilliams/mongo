@@ -72,13 +72,22 @@ public:
     void onRepairStarted();
 
     /**
+     * Indicate that a data$modification was made by repair. If even a single call is made, the
+     * replica set configuration will be invalidated.
+     *
+     * Provide a 'description' of the modification that will added to a list of modifications by
+     * getModifications();
+     */
+    void onModification(const std::string& description);
+
+    /**
      * This must be called to notify the repair observer that a database repair operation completed
      * successfully. If dataState is 'kModified', this invalidates the replica set configuration so
      * this node will be unable to rejoin a replica set.
      *
      * May only be called after a call to onRepairStarted().
      */
-    void onRepairDone(OperationContext* opCtx, DataState dataState);
+    void onRepairDone(OperationContext* opCtx);
 
     /**
      * Returns 'true' if this node is an incomplete repair state.
@@ -100,9 +109,14 @@ public:
      * May only be called after a call to repairDone().
      */
     bool isDataModified() const {
-        invariant(_repairState == RepairState::kDone);
-        return _dataState == DataState::kModified;
+        invariant(_repairState == RepairState::kIncomplete || _repairState == RepairState::kDone);
+        return !_modifications.empty();
     }
+
+    const std::vector<std::string> getModifications() const {
+        return _modifications;
+    }
+
 
 private:
     enum class RepairState {
@@ -131,7 +145,7 @@ private:
 
     boost::filesystem::path _repairIncompleteFilePath;
     RepairState _repairState;
-    DataState _dataState;
+    std::vector<std::string> _modifications;
 };
 
 }  // namespace mongo

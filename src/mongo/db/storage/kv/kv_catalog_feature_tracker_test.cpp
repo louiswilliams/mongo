@@ -79,7 +79,7 @@ public:
             wuow.commit();
         }
 
-        _catalog = stdx::make_unique<KVCatalog>(_rs.get(), false, false, false);
+        _catalog = stdx::make_unique<KVCatalog>(_rs.get(), false, false);
         _catalog->init(opCtx.get());
 
         {

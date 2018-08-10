@@ -56,10 +56,7 @@ public:
      * dataFor. The KVCatalog does not utilize Cursors and those methods may omit further
      * protection.
      */
-    KVCatalog(RecordStore* rs,
-              bool directoryPerDb,
-              bool directoryForIndexes,
-              bool dataModifiedByRepair);
+    KVCatalog(RecordStore* rs, bool directoryPerDb, bool directoryForIndexes);
     ~KVCatalog();
 
     void init(OperationContext* opCtx);
@@ -132,8 +129,6 @@ private:
     RecordStore* _rs;  // not owned
     const bool _directoryPerDb;
     const bool _directoryForIndexes;
-
-    const bool _dataModifiedByRepair;
 
     // These two are only used for ident generation inside _newUniqueIdent.
     std::string _rand;  // effectively const after init() returns

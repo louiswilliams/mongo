@@ -177,7 +177,7 @@ TEST(KVCatalogTest, Coll1) {
         WriteUnitOfWork uow(&opCtx);
         ASSERT_OK(engine->createRecordStore(&opCtx, "catalog", "catalog", CollectionOptions()));
         rs = engine->getRecordStore(&opCtx, "catalog", "catalog", CollectionOptions());
-        catalog.reset(new KVCatalog(rs.get(), false, false, false));
+        catalog.reset(new KVCatalog(rs.get(), false, false));
         uow.commit();
     }
 
@@ -194,7 +194,7 @@ TEST(KVCatalogTest, Coll1) {
     {
         MyOperationContext opCtx(engine);
         WriteUnitOfWork uow(&opCtx);
-        catalog.reset(new KVCatalog(rs.get(), false, false, false));
+        catalog.reset(new KVCatalog(rs.get(), false, false));
         catalog->init(&opCtx);
         uow.commit();
     }
@@ -223,7 +223,7 @@ TEST(KVCatalogTest, Idx1) {
         WriteUnitOfWork uow(&opCtx);
         ASSERT_OK(engine->createRecordStore(&opCtx, "catalog", "catalog", CollectionOptions()));
         rs = engine->getRecordStore(&opCtx, "catalog", "catalog", CollectionOptions());
-        catalog.reset(new KVCatalog(rs.get(), false, false, false));
+        catalog.reset(new KVCatalog(rs.get(), false, false));
         uow.commit();
     }
 
@@ -301,7 +301,7 @@ TEST(KVCatalogTest, DirectoryPerDb1) {
         WriteUnitOfWork uow(&opCtx);
         ASSERT_OK(engine->createRecordStore(&opCtx, "catalog", "catalog", CollectionOptions()));
         rs = engine->getRecordStore(&opCtx, "catalog", "catalog", CollectionOptions());
-        catalog.reset(new KVCatalog(rs.get(), true, false, false));
+        catalog.reset(new KVCatalog(rs.get(), true, false));
         uow.commit();
     }
 
@@ -346,7 +346,7 @@ TEST(KVCatalogTest, Split1) {
         WriteUnitOfWork uow(&opCtx);
         ASSERT_OK(engine->createRecordStore(&opCtx, "catalog", "catalog", CollectionOptions()));
         rs = engine->getRecordStore(&opCtx, "catalog", "catalog", CollectionOptions());
-        catalog.reset(new KVCatalog(rs.get(), false, true, false));
+        catalog.reset(new KVCatalog(rs.get(), false, true));
         uow.commit();
     }
 
@@ -391,7 +391,7 @@ TEST(KVCatalogTest, DirectoryPerAndSplit1) {
         WriteUnitOfWork uow(&opCtx);
         ASSERT_OK(engine->createRecordStore(&opCtx, "catalog", "catalog", CollectionOptions()));
         rs = engine->getRecordStore(&opCtx, "catalog", "catalog", CollectionOptions());
-        catalog.reset(new KVCatalog(rs.get(), true, true, false));
+        catalog.reset(new KVCatalog(rs.get(), true, true));
         uow.commit();
     }
 
@@ -442,7 +442,7 @@ TEST(KVCatalogTest, RestartForPrefixes) {
             WriteUnitOfWork uow(&opCtx);
             ASSERT_OK(engine->createRecordStore(&opCtx, "catalog", "catalog", CollectionOptions()));
             rs = engine->getRecordStore(&opCtx, "catalog", "catalog", CollectionOptions());
-            catalog.reset(new KVCatalog(rs.get(), false, false, false));
+            catalog.reset(new KVCatalog(rs.get(), false, false));
             uow.commit();
         }
 
@@ -480,7 +480,7 @@ TEST(KVCatalogTest, RestartForPrefixes) {
         WriteUnitOfWork uow(&opCtx);
         unique_ptr<RecordStore> rs =
             engine->getRecordStore(&opCtx, "catalog", "catalog", CollectionOptions());
-        unique_ptr<KVCatalog> catalog = stdx::make_unique<KVCatalog>(rs.get(), false, false, false);
+        unique_ptr<KVCatalog> catalog = stdx::make_unique<KVCatalog>(rs.get(), false, false);
         catalog->init(&opCtx);
 
         const BSONCollectionCatalogEntry::MetaData md = catalog->getMetaData(&opCtx, "a.b");

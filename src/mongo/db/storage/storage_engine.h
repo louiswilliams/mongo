@@ -217,11 +217,6 @@ public:
     virtual void closeCatalog(OperationContext* opCtx) {}
 
     /**
-     * If 'true', catalog data was potentially modified by a repair operation.
-     */
-    virtual bool catalogModifiedByRepair() const = 0;
-
-    /**
      * Closes all file handles associated with a database.
      */
     virtual Status closeDatabase(OperationContext* opCtx, StringData db) = 0;
@@ -283,9 +278,6 @@ public:
     /**
      * Recover as much data as possible from a potentially corrupt RecordStore.
      * This only recovers the record data, not indexes or anything else.
-     *
-     * If data has been or could have been modified, returns DataModifiedByRepair, which indicates a
-     * non-fatal modification of data.
      *
      * Generally, this method should not be called directly except by the repairDatabase()
      * free function.

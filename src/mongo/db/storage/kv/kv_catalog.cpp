@@ -317,14 +317,10 @@ void KVCatalog::FeatureTracker::putInfo(OperationContext* opCtx, const FeatureBi
     }
 }
 
-KVCatalog::KVCatalog(RecordStore* rs,
-                     bool directoryPerDb,
-                     bool directoryForIndexes,
-                     bool dataModifiedByRepair)
+KVCatalog::KVCatalog(RecordStore* rs, bool directoryPerDb, bool directoryForIndexes)
     : _rs(rs),
       _directoryPerDb(directoryPerDb),
       _directoryForIndexes(directoryForIndexes),
-      _dataModifiedByRepair(dataModifiedByRepair),
       _rand(_newRand()) {}
 
 KVCatalog::~KVCatalog() {

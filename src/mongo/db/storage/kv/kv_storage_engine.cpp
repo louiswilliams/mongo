@@ -40,6 +40,7 @@
 #include "mongo/db/storage/kv/kv_catalog_feature_tracker.h"
 #include "mongo/db/storage/kv/kv_database_catalog_entry.h"
 #include "mongo/db/storage/kv/kv_engine.h"
+#include "mongo/db/storage/storage_repair_observer.h"
 #include "mongo/db/unclean_shutdown.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
@@ -95,7 +96,6 @@ KVStorageEngine::KVStorageEngine(
 
 void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
     bool catalogExists = _engine->hasIdent(opCtx, catalogInfo);
-    bool catalogModifiedByRepair = false;
     if (_options.forRepair && catalogExists) {
         log() << "Repairing catalog metadata";
         // TODO should also validate all BSON in the catalog.
@@ -103,7 +103,8 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
 
         if (status.code() == ErrorCodes::DataModifiedByRepair) {
             log() << "Catalog data modified by repair: " << status.reason();
-            catalogModifiedByRepair = true;
+            StorageRepairObserver::get(getGlobalServiceContext())
+                ->onModification(str::stream() << "KVCatalog repaired: " << status.reason());
         } else {
             fassertNoTrace(50911, status);
         }
@@ -131,10 +132,8 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
         _dumpCatalog(opCtx);
     }
 
-    _catalog.reset(new KVCatalog(_catalogRecordStore.get(),
-                                 _options.directoryPerDB,
-                                 _options.directoryForIndexes,
-                                 catalogModifiedByRepair));
+    _catalog.reset(new KVCatalog(
+        _catalogRecordStore.get(), _options.directoryPerDB, _options.directoryForIndexes));
     _catalog->init(opCtx);
 
     // We populate 'identsKnownToStorageEngine' only if we are loading after an unclean shutdown or
@@ -200,8 +199,26 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
                                               collectionIdent);
             // If the storage engine is missing a collection and is unable to create a new record
             // store, continue past the following logic.
-            if (orphan && !_recoverOrDropOrphanedCollection(opCtx, nss, collectionIdent)) {
-                continue;
+            if (orphan) {
+                auto status = _recoverOrphanedCollection(opCtx, nss, collectionIdent);
+                if (!status.isOK()) {
+                    warning() << "Failed to recover orphaned data file for collection '" << coll
+                              << "': " << status;
+                    WriteUnitOfWork wuow(opCtx);
+                    fassert(50716, _catalog->dropCollection(opCtx, coll));
+
+                    if (_options.forRepair) {
+                        opCtx->recoveryUnit()->onCommit(
+                            [opCtx, coll, status](boost::optional<Timestamp>) {
+                                StorageRepairObserver::get(getGlobalServiceContext())
+                                    ->onModification(str::stream() << "Collection " << coll
+                                                                   << " dropped: "
+                                                                   << status.reason());
+                            });
+                    }
+                    wuow.commit();
+                    continue;
+                }
             }
         }
 
@@ -245,35 +262,37 @@ void KVStorageEngine::closeCatalog(OperationContext* opCtx) {
     _catalogRecordStore.reset(nullptr);
 }
 
-bool KVStorageEngine::_recoverOrDropOrphanedCollection(OperationContext* opCtx,
-                                                       const NamespaceString& collectionName,
-                                                       StringData collectionIdent) {
-
-    if (_options.forRepair) {
-        log() << "Storage engine is missing collection '" << collectionName
-              << "' from its metadata. Attempting to locate and recover the data for "
-              << collectionIdent;
-
-        WriteUnitOfWork wuow(opCtx);
-        const auto metadata = _catalog->getMetaData(opCtx, collectionName.toString());
-        auto status = _engine->recoverOrphanedIdent(
-            opCtx, collectionName.toString(), collectionIdent, metadata.options);
-        if (status.isOK()) {
-            wuow.commit();
-            return true;
-        }
-
-        warning() << "Failed to recover orphaned data file for collection '" << collectionName
-                  << "': " << status;
+Status KVStorageEngine::_recoverOrphanedCollection(OperationContext* opCtx,
+                                                   const NamespaceString& collectionName,
+                                                   StringData collectionIdent) {
+    if (!_options.forRepair) {
+        return {ErrorCodes::IllegalOperation, "Orphan recovery only supported in repair"};
     }
-
-    log() << "Dropping collection " << collectionName
-          << " from the catalog unknown to the storage engine";
+    log() << "Storage engine is missing collection '" << collectionName
+          << "' from its metadata. Attempting to locate and recover the data for "
+          << collectionIdent;
 
     WriteUnitOfWork wuow(opCtx);
-    fassert(50716, _catalog->dropCollection(opCtx, collectionName.toString()));
+    const auto metadata = _catalog->getMetaData(opCtx, collectionName.toString());
+    auto status = _engine->recoverOrphanedIdent(
+        opCtx, collectionName.toString(), collectionIdent, metadata.options);
+
+
+    bool dataModified = status.code() == ErrorCodes::DataModifiedByRepair;
+    if (!status.isOK() && !dataModified) {
+        return status;
+    }
+    if (dataModified) {
+        opCtx->recoveryUnit()->onCommit(
+            [opCtx, collectionName, status](boost::optional<Timestamp>) {
+                StorageRepairObserver::get(getGlobalServiceContext())
+                    ->onModification(str::stream() << "Collection " << collectionName.ns()
+                                                   << " recovered: "
+                                                   << status.reason());
+            });
+    }
     wuow.commit();
-    return false;
+    return Status::OK();
 }
 
 /**
@@ -583,11 +602,18 @@ SnapshotManager* KVStorageEngine::getSnapshotManager() const {
 
 Status KVStorageEngine::repairRecordStore(OperationContext* opCtx, const std::string& ns) {
     Status status = _engine->repairIdent(opCtx, _catalog->getCollectionIdent(ns));
-    if (status.isOK() || status.code() == ErrorCodes::DataModifiedByRepair) {
-        _dbs[nsToDatabase(ns)]->reinitCollectionAfterRepair(opCtx, ns);
+    bool dataModified = status.code() == ErrorCodes::DataModifiedByRepair;
+    if (!status.isOK() && !dataModified) {
+        return status;
     }
 
-    return status;
+    if (dataModified) {
+        StorageRepairObserver::get(getGlobalServiceContext())
+            ->onModification(str::stream() << "Collection " << ns << ": " << status.reason());
+    }
+    _dbs[nsToDatabase(ns)]->reinitCollectionAfterRepair(opCtx, ns);
+
+    return Status::OK();
 }
 
 void KVStorageEngine::setJournalListener(JournalListener* jl) {

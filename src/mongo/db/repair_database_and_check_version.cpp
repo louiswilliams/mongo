@@ -307,10 +307,6 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
 
     bool repairVerifiedAllCollectionsHaveUUIDs = false;
 
-    // If the catalog data was modified by a repair operation, the data on this node is no longer
-    // consistent with the rest of the replica set, and its config should be invalidated.
-    bool dataModified = storageEngine->catalogModifiedByRepair();
-
     // Repair all databases first, so that we do not try to open them if they are in bad shape
     if (storageGlobalParams.repair) {
         invariant(!storageGlobalParams.readOnly);
@@ -323,14 +319,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         for (const auto& dbName : dbNames) {
             LOG(1) << "    Repairing database: " << dbName;
             auto status = repairDatabase(opCtx, storageEngine, dbName);
-            bool modified = status.code() == ErrorCodes::DataModifiedByRepair;
-            if (!modified)
-                fassert(18506, status);
-
-            if (modified) {
-                log() << "Data modified on database " << dbName << ": " << status.reason();
-                dataModified = true;
-            }
+            fassertNoTrace(18506, status);
         }
 
         // All collections must have UUIDs before restoring the FCV document to a version that
@@ -383,17 +372,20 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
             log() << "Exiting because 'exitBeforeRepairInvalidatesConfig' fail point was set.";
             quickExit(EXIT_ABRUPT);
         }
-        const auto dataState = dataModified ? StorageRepairObserver::DataState::kModified
-                                            : StorageRepairObserver::DataState::kUnmodified;
-
         // This must be done after opening the "local" database as it modifies the replica set
         // config.
         auto repairObserver = StorageRepairObserver::get(opCtx->getServiceContext());
-        repairObserver->onRepairDone(opCtx, dataState);
-
-        if (dataModified && hasReplSetConfig(opCtx)) {
-            warning() << "WARNING: Repair may have modified replicated data. This node will no "
-                         "longer be able to join a replica set without a full re-sync";
+        repairObserver->onRepairDone(opCtx);
+        if (repairObserver->isDataModified()) {
+            const auto& mods = repairObserver->getModifications();
+            log() << "Modifications made by repair:";
+            for (const auto& mod : mods) {
+                log() << "  " << mod;
+            }
+            if (hasReplSetConfig(opCtx)) {
+                warning() << "WARNING: Repair may have modified replicated data. This node will no "
+                             "longer be able to join a replica set without a full re-sync";
+            }
         }
     }
 

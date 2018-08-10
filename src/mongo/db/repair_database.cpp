@@ -52,6 +52,7 @@
 #include "mongo/db/index/index_descriptor.h"
 #include "mongo/db/logical_clock.h"
 #include "mongo/db/storage/storage_engine.h"
+#include "mongo/db/storage/storage_repair_observer.h"
 #include "mongo/util/log.h"
 #include "mongo/util/scopeguard.h"
 
@@ -274,8 +275,6 @@ Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std:
     std::list<std::string> colls;
     dbce->getCollectionNamespaces(&colls);
 
-    bool dataModified = false;
-
     for (std::list<std::string>::const_iterator it = colls.begin(); it != colls.end(); ++it) {
         // Don't check for interrupt after starting to repair a collection otherwise we can
         // leave data in an inconsistent state. Interrupting between collections is ok, however.
@@ -284,14 +283,8 @@ Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std:
         log() << "Repairing collection " << *it;
 
         Status status = engine->repairRecordStore(opCtx, *it);
-        bool modified = status.code() == ErrorCodes::DataModifiedByRepair;
-        if (!status.isOK() && !modified)
+        if (!status.isOK())
             return status;
-
-        if (modified) {
-            log() << "Data modified by repair for collection " << *it << ": " << status.reason();
-            dataModified = true;
-        }
 
         CollectionCatalogEntry* cce = dbce->getCollectionCatalogEntry(*it);
         auto swIndexNameObjs = getIndexNameObjs(opCtx, dbce, cce);
@@ -305,8 +298,6 @@ Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std:
         // TODO: uncomment once SERVER-16869
         // engine->flushAllFiles(true);
     }
-
-    return (dataModified) ? Status(ErrorCodes::DataModifiedByRepair, "Data modified by repair")
-                          : Status::OK();
+    return Status::OK();
 }
 }

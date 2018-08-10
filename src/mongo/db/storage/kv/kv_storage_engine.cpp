@@ -97,14 +97,17 @@ KVStorageEngine::KVStorageEngine(
 void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
     bool catalogExists = _engine->hasIdent(opCtx, catalogInfo);
     if (_options.forRepair && catalogExists) {
+        auto repairObserver = StorageRepairObserver::get(getGlobalServiceContext());
+        invariant(repairObserver->isIncomplete());
+
         log() << "Repairing catalog metadata";
         // TODO should also validate all BSON in the catalog.
         Status status = _engine->repairIdent(opCtx, catalogInfo);
 
         if (status.code() == ErrorCodes::DataModifiedByRepair) {
             log() << "Catalog data modified by repair: " << status.reason();
-            StorageRepairObserver::get(getGlobalServiceContext())
-                ->onModification(str::stream() << "KVCatalog repaired: " << status.reason());
+            repairObserver->onModification(str::stream() << "KVCatalog repaired: "
+                                                         << status.reason());
         } else {
             fassertNoTrace(50911, status);
         }
@@ -593,6 +596,9 @@ SnapshotManager* KVStorageEngine::getSnapshotManager() const {
 }
 
 Status KVStorageEngine::repairRecordStore(OperationContext* opCtx, const std::string& ns) {
+    auto repairObserver = StorageRepairObserver::get(getGlobalServiceContext());
+    invariant(repairObserver->isIncomplete());
+
     Status status = _engine->repairIdent(opCtx, _catalog->getCollectionIdent(ns));
     bool dataModified = status.code() == ErrorCodes::DataModifiedByRepair;
     if (!status.isOK() && !dataModified) {
@@ -600,8 +606,8 @@ Status KVStorageEngine::repairRecordStore(OperationContext* opCtx, const std::st
     }
 
     if (dataModified) {
-        StorageRepairObserver::get(getGlobalServiceContext())
-            ->onModification(str::stream() << "Collection " << ns << ": " << status.reason());
+        repairObserver->onModification(str::stream() << "Collection " << ns << ": "
+                                                     << status.reason());
     }
     _dbs[nsToDatabase(ns)]->reinitCollectionAfterRepair(opCtx, ns);
 

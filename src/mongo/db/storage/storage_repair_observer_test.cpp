@@ -28,7 +28,8 @@
 
 #include "mongo/platform/basic.h"
 
-#include "boost/filesystem.hpp"
+#include <boost/filesystem.hpp>
+
 #include "mongo/db/concurrency/d_concurrency.h"
 #include "mongo/db/dbhelpers.h"
 #include "mongo/db/operation_context_noop.h"

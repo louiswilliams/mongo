@@ -914,7 +914,7 @@ TEST(ReplSetConfig, ParseFailsWithRepairField) {
                                            << "members"
                                            << BSON_ARRAY(BSON("_id" << 0 << "host"
                                                                     << "localhost:12345"))));
-    ASSERT_EQUALS(ErrorCodes::RepairedReplicaSetConfig, status);
+    ASSERT_EQUALS(ErrorCodes::RepairedReplicaSetNode, status);
 }
 
 TEST(ReplSetConfig, ValidateFailsWithBadProtocolVersion) {

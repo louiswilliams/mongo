@@ -52,7 +52,6 @@
 #include "mongo/db/index/index_descriptor.h"
 #include "mongo/db/logical_clock.h"
 #include "mongo/db/storage/storage_engine.h"
-#include "mongo/db/storage/storage_repair_observer.h"
 #include "mongo/util/log.h"
 #include "mongo/util/scopeguard.h"
 
@@ -298,6 +297,7 @@ Status repairDatabase(OperationContext* opCtx, StorageEngine* engine, const std:
         // TODO: uncomment once SERVER-16869
         // engine->flushAllFiles(true);
     }
+
     return Status::OK();
 }
 }

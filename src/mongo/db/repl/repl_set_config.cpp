@@ -110,7 +110,7 @@ Status ReplSetConfig::_initialize(const BSONObj& cfg, bool forInitiate, OID defa
     _members.clear();
 
     if (cfg.hasField(kRepairedFieldName)) {
-        return {ErrorCodes::RepairedReplicaSetConfig, "Replicated data has been repaired"};
+        return {ErrorCodes::RepairedReplicaSetNode, "Replicated data has been repaired"};
     }
 
     Status status =

@@ -40,10 +40,11 @@ let assertRepairFailsWithFailpoint = function(dbpath, port, failpoint) {
         runMongoProgram(
             "mongod", "--repair", "--port", port, "--dbpath", dbpath, "--setParameter", param));
 };
+
 /**
-* Assert that starting MongoDB with --replSet on an existing data path exits with a specific
-* error.
-*/
+ * Assert that starting MongoDB with --replSet on an existing data path exits with a specific
+ * error.
+ */
 let assertErrorOnStartupWhenStartingAsReplSet = function(dbpath, port, rsName) {
     jsTestLog("The repaired node should fail to start up with the --replSet option");
 
@@ -71,6 +72,7 @@ let assertErrorOnStartupAfterIncompleteRepair = function(dbpath, port) {
     });
     MongoRunner.stopMongod(node, null, {allowedExitCode: MongoRunner.EXIT_UNCAUGHT});
 };
+
 /**
  * Assert that starting MongoDB as a standalone on an existing data path succeeds. Uses a provided
  * testFunc to run any caller-provided checks on the started node.
@@ -99,6 +101,7 @@ let assertStartAndResync = function(replSet, originalNode, cleanData, testFunc) 
     testFunc(node);
     return node;
 };
+
 /**
  * Assert certain error messages are thrown on startup when files are missing or corrupt.
  */

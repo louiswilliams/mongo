@@ -101,11 +101,10 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
         invariant(repairObserver->isIncomplete());
 
         log() << "Repairing catalog metadata";
-        // TODO should also validate all BSON in the catalog.
         Status status = _engine->repairIdent(opCtx, catalogInfo);
 
         if (status.code() == ErrorCodes::DataModifiedByRepair) {
-            log() << "Catalog data modified by repair: " << status.reason();
+            warning() << "Catalog data modified by repair: " << status.reason();
             repairObserver->onModification(str::stream() << "KVCatalog repaired: "
                                                          << status.reason());
         } else {
@@ -201,7 +200,8 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
                                               identsKnownToStorageEngine.end(),
                                               collectionIdent);
             // If the storage engine is missing a collection and is unable to create a new record
-            // store, continue past the following logic.
+            // store, drop it from the catalog and skip initializing it by continuing past the
+            // following logic.
             if (orphan) {
                 auto status = _recoverOrphanedCollection(opCtx, nss, collectionIdent);
                 if (!status.isOK()) {

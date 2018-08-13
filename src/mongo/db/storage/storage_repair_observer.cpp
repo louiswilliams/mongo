@@ -28,6 +28,8 @@
 
 #include "mongo/db/storage/storage_repair_observer.h"
 
+#include <errno.h>
+
 #include "mongo/db/dbhelpers.h"
 #include "mongo/db/repl/repl_set_config.h"
 #include "mongo/db/service_context.h"
@@ -37,7 +39,6 @@ namespace mongo {
 namespace {
 static const NamespaceString kConfigNss("local.system.replset");
 static const std::string kRepairIncompleteFileName = "_repair_incomplete";
-
 
 const auto getRepairObserver =
     ServiceContext::declareDecoration<std::unique_ptr<StorageRepairObserver>>();
@@ -89,7 +90,13 @@ void StorageRepairObserver::onRepairDone(OperationContext* opCtx) {
 
 void StorageRepairObserver::_touchRepairIncompleteFile() {
     boost::filesystem::ofstream file(_repairIncompleteFilePath);
-    file << "";
+    file << "This file indicates that a repair operation is in progress or incomplete.";
+    if (file.fail()) {
+        uasserted(50912,
+                  str::stream() << "Failed to write to file " << _repairIncompleteFilePath.c_str()
+                                << ": "
+                                << strerror(errno));
+    }
     file.close();
     invariant(boost::filesystem::exists(_repairIncompleteFilePath));
 }
@@ -97,7 +104,14 @@ void StorageRepairObserver::_touchRepairIncompleteFile() {
 void StorageRepairObserver::_removeRepairIncompleteFile() {
     invariant(boost::filesystem::exists(_repairIncompleteFilePath));
 
-    boost::filesystem::remove(_repairIncompleteFilePath);
+    boost::system::error_code ec;
+    boost::filesystem::remove(_repairIncompleteFilePath, ec);
+    if (ec) {
+        uasserted(50913,
+                  str::stream() << "Failed to remove file " << _repairIncompleteFilePath.c_str()
+                                << ": "
+                                << ec.message());
+    }
 }
 
 void StorageRepairObserver::_invalidateReplConfigIfNeeded(OperationContext* opCtx) {

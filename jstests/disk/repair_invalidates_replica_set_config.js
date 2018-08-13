@@ -9,7 +9,6 @@
 
     load('jstests/disk/libs/wt_file_helper.js');
 
-    const baseName = "repair_invalidates_replica_set_config";
     const dbName = "repair_invalidates_replica_set_config";
     const collName = "test";
 

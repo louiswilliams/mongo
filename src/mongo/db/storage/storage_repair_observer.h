@@ -30,7 +30,8 @@
 
 #include "mongo/platform/basic.h"
 
-#include "boost/filesystem.hpp"
+#include <boost/filesystem.hpp>
+
 #include "mongo/base/disallow_copying.h"
 #include "mongo/db/service_context.h"
 
@@ -45,7 +46,7 @@ class StorageRepairObserver {
 public:
     MONGO_DISALLOW_COPYING(StorageRepairObserver);
 
-    StorageRepairObserver(const std::string& dbpath);
+    explicit StorageRepairObserver(const std::string& dbpath);
     ~StorageRepairObserver();
 
     static StorageRepairObserver* get(ServiceContext* service);
@@ -134,7 +135,7 @@ private:
         kIncomplete,
         /**
          * Repair has completed. The server can be started normally unless data was modified and the
-         * server is started as a a replica set.
+         * server is started as a replica set.
          */
         kDone
     };

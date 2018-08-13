@@ -187,22 +187,13 @@ const NamespaceString startupLogCollectionName("local.startup_log");
 const NamespaceString kSystemReplSetCollection("local.system.replset");
 
 /**
- * Checks if this server was started without --replset but has a config in local.system.replset
- * (meaning that this is probably a replica set member started in stand-alone mode).
- *
- * @returns the number of documents in local.system.replset or 0 if this was started with
- *          --replset.
+ * Returns 'true' if this server has a config in local.system.replset meaning that this is probably
+ * a replica set member.
  */
 bool hasReplSetConfig(OperationContext* opCtx) {
-    // This is helpful for the query below to work as you can't open files when readlocked
     Lock::GlobalWrite lk(opCtx);
-    if (!repl::ReplicationCoordinator::get(getGlobalServiceContext())
-             ->getSettings()
-             .usingReplSets()) {
-        DBDirectClient c(opCtx);
-        return c.count(kSystemReplSetCollection.ns()) > 0;
-    }
-    return false;
+    DBDirectClient c(opCtx);
+    return c.count(kSystemReplSetCollection.ns()) > 0;
 }
 
 /**
@@ -318,8 +309,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
 
         for (const auto& dbName : dbNames) {
             LOG(1) << "    Repairing database: " << dbName;
-            auto status = repairDatabase(opCtx, storageEngine, dbName);
-            fassertNoTrace(18506, status);
+            fassertNoTrace(18506, repairDatabase(opCtx, storageEngine, dbName));
         }
 
         // All collections must have UUIDs before restoring the FCV document to a version that
@@ -377,10 +367,10 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
         auto repairObserver = StorageRepairObserver::get(opCtx->getServiceContext());
         repairObserver->onRepairDone(opCtx);
         if (repairObserver->isDataModified()) {
+            warning() << "Modifications made by repair:";
             const auto& mods = repairObserver->getModifications();
-            log() << "Modifications made by repair:";
             for (const auto& mod : mods) {
-                log() << "  " << mod;
+                warning() << "  " << mod;
             }
             if (hasReplSetConfig(opCtx)) {
                 warning() << "WARNING: Repair may have modified replicated data. This node will no "

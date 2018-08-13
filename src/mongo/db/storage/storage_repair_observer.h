@@ -72,7 +72,7 @@ public:
     void onRepairStarted();
 
     /**
-     * Indicate that a data$modification was made by repair. If even a single call is made, the
+     * Indicate that a data modification was made by repair. If even a single call is made, the
      * replica set configuration will be invalidated.
      *
      * Provide a 'description' of the modification that will added to a list of modifications by
@@ -113,7 +113,7 @@ public:
         return !_modifications.empty();
     }
 
-    const std::vector<std::string> getModifications() const {
+    const std::vector<std::string>& getModifications() const {
         return _modifications;
     }
 

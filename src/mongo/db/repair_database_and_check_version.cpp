@@ -187,8 +187,7 @@ const NamespaceString startupLogCollectionName("local.startup_log");
 const NamespaceString kSystemReplSetCollection("local.system.replset");
 
 /**
- * Returns 'true' if this server has a config in local.system.replset meaning that this is probably
- * a replica set member.
+ * Returns 'true' if this server has a configuration document in local.system.replset.
  */
 bool hasReplSetConfig(OperationContext* opCtx) {
     Lock::GlobalWrite lk(opCtx);
@@ -282,8 +281,6 @@ void rebuildIndexes(OperationContext* opCtx, StorageEngine* storageEngine) {
  * represents whether there are non-local databases.
  */
 StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
-    LOG(1) << "enter repairDatabases (to check pdfile version #)";
-
     auto const storageEngine = opCtx->getServiceContext()->getStorageEngine();
     Lock::GlobalWrite lk(opCtx);
 

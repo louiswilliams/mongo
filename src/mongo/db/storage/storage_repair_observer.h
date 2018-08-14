@@ -47,22 +47,10 @@ public:
     MONGO_DISALLOW_COPYING(StorageRepairObserver);
 
     explicit StorageRepairObserver(const std::string& dbpath);
-    ~StorageRepairObserver();
+    ~StorageRepairObserver() = default;
 
     static StorageRepairObserver* get(ServiceContext* service);
     static void set(ServiceContext* service, std::unique_ptr<StorageRepairObserver> repairObserver);
-
-    enum class DataState {
-        /**
-         * Repair has modified data. The server may be started again safely, but not rejoin a
-         * replica set.
-         */
-        kModified,
-        /**
-         * No data has been modified. The server may be started again safely.
-         */
-        kUnmodified
-    };
 
     /**
      * Notify the repair observer that a database repair operation is about to begin.
@@ -83,8 +71,8 @@ public:
 
     /**
      * This must be called to notify the repair observer that a database repair operation completed
-     * successfully. If dataState is 'kModified', this invalidates the replica set configuration so
-     * this node will be unable to rejoin a replica set.
+     * successfully. If any calls to onModification have been made, this invalidates the replica set
+     * configuration so this node will be unable to rejoin a replica set.
      *
      * May only be called after a call to onRepairStarted().
      */
@@ -107,7 +95,7 @@ public:
     /**
      * Returns 'true' if repair modified data.
      *
-     * May only be called after a call to repairDone().
+     * May only be called after a call to onRepairDone().
      */
     bool isDataModified() const {
         invariant(_repairState == RepairState::kIncomplete || _repairState == RepairState::kDone);

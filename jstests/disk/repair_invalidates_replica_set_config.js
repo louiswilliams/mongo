@@ -22,7 +22,7 @@
     let primaryDB = replSet.getPrimary().getDB(dbName);
     let secondaryDB = originalSecondary.getDB(dbName);
 
-    assert.writeOK(primaryDB[collName].insert({_id: 0, foo: "bar"}));
+    assert.commandWorked(primaryDB[collName].insert({_id: 0, foo: "bar"}));
     replSet.awaitLastOpCommitted();
 
     const secondaryPort = originalSecondary.port;

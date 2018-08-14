@@ -86,18 +86,24 @@ let assertStartAndStopStandaloneOnExistingDbpath = function(dbpath, port, testFu
 };
 
 /**
- * Assert that starting MongoDB with --replSet on a clean data directory succeeds. Uses a provided
- * testFunc to run any caller-provided checks on the started node.
+ * Assert that starting MongoDB with --replSet succeeds. Uses a provided testFunc to run any
+ * caller-provided checks on the started node.
  *
  * Returns the started node.
  */
 let assertStartAndResync = function(replSet, originalNode, cleanData, testFunc) {
-    jsTestLog("The node with a wiped data directory should resync successfully");
+    jsTestLog("The node should resync successfully. startClean: " + cleanData);
     let node = replSet.start(
         originalNode,
         {dbpath: originalNode.dbpath, port: originalNode.port, startClean: cleanData});
-    assert(node);
-    replSet.awaitSecondaryNodes();
+
+    replSet.waitForState(node, ReplSetTest.State.SECONDARY);
+
+    // Ensure that an initial sync attempt was made and succeeded.
+    let res = assert.commandWorked(node.adminCommand({replSetGetStatus: 1, initialSync: 1}));
+    assert.eq(1, res.initialSyncStatus.initialSyncAttempts.length);
+    assert.eq(0, res.initialSyncStatus.failedInitialSyncAttempts);
+
     testFunc(node);
     return node;
 };
@@ -111,7 +117,7 @@ let assertErrorOnStartupWhenFilesAreCorruptOrMissing = function(
     const mongod = MongoRunner.runMongod({dbpath: dbpath, cleanData: true});
     const testColl = mongod.getDB(dbName)[collName];
     const doc = {a: 1};
-    assert.writeOK(testColl.insert(doc));
+    assert.commandWorked(testColl.insert(doc));
 
     // Stop MongoDB and corrupt/delete certain files.
     deleteOrCorruptFunc(mongod, testColl);
@@ -132,7 +138,7 @@ let assertErrorOnRequestWhenFilesAreCorruptOrMissing = function(
     mongod = MongoRunner.runMongod({dbpath: dbpath, cleanData: true});
     testColl = mongod.getDB(dbName)[collName];
     const doc = {a: 1};
-    assert.writeOK(testColl.insert(doc));
+    assert.commandWorked(testColl.insert(doc));
 
     // Stop MongoDB and corrupt/delete certain files.
     deleteOrCorruptFunc(mongod, testColl);

@@ -10,7 +10,7 @@
     load('jstests/disk/libs/wt_file_helper.js');
 
     const exitBeforeRepairParameter = "exitBeforeDataRepair";
-    const exitBeforeRepairInvalidatesConfigParamter = "exitBeforeRepairInvalidatesConfig";
+    const exitBeforeRepairInvalidatesConfigParameter = "exitBeforeRepairInvalidatesConfig";
 
     const baseName = "repair_failure_is_recoverable";
     const dbName = "repair_failure_is_recoverable";
@@ -24,7 +24,7 @@
 
     let testColl = mongod.getDB(dbName)[collName];
 
-    assert.writeOK(testColl.insert({_id: 0, foo: "bar"}));
+    assert.commandWorked(testColl.insert({_id: 0, foo: "bar"}));
 
     MongoRunner.stopMongod(mongod);
 
@@ -48,7 +48,7 @@
      * Test 2. Fail after repairing data, before invalidating the replica set config. MongoDB should
      * not be able to restart without --repair.
      */
-    assertRepairFailsWithFailpoint(dbpath, port, exitBeforeRepairInvalidatesConfigParamter);
+    assertRepairFailsWithFailpoint(dbpath, port, exitBeforeRepairInvalidatesConfigParameter);
 
     assertErrorOnStartupAfterIncompleteRepair(dbpath, port);
 

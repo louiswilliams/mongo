@@ -52,8 +52,6 @@ StorageRepairObserver::StorageRepairObserver(const std::string& dbpath) {
                                                                         : RepairState::kPreStart;
 }
 
-StorageRepairObserver::~StorageRepairObserver() {}
-
 StorageRepairObserver* StorageRepairObserver::get(ServiceContext* service) {
     return getRepairObserver(service).get();
 }
@@ -78,7 +76,7 @@ void StorageRepairObserver::onModification(const std::string& description) {
 void StorageRepairObserver::onRepairDone(OperationContext* opCtx) {
     invariant(_repairState == RepairState::kIncomplete);
 
-    // This ordering is imporant. The incomplete file should only be removed once the
+    // This ordering is important. The incomplete file should only be removed once the
     // replica set configuration has been invalidated successfully.
     if (!_modifications.empty()) {
         _invalidateReplConfigIfNeeded(opCtx);

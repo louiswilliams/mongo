@@ -20,7 +20,7 @@
 
     let testColl = mongod.getDB(dbName)[collName];
 
-    assert.writeOK(testColl.insert({_id: 0, foo: "bar"}));
+    assert.commandWorked(testColl.insert({_id: 0, foo: "bar"}));
 
     let collUri = getUriForColl(testColl);
     let collFile = dbpath + "/" + collUri + ".wt";

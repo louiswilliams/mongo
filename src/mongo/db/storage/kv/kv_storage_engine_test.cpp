@@ -152,6 +152,11 @@ public:
     void tearDown() {
         auto repairObserver = StorageRepairObserver::get(getGlobalServiceContext());
         ASSERT(repairObserver->isDone());
+
+        unittest::log() << "Modifications: ";
+        for (const auto& mod : repairObserver->getModifications()) {
+            unittest::log() << "  " << mod;
+        }
     }
 };
 

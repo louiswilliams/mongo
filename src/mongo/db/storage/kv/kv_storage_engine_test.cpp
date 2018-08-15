@@ -332,6 +332,9 @@ TEST_F(KVStorageEngineRepairTest, LoadCatalogRecoversOrphansInCatalog) {
 
     ASSERT(identExists(opCtx.get(), swIdentName.getValue()));
     ASSERT(collectionExists(opCtx.get(), orphanNs));
+
+    StorageRepairObserver::get(getGlobalServiceContext())->onRepairDone(opCtx.get());
+    ASSERT_EQ(1U, StorageRepairObserver::get(getGlobalServiceContext())->getModifications().size());
 }
 
 }  // namespace

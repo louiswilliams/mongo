@@ -108,7 +108,7 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
             repairObserver->onModification(str::stream() << "KVCatalog repaired: "
                                                          << status.reason());
         } else {
-            fassertNoTrace(50911, status);
+            fassertNoTrace(50916, status);
         }
     }
 
@@ -152,7 +152,7 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
     std::vector<std::string> collectionsKnownToCatalog;
     _catalog->getAllCollections(&collectionsKnownToCatalog);
 
-    if (loadingFromUncleanShutdownOrRepair) {
+    if (_options.forRepair) {
         // If we are loading the catalog after an unclean shutdown or during repair, it's possible
         // that there are collection files on disk that are unknown to the catalog. If we can't find
         // an ident in the catalog, we generate a catalog entry for it.
@@ -173,6 +173,11 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
                         log() << "Successfully created an entry in the catalog for the orphaned "
                                  "collection: "
                               << statusWithNs.getValue();
+
+                        StorageRepairObserver::get(getGlobalServiceContext())
+                            ->onModification(str::stream() << "Orphan collection created: "
+                                                           << statusWithNs.getValue());
+
                     } else {
                         // Log an error message if we cannot create the entry.
                         // reconcileCatalogAndIdents() will later drop this ident.

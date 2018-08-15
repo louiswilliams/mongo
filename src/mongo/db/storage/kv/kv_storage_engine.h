@@ -198,7 +198,7 @@ private:
 
     /**
      * When called in a repair context (_options.forRepair=true), attempts to recover a collection
-     * whose entry is present in the KVCatalog, but missing from the KVEngine. Returns and error
+     * whose entry is present in the KVCatalog, but missing from the KVEngine. Returns an error
      * Status if called outside of a repair context or the implementation of
      * KVEngine::recoverOrphanedIdent returns an error other than DataModifiedByRepair.
      *

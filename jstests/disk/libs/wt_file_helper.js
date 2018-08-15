@@ -91,18 +91,22 @@ let assertStartAndStopStandaloneOnExistingDbpath = function(dbpath, port, testFu
  *
  * Returns the started node.
  */
-let assertStartAndResync = function(replSet, originalNode, cleanData, testFunc) {
-    jsTestLog("The node should resync successfully. startClean: " + cleanData);
+let assertStartInReplSet = function(replSet, originalNode, cleanData, expectResync, testFunc) {
+    jsTestLog("The node should rejoin the replica set. Clean data: " + cleanData,
+              ". Expect resync: " + expectResync);
     let node = replSet.start(
-        originalNode,
-        {dbpath: originalNode.dbpath, port: originalNode.port, startClean: cleanData});
+        originalNode, {dbpath: originalNode.dbpath, port: originalNode.port, restart: !cleanData});
 
     replSet.waitForState(node, ReplSetTest.State.SECONDARY);
 
-    // Ensure that an initial sync attempt was made and succeeded.
+    // Ensure that an initial sync attempt was made and succeeded if the data directory was cleaned.
     let res = assert.commandWorked(node.adminCommand({replSetGetStatus: 1, initialSync: 1}));
-    assert.eq(1, res.initialSyncStatus.initialSyncAttempts.length);
-    assert.eq(0, res.initialSyncStatus.failedInitialSyncAttempts);
+    if (expectResync) {
+        assert.eq(1, res.initialSyncStatus.initialSyncAttempts.length);
+        assert.eq(0, res.initialSyncStatus.failedInitialSyncAttempts);
+    } else {
+        assert.eq(undefined, res.initialSyncStatus);
+    }
 
     testFunc(node);
     return node;

@@ -28,7 +28,8 @@
 
 #include "mongo/db/storage/storage_repair_observer.h"
 
-#include <errno.h>
+#include <cerrno>
+#include <cstring>
 
 #include "mongo/db/dbhelpers.h"
 #include "mongo/db/repl/repl_set_config.h"
@@ -93,15 +94,13 @@ void StorageRepairObserver::_touchRepairIncompleteFile() {
         uasserted(50912,
                   str::stream() << "Failed to write to file " << _repairIncompleteFilePath.c_str()
                                 << ": "
-                                << strerror(errno));
+                                << std::strerror(errno));
     }
     file.close();
     invariant(boost::filesystem::exists(_repairIncompleteFilePath));
 }
 
 void StorageRepairObserver::_removeRepairIncompleteFile() {
-    invariant(boost::filesystem::exists(_repairIncompleteFilePath));
-
     boost::system::error_code ec;
     boost::filesystem::remove(_repairIncompleteFilePath, ec);
     if (ec) {

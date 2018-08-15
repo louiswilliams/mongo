@@ -189,7 +189,7 @@ const NamespaceString kSystemReplSetCollection("local.system.replset");
 /**
  * Returns 'true' if this server has a configuration document in local.system.replset.
  */
-bool hasReplSetConfig(OperationContext* opCtx) {
+bool hasReplSetConfigDoc(OperationContext* opCtx) {
     Lock::GlobalWrite lk(opCtx);
     DBDirectClient c(opCtx);
     return c.count(kSystemReplSetCollection.ns()) > 0;
@@ -344,7 +344,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     }
 
     if (!storageGlobalParams.readOnly) {
-        // We open the "local" database before calling hasReplSetConfig() to ensure the in-memory
+        // We open the "local" database before calling hasReplSetConfigDoc() to ensure the in-memory
         // catalog entries for the 'kSystemReplSetCollection' collection have been populated if the
         // collection exists. If the "local" database didn't exist at this point yet, then it will
         // be created. If the mongod is running in a read-only mode, then it is fine to not open the
@@ -369,7 +369,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
             for (const auto& mod : mods) {
                 warning() << "  " << mod;
             }
-            if (hasReplSetConfig(opCtx)) {
+            if (hasReplSetConfigDoc(opCtx)) {
                 warning() << "WARNING: Repair may have modified replicated data. This node will no "
                              "longer be able to join a replica set without a full re-sync";
             }
@@ -384,7 +384,7 @@ StatusWith<bool> repairDatabasesAndCheckVersion(OperationContext* opCtx) {
     // to. The local DB is special because it is not replicated.  See SERVER-10927 for more
     // details.
     const bool shouldClearNonLocalTmpCollections =
-        !(hasReplSetConfig(opCtx) || replSettings.usingReplSets());
+        !(hasReplSetConfigDoc(opCtx) || replSettings.usingReplSets());
 
     // To check whether a featureCompatibilityVersion document exists.
     bool fcvDocumentExists = false;

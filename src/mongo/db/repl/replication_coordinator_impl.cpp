@@ -498,7 +498,7 @@ bool ReplicationCoordinatorImpl::_startLoadLocalConfig(OperationContext* opCtx) 
             severe()
                 << "This instance has been repaired and may contain modified replicated data that "
                    "would not match other replica set members. To see your repaired data, start "
-                   "MongoDB without the --replSet option. When you are finished recovering your "
+                   "mongod without the --replSet option. When you are finished recovering your "
                    "data and would like to perform a complete re-sync, please refer to the "
                    "documentation here: "
                    "https://docs.mongodb.com/manual/tutorial/resync-replica-set-member/";

@@ -49,7 +49,7 @@
     });
 
     // Starting the secondary with the same data directory should succeed with the same data.
-    secondary = assertStartAndResync(replSet, originalSecondary, false, function(node) {
+    secondary = assertStartInReplSet(replSet, originalSecondary, false, false, function(node) {
         let nodeDB = node.getDB(dbName);
         assert.eq(nodeDB[collName].find().itcount(), 1);
     });
@@ -82,7 +82,7 @@
     });
 
     // Starting the secondary with a wiped data directory should force an initial sync.
-    secondary = assertStartAndResync(replSet, originalSecondary, true, function(node) {
+    secondary = assertStartInReplSet(replSet, originalSecondary, true, true, function(node) {
         let nodeDB = node.getDB(dbName);
         assert.eq(nodeDB[collName].find().itcount(), 1);
     });
@@ -112,7 +112,7 @@
     // The node's local.system.replset collection has been deleted, so it's perfectly okay that it
     // is is able to start up and re-sync.
     // Starting the secondary with the same data directory should force an initial sync.
-    secondary = assertStartAndResync(replSet, originalSecondary, false, function(node) {
+    secondary = assertStartInReplSet(replSet, originalSecondary, false, true, function(node) {
         let nodeDB = node.getDB(dbName);
         assert.eq(nodeDB[collName].find().itcount(), 1);
     });

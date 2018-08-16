@@ -26,14 +26,28 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
+
 #include "mongo/db/storage/storage_repair_observer.h"
 
 #include <cerrno>
 #include <cstring>
 
+#ifdef __linux__
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#endif
+
+#include <boost/filesystem/path.hpp>
+
 #include "mongo/db/dbhelpers.h"
+#include "mongo/db/operation_context.h"
 #include "mongo/db/repl/repl_set_config.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/storage/storage_options.h"
+#include "mongo/util/file.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 
@@ -43,9 +57,56 @@ static const std::string kRepairIncompleteFileName = "_repair_incomplete";
 
 const auto getRepairObserver =
     ServiceContext::declareDecoration<std::unique_ptr<StorageRepairObserver>>();
+
+Status fsyncFile(const boost::filesystem::path& path) {
+    File file;
+    file.open(path.c_str(), /*read-only*/ false, /*direct-io*/ false);
+    if (!file.is_open()) {
+        return {ErrorCodes::FileOpenFailed,
+                str::stream() << "Failed to open file " << path.c_str()};
+    }
+    file.fsync();
+    return Status::OK();
+}
+
+Status fsyncParentDirectory(const boost::filesystem::path& file) {
+#ifdef __linux__  // this isn't needed elsewhere
+    if (!file.has_parent_path()) {
+        return {ErrorCodes::InvalidPath,
+                str::stream() << "Couldn't find parent directory for file: " << file.string()};
+    }
+
+    boost::filesystem::path dir = file.parent_path();
+
+    LOG(1) << "flushing directory " << dir.string();
+
+    int fd = ::open(dir.string().c_str(), O_RDONLY);
+    if (fd < 0) {
+        return {ErrorCodes::FileOpenFailed,
+                str::stream() << "Failed to open directory " << dir.string() << " for flushing: "
+                              << errnoWithDescription()};
+    }
+    if (fsync(fd) != 0) {
+        int e = errno;
+        if (e == EINVAL) {
+            warning() << "Could not fsync directory because this file system is not supported.";
+        } else {
+            close(fd);
+            return {ErrorCodes::OperationFailed,
+                    str::stream() << "Failed to fsync directory '" << dir.string() << "': "
+                                  << errnoWithDescription(e)};
+        }
+    }
+    close(fd);
+#endif
+    return Status::OK();
+}
+
 }  // namespace
 
 StorageRepairObserver::StorageRepairObserver(const std::string& dbpath) {
+    invariant(!storageGlobalParams.readOnly);
+
     using boost::filesystem::path;
     _repairIncompleteFilePath = path(dbpath) / path(kRepairIncompleteFileName);
 
@@ -88,27 +149,29 @@ void StorageRepairObserver::onRepairDone(OperationContext* opCtx) {
 }
 
 void StorageRepairObserver::_touchRepairIncompleteFile() {
-    boost::filesystem::ofstream file(_repairIncompleteFilePath);
-    file << "This file indicates that a repair operation is in progress or incomplete.";
-    if (file.fail()) {
-        uasserted(50912,
-                  str::stream() << "Failed to write to file " << _repairIncompleteFilePath.c_str()
-                                << ": "
-                                << std::strerror(errno));
+    boost::filesystem::ofstream fileStream(_repairIncompleteFilePath);
+    fileStream << "This file indicates that a repair operation is in progress or incomplete.";
+    if (fileStream.fail()) {
+        severe() << "Failed to write to file " << _repairIncompleteFilePath.c_str() << ": "
+                 << errnoWithDescription();
+        fassertFailedNoTrace(50912);
     }
-    file.close();
-    invariant(boost::filesystem::exists(_repairIncompleteFilePath));
+    fileStream.close();
+
+    fassertNoTrace(50917, fsyncFile(_repairIncompleteFilePath));
+    fassertNoTrace(50918, fsyncParentDirectory(_repairIncompleteFilePath));
 }
 
 void StorageRepairObserver::_removeRepairIncompleteFile() {
     boost::system::error_code ec;
     boost::filesystem::remove(_repairIncompleteFilePath, ec);
+
     if (ec) {
-        uasserted(50913,
-                  str::stream() << "Failed to remove file " << _repairIncompleteFilePath.c_str()
-                                << ": "
-                                << ec.message());
+        severe() << "Failed to remove file " << _repairIncompleteFilePath.c_str() << ": "
+                 << ec.message();
+        fassertFailedNoTrace(50913);
     }
+    fassertNoTrace(50919, fsyncParentDirectory(_repairIncompleteFilePath));
 }
 
 void StorageRepairObserver::_invalidateReplConfigIfNeeded(OperationContext* opCtx) {
@@ -126,6 +189,8 @@ void StorageRepairObserver::_invalidateReplConfigIfNeeded(OperationContext* opCt
     BSONObjBuilder configBuilder(config);
     configBuilder.append(repl::ReplSetConfig::kRepairedFieldName, true);
     Helpers::putSingleton(opCtx, kConfigNss.ns().c_str(), configBuilder.obj());
+
+    opCtx->recoveryUnit()->waitUntilDurable();
 }
 
 }  // namespace mongo

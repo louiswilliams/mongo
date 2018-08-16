@@ -70,17 +70,19 @@ void initializeStorageEngine(ServiceContext* service, const StorageEngineInitFla
 
     const std::string dbpath = storageGlobalParams.dbpath;
 
-    StorageRepairObserver::set(service, std::make_unique<StorageRepairObserver>(dbpath));
-    auto repairObserver = StorageRepairObserver::get(service);
+    if (!storageGlobalParams.readOnly) {
+        StorageRepairObserver::set(service, std::make_unique<StorageRepairObserver>(dbpath));
+        auto repairObserver = StorageRepairObserver::get(service);
 
-    if (storageGlobalParams.repair) {
-        repairObserver->onRepairStarted();
-    } else {
-        uassert(50914,
-                str::stream() << "An incomplete repair has been detected! This is likely because "
-                                 "a repair operation unexpectedly failed before completing. "
-                                 "MongoDB will not start up again without --repair.",
-                !repairObserver->isIncomplete());
+        if (storageGlobalParams.repair) {
+            repairObserver->onRepairStarted();
+        } else if (repairObserver->isIncomplete()) {
+            severe()
+                << "An incomplete repair has been detected! This is likely because a repair "
+                   "operation unexpectedly failed before completing. MongoDB will not start up "
+                   "again without --repair.";
+            fassertFailedNoTrace(50914);
+        }
     }
 
     if (auto existingStorageEngine = StorageEngineMetadata::getStorageEngineForPath(dbpath)) {

@@ -68,9 +68,9 @@ let assertErrorOnStartupAfterIncompleteRepair = function(dbpath, port) {
     let node = MongoRunner.runMongod(
         {dbpath: dbpath, port: port, noCleanData: true, waitForConnect: false});
     assert.soon(function() {
-        return rawMongoProgramOutput().indexOf("Location50914") >= 0;
+        return rawMongoProgramOutput().indexOf("Fatal Assertion 50914") >= 0;
     });
-    MongoRunner.stopMongod(node, null, {allowedExitCode: MongoRunner.EXIT_UNCAUGHT});
+    MongoRunner.stopMongod(node, null, {allowedExitCode: MongoRunner.EXIT_ABRUPT});
 };
 
 /**

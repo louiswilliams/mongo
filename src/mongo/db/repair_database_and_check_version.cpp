@@ -191,8 +191,8 @@ const NamespaceString kSystemReplSetCollection("local.system.replset");
  */
 bool hasReplSetConfigDoc(OperationContext* opCtx) {
     Lock::GlobalWrite lk(opCtx);
-    DBDirectClient c(opCtx);
-    return c.count(kSystemReplSetCollection.ns()) > 0;
+    BSONObj config;
+    return Helpers::getSingleton(opCtx, kSystemReplSetCollection.ns().c_str(), config);
 }
 
 /**

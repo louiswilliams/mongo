@@ -308,6 +308,17 @@ private:
     class WiredTigerJournalFlusher;
     class WiredTigerCheckpointThread;
 
+    /**
+     * Opens a connection on the WiredTiger database 'path' with the configuration 'wtOpenConfig'.
+     * All unhandled errors from wiredtiger_open() are fatal.
+     *
+     * When successfull, intializes '_conn' and '_fileVersion'.
+     *
+     * If corruption is detected and _inRepairMode is 'true', attempts to salvage the WiredTiger
+     * metadata.
+     */
+    void _openWiredTiger(const std::string& path, const std::string& wtOpenConfig);
+
     Status _salvageIfNeeded(const char* uri);
     void _ensureIdentPath(StringData ident);
 

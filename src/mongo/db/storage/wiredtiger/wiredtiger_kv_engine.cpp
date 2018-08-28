@@ -576,7 +576,6 @@ void WiredTigerKVEngine::appendGlobalStats(BSONObjBuilder& b) {
     bb.done();
 }
 
-#define WT_DATA_CORRUPTION 1234
 void WiredTigerKVEngine::_openWiredTiger(const std::string& path, const std::string& wtOpenConfig) {
     std::string configStr = wtOpenConfig + ",compatibility=(require_min=\"3.1.0\")";
 
@@ -605,13 +604,13 @@ void WiredTigerKVEngine::_openWiredTiger(const std::string& path, const std::str
         return;
     }
 
-    severe() << "Failed to start up WiredTiger under any compatibility version.";
+    warning() << "Failed to start up WiredTiger under any compatibility version.";
     if (ret == EINVAL) {
         fassertFailedNoTrace(28561);
     }
 
     if (ret == WT_DATA_CORRUPTION) {
-        severe() << "WiredTiger metadata corruption detected";
+        warning() << "WiredTiger metadata corruption detected";
 
         if (!_inRepairMode) {
             severe() << kWTRepairMsg;

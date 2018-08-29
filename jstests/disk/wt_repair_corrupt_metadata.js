@@ -8,23 +8,23 @@
 
     load('jstests/disk/libs/wt_file_helper.js');
 
-    const baseName = "wt_repair_corrupt_files";
+    const baseName = "wt_repair_corrupt_metadata";
     const collName = "test";
     const dbpath = MongoRunner.dataPath + baseName + "/";
 
     /**
-     * Run the test by supplying additional paramters to MongoRunner.runMongod with 'mongodOptions'.
+     * Run the test by supplying additional parameters to MongoRunner.runMongod with
+     * 'mongodOptions'.
      */
     let runTest = function(mongodOptions) {
         resetDbpath(dbpath);
         jsTestLog("Running test with args: " + tojson(mongodOptions));
 
         /**
-         * Test 1. Create a collection, corrupt the WiredTiger metadata by replacing the .turtle
-         * file with an older version. A salvage operation will be run and repair should be
-         * successful, either in recovering the collection metadata, or discarding it. There are no
-         * guarantees about the existence of the data once salvaged, only that the collection
-         * exists.
+         * Create a collection, corrupt the WiredTiger metadata by replacing the .turtle file with
+         * older versions. A salvage operation will be run and repair should be successful, either
+         * by recovering the collection metadata, or discarding it. There are no guarantees about
+         * the existence of the data once salvaged, only that the collection exists.
          */
 
         const turtleFile = dbpath + "WiredTiger.turtle";
@@ -33,7 +33,7 @@
 
         let mongod = startMongodOnExistingPath(dbpath, mongodOptions);
 
-        jsTestLog("Copying metadata file before creating the collection: " +
+        jsTestLog("Making copy of metadata file before creating the collection: " +
                   turtleFileWithoutCollection);
         copyFile(turtleFile, turtleFileWithoutCollection);
 
@@ -43,7 +43,7 @@
         // Force a checkpoint with fsync because journaling is disabled.
         assert.commandWorked(mongod.getDB(baseName).adminCommand({fsync: 1}));
 
-        jsTestLog("Copying metadata file after creating the collection and inserting data: " +
+        jsTestLog("Making copy of metadta file after creating the collection and inserting data: " +
                   turtleFileWithCollectionAndData);
         copyFile(turtleFile, turtleFileWithCollectionAndData);
 
@@ -52,12 +52,12 @@
         // A clean shutdown will write a different checkpoint.
         MongoRunner.stopMongod(mongod);
 
-        // Guarantee the turtle files changed after each checkpoint.
+        // Guarantee the turtle files changed between each checkpoint.
         assert.neq(md5sumFile(turtleFileWithoutCollection),
                    md5sumFile(turtleFileWithCollectionAndData));
-        assert.neq(md5sumFile(turtleFileWithoutCollection), md5sumFile(turtleFile));
+        assert.neq(md5sumFile(turtleFileWithCollectionAndData), md5sumFile(turtleFile));
 
-        jsTestLog("Replacing metadata file with an version after the collection and data existed.");
+        jsTestLog("Replacing metadata file with a version where the collection and older existed.");
         removeFile(turtleFile);
         copyFile(turtleFileWithCollectionAndData, turtleFile);
 

@@ -400,13 +400,10 @@ int mdb_handle_error_with_startup_suppression(WT_EVENT_HANDLER* handler,
                 return 0;
             }
         }
+
         error() << "WiredTiger error (" << errorCode << ") " << redact(message)
                 << " Raw: " << message;
-
-        if (errorCode == WT_DATA_CORRUPTION) {
-            severe() << "WiredTiger data corruption found. " << kWTRepairMsg;
-        }
-        // fassert(50853, errorCode != WT_PANIC);
+        fassert(50853, errorCode != WT_PANIC);
     } catch (...) {
         std::terminate();
     }

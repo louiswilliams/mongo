@@ -614,7 +614,7 @@ void WiredTigerKVEngine::_openWiredTiger(const std::string& path, const std::str
 
         if (!_inRepairMode) {
             severe() << kWTRepairMsg;
-            fassertFailedNoTrace(50939);
+            fassertFailedNoTrace(50940);
         }
 
         warning() << "Attempting to salvage WiredTiger metadata";
@@ -627,7 +627,7 @@ void WiredTigerKVEngine::_openWiredTiger(const std::string& path, const std::str
         }
 
         severe() << "Failed to salvage WiredTiger metadata: " + wtRCToStatus(ret).reason();
-        fassertFailedNoTrace(50938);
+        fassertFailedNoTrace(50941);
     }
 
     severe() << "Reason: " << wtRCToStatus(ret).reason();

@@ -631,8 +631,6 @@ void WiredTigerKVEngine::_openWiredTiger(const std::string& path, const std::str
     }
 
     severe() << "Reason: " << wtRCToStatus(ret).reason();
-    severe() << "Failed to open a WiredTiger connection. This may be due to metadata corruption. "
-             << kWTRepairMsg;
     fassertFailedNoTrace(28595);
 }
 

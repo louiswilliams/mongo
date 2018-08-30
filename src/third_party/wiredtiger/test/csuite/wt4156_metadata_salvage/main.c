@@ -39,10 +39,9 @@
  * sizes need to change along with it.
  */
 #define	APP_MD_SIZE 	4096
-#define	APP_BUF_SIZE	3 * 1024
+#define	APP_BUF_SIZE	(3 * 1024)
 #define	APP_STR		"long app metadata. "
 
-static bool saw_corruption = false;
 static bool test_abort = false;
 
 static int
@@ -50,10 +49,6 @@ handle_message(WT_EVENT_HANDLER *handler,
     WT_SESSION *session, int error, const char *message)
 {
 	(void)(handler);
-
-	/* Skip the error messages we're expecting to see. */
-	if ((strstr(message, "database corruption detected") != NULL))
-		saw_corruption = true;
 
 	(void)fprintf(stderr, "%s: %s\n",
 	    message, session->strerror(session, error));
@@ -204,15 +199,15 @@ corrupt_metadata(const char *home)
 	 * modify one byte at that offset. That will cause a checksum error
 	 * when WiredTiger next reads it.
 	 */
-	sprintf(path, "%s/%s", home, WT_METAFILE);
-	testutil_check(stat(path, &sb));
-	meta_size = (size_t)sb.st_size;
-	buf = dmalloc(meta_size);
-	memset(buf, 0, meta_size);
+	testutil_check(__wt_snprintf(
+	    path, sizeof(path), "%s/%s", home, WT_METAFILE));
 	if ((fp = fopen(path, "r+")) == NULL)
-		testutil_die(errno, "fopen: %s", WT_METAFILE);
+		testutil_die(errno, "fopen: %s", path);
+	testutil_check(fstat(fileno(fp), &sb));
+	meta_size = (size_t)sb.st_size;
+	buf = dcalloc(meta_size, 1);
 	if (fread(buf, 1, meta_size, fp) != meta_size)
-		testutil_die(errno, "fread: %" PRIu64, (uint64_t)meta_size);
+		testutil_die(errno, "fread: %" WT_SIZET_FMT, meta_size);
 	corrupted = false;
 	/*
 	 * Corrupt all occurrences of the string in the file.
@@ -223,7 +218,7 @@ corrupt_metadata(const char *home)
 		*(char *)corrupt = 'X';
 		off = (long)(corrupt - buf);
 		if (fseek(fp, off, SEEK_SET) != 0)
-			testutil_die(errno, "fseek: %" PRIu64, (uint64_t)off);
+			testutil_die(errno, "fseek: %ld", off);
 		if (fwrite("X", 1, 1, fp) != 1)
 			testutil_die(errno, "fwrite");
 	}
@@ -231,6 +226,7 @@ corrupt_metadata(const char *home)
 		testutil_die(errno, "corrupt string did not occur");
 	if (fclose(fp) != 0)
 		testutil_die(errno, "fclose");
+	free(buf);
 }
 
 /*
@@ -296,7 +292,8 @@ verify_metadata(WT_CONNECTION *conn, TABLE_INFO *tables)
 			}
 		}
 	}
-	cursor->close(cursor);
+	testutil_assert(ret == WT_NOTFOUND);
+	testutil_check(cursor->close(cursor));
 	/*
 	 * Any tables that were salvaged, make sure we can read the data.
 	 * The corrupt table should never be salvaged.
@@ -313,24 +310,40 @@ verify_metadata(WT_CONNECTION *conn, TABLE_INFO *tables)
 				testutil_check(cursor->get_value(cursor, &kv));
 				testutil_assert(strcmp(kv, VALUE) == 0);
 			}
-			cursor->close(cursor);
+			testutil_assert(ret == WT_NOTFOUND);
+			testutil_check(cursor->close(cursor));
 			printf("%s metadata salvaged and data verified\n",
 			    t->name);
 		}
 	}
 }
 
-static int
+/*
+ * wt_open_corrupt --
+ *	This function is run in a child process because when the corruption
+ *	is detected the connection panics. On some configurations that
+ *	causes a core dump. On other configurations we can check the return
+ *	values. If the user has enabled attaching, skip this call because
+ *	then it will hang.
+ */
+static void wt_open_corrupt(const char *)
+    WT_GCC_FUNC_DECL_ATTRIBUTE((noreturn));
+static void
 wt_open_corrupt(const char *home)
 {
 	WT_CONNECTION *conn;
 	int ret;
 
 	conn = NULL;
+#ifdef HAVE_ATTACH
+	WT_UNUSED(conn);
+	WT_UNUSED(home);
+	WT_UNUSED(ret);
+#else
 	ret = wiredtiger_open(home, &event_handler, NULL, &conn);
 	testutil_assert(conn == NULL);
-	testutil_assert(ret == WT_PANIC);
-	testutil_assert(saw_corruption == true);
+	testutil_assert(ret == WT_TRY_SALVAGE);
+#endif
 	exit (EXIT_SUCCESS);
 }
 
@@ -437,7 +450,8 @@ main(int argc, char *argv[])
 	testutil_check(wiredtiger_open(opts->home,
 	    &event_handler, "salvage=true,verbose=(salvage)", &opts->conn));
 	testutil_assert(opts->conn != NULL);
-	sprintf(buf, "%s/%s", opts->home, WT_METAFILE_SLVG);
+	testutil_check(__wt_snprintf(
+	    buf, sizeof(buf), "%s/%s", opts->home, WT_METAFILE_SLVG));
 	testutil_assert(file_exists(buf));
 
 	/*

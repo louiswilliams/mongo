@@ -50,20 +50,25 @@ __wt_col_modify(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt,
 				modify_type = WT_UPDATE_STANDARD;
 				value = &col_fix_remove;
 			}
-		} else {
-			/*
-			 * There's a chance the application specified a record
-			 * past the last record on the page.  If that's the
-			 * case, and we're inserting a new WT_INSERT/WT_UPDATE
-			 * pair, it goes on the append list, not the update
-			 * list. Also, an out-of-band recno implies an append
-			 * operation, we're allocating a new row.
-			 */
-			if (recno == WT_RECNO_OOB ||
-			    recno > (btree->type == BTREE_COL_VAR ?
-			    __col_var_last_recno(cbt->ref) :
-			    __col_fix_last_recno(cbt->ref)))
-				append = true;
+		}
+
+		/*
+		 * There's a chance the application specified a record past the
+		 * last record on the page. If that's the case and we're
+		 * inserting a new WT_INSERT/WT_UPDATE pair, it goes on the
+		 * append list, not the update list. Also, an out-of-band recno
+		 * implies an append operation, we're allocating a new row.
+		 * Ignore any information obtained from the search.
+		 */
+		WT_ASSERT(session, recno != WT_RECNO_OOB || cbt->compare != 0);
+		if (cbt->compare != 0 &&
+		    (recno == WT_RECNO_OOB ||
+		    recno > (btree->type == BTREE_COL_VAR ?
+		    __col_var_last_recno(cbt->ref) :
+		    __col_fix_last_recno(cbt->ref)))) {
+			append = true;
+			cbt->ins = NULL;
+			cbt->ins_head = NULL;
 		}
 	}
 
@@ -73,6 +78,43 @@ __wt_col_modify(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt,
 	/* If we don't yet have a modify structure, we'll need one. */
 	WT_RET(__wt_page_modify_init(session, page));
 	mod = page->modify;
+
+	/*
+	 * If modifying a record not previously modified, but which is in the
+	 * same update slot as a previously modified record, cursor.ins will
+	 * not be set because there's no list of update records for this recno,
+	 * but cursor.ins_head will be set to point to the correct update slot.
+	 * Acquire the necessary insert information, then create a new update
+	 * entry and link it into the existing list. We get here if a page has
+	 * a single cell representing multiple records (the records have the
+	 * same value), and then a record in the cell is updated or removed,
+	 * creating the update list for the cell, and then a cursor iterates
+	 * into that same cell to update/remove a different record. We find the
+	 * correct slot in the update array, but we don't find an update list
+	 * (because it doesn't exist), and don't have the information we need
+	 * to do the insert. Normally, we wouldn't care (we could fail and do
+	 * a search for the record which would configure everything for the
+	 * insert), but range truncation does this pattern for every record in
+	 * the cell, and the performance is terrible. For that reason, catch it
+	 * here.
+	 */
+	if (cbt->ins == NULL && cbt->ins_head != NULL) {
+		cbt->ins = __col_insert_search(
+		    cbt->ins_head, cbt->ins_stack, cbt->next_stack, recno);
+		if (cbt->ins != NULL) {
+			if (WT_INSERT_RECNO(cbt->ins) == recno)
+				cbt->compare = 0;
+			else {
+				/*
+				 * The test below is for cursor.compare set to 0
+				 * and cursor.ins set: cursor.compare wasn't set
+				 * by the search we just did, and has an unknown
+				 * value. Clear cursor.ins to avoid the test.
+				 */
+				cbt->ins = NULL;
+			}
+		}
+	}
 
 	/*
 	 * Delete, insert or update a column-store entry.
@@ -135,31 +177,6 @@ __wt_col_modify(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt,
 
 		/* Choose a skiplist depth for this insert. */
 		skipdepth = __wt_skip_choose_depth(session);
-
-		/*
-		 * If modifying a record not previously modified, but which
-		 * is in the same update slot as a previously modified record,
-		 * cursor.ins will not be set because there's no list of update
-		 * records for this recno, but cursor.ins_head will be set to
-		 * point to the correct update slot.  Acquire the necessary
-		 * insert information, then create a new update entry and link
-		 * link it into the existing list. We get here if a page has a
-		 * single cell representing multiple records (the records have
-		 * the same value), and then a record in the cell is updated or
-		 * removed, creating the update list for the cell, and then a
-		 * cursor iterates into that same cell to update/remove a
-		 * different record. We find the correct slot in the update
-		 * array, but we don't find an update list (because it doesn't
-		 * exist), and don't have the information we need to do the
-		 * insert. Normally, we wouldn't care (we could fail and do a
-		 * search for the record which would configure everything for
-		 * the insert), but range truncation does this pattern for every
-		 * record in the cell, and the performance is terrible. For that
-		 * reason, catch it here.
-		 */
-		if (cbt->ins_stack[0] == NULL && cbt->ins_head != NULL)
-			(void)__col_insert_search(cbt->ins_head,
-			    cbt->ins_stack, cbt->next_stack, recno);
 
 		/*
 		 * Allocate a WT_INSERT/WT_UPDATE pair and transaction ID, and

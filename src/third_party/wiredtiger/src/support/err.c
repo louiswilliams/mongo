@@ -523,19 +523,20 @@ __wt_panic(WT_SESSION_IMPL *session)
 	__wt_err(session, WT_PANIC, "the process must exit and restart");
 
 #if defined(HAVE_DIAGNOSTIC)
-	__wt_abort(session);			/* Drop core if testing. */
-	/* NOTREACHED */
+    // __wt_abort(session);			/* Drop core if testing. */
+    return (WT_PANIC);
+/* NOTREACHED */
 #endif
 #if !defined(HAVE_DIAGNOSTIC) || defined(_WIN32)
-	/*
-	 * Confusing #ifdef structure because gcc knows we can't get here and
-	 * Visual Studio doesn't.
-	 *
-	 * Chaos reigns within.
-	 * Reflect, repent, and reboot.
-	 * Order shall return.
-	 */
-	return (WT_PANIC);
+        /*
+         * Confusing #ifdef structure because gcc knows we can't get here and
+         * Visual Studio doesn't.
+         *
+         * Chaos reigns within.
+         * Reflect, repent, and reboot.
+         * Order shall return.
+         */
+        return (WT_PANIC);
 #endif
 }
 

@@ -609,7 +609,7 @@ void WiredTigerKVEngine::_openWiredTiger(const std::string& path, const std::str
         fassertFailedNoTrace(28561);
     }
 
-    if (ret == WT_DATA_CORRUPTION) {
+    if (ret == WT_TRY_SALVAGE) {
         warning() << "WiredTiger metadata corruption detected";
 
         if (!_inRepairMode) {

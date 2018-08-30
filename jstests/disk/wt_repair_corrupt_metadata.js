@@ -21,10 +21,22 @@
         jsTestLog("Running test with args: " + tojson(mongodOptions));
 
         /**
-         * Create a collection, corrupt the WiredTiger metadata by replacing the .turtle file with
-         * older versions. A salvage operation will be run and repair should be successful, either
-         * by recovering the collection metadata, or discarding it. There are no guarantees about
-         * the existence of the data once salvaged, only that the collection exists.
+         * Create a collection and corrupt the WiredTiger metadata by replacing the
+         * WiredTiger.turtle file with older versions. This file contains checkpoint information
+         * about the WiredTiger.wt file, so if these two files get out of sync, WiredTiger will have
+         * to attempt a salvage operation on the .wt file and rebuild the .turtle file. This could
+         * involve recovering the collection metadata or discarding, depending on the extent of the
+         * damage.
+         *
+         * These are two different scenarios to consider:
+         *
+         * 1. Run repair using a version of the turtle file that has checkpoint information after
+         * the collection was created. The expectation is that the metadata salvage on the turtle
+         * file should be successful, and the data in the collection should still be still visible.
+         *
+         * 2. Run repair using a version of the turtle file that has checkpoint information before
+         * the collection was created. The expectation is that the metadata salvage will not be
+         * successful (but not fail), and the collection will be recreated without any data.
          */
 
         const turtleFile = dbpath + "WiredTiger.turtle";
@@ -57,7 +69,7 @@
                    md5sumFile(turtleFileWithCollectionAndData));
         assert.neq(md5sumFile(turtleFileWithCollectionAndData), md5sumFile(turtleFile));
 
-        jsTestLog("Replacing metadata file with a version where the collection and older existed.");
+        jsTestLog("Replacing metadata file with a version where the collection existed.");
         removeFile(turtleFile);
         copyFile(turtleFileWithCollectionAndData, turtleFile);
 
@@ -67,26 +79,32 @@
         testColl = mongod.getDB(baseName)[collName];
 
         assert(testColl.exists());
-        // Don't assert about the existence, because salvage makes no guarantees.
-        print("Found documents in collection: " + testColl.find({}).itcount());
+        // We can assert that the data exists because the salvage only took place on the metadata,
+        // not the data.
+        assert.eq(testColl.find({}).itcount(), 2);
 
         MongoRunner.stopMongod(mongod);
 
-        // TODO: THIS DOESN'T WORK YET.
-        /*
-        jsTestLog("Replacing metadata file with an version before the collection existed.");
-        removeFile(turtleFile);
-        copyFile(turtleFileWithoutCollection, turtleFile);
+        // Unfortunately, WiredTiger aborts and dumps core when WT_PANIC is returned on debug
+        // builds. The case below triggers a WT_PANIC, which means that normal error handling in
+        // MongoDB is impossible.
+        if (!db.adminCommand('buildInfo').debug) {
+            jsTestLog("Replacing metadata file with an version before the collection existed.");
+            removeFile(turtleFile);
+            copyFile(turtleFileWithoutCollection, turtleFile);
 
-        assertRepairSucceeds(dbpath, mongod.port, mongodOptions);
+            assertRepairSucceeds(dbpath, mongod.port, mongodOptions);
 
-        mongod = startMongodOnExistingPath(dbpath, mongodOptions);
-        testColl = mongod.getDB(baseName)[collName];
+            mongod = startMongodOnExistingPath(dbpath, mongodOptions);
+            testColl = mongod.getDB(baseName)[collName];
 
-        assert(testColl.exists());
-        print("Found documents in collection: " + testColl.find({}).itcount());
-        MongoRunner.stopMongod(mongod);
-        */
+            // Assert the existence of the collection only because it was recovered.
+            assert(testColl.exists());
+            assert.eq(testColl.find({}).itcount(), 2);
+            MongoRunner.stopMongod(mongod);
+        } else {
+            jsTestLog("Skipping test case because running on a debug build.");
+        }
     };
 
     // Run without the journal so that fsync forces a checkpoint.

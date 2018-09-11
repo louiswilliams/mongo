@@ -253,6 +253,42 @@ public:
             parseAndValidateIndexSpecs(opCtx, ns, cmdObj, serverGlobalParams.featureCompatibility);
         uassertStatusOK(specsWithStatus.getStatus());
         auto specs = std::move(specsWithStatus.getValue());
+        const size_t origSpecsSize = specs.size();
+
+        // Before taking a strong database lock, first take a weaker collection lock to remove
+        // index specs that  already exist. Only continue if new indexes need to be built.
+        int numIndexesBefore = 0;
+        {
+            AutoGetCollection autoColl(opCtx, ns, MODE_IS);
+            auto collection = autoColl.getCollection();
+            if (collection) {
+                auto indexSpecsWithDefaults =
+                    resolveCollectionDefaultProperties(opCtx, collection, std::move(specs));
+                uassertStatusOK(indexSpecsWithDefaults.getStatus());
+                specs = std::move(indexSpecsWithDefaults.getValue());
+
+                numIndexesBefore = collection->getIndexCatalog()->numIndexesTotal(opCtx);
+
+                // Remove indexes that already exist.
+                for (size_t i = 0; i < specs.size(); i++) {
+                    Status status = collection->getIndexCatalog()
+                                        ->prepareSpecForCreate(opCtx, specs[i])
+                                        .getStatus();
+                    if (status.code() == ErrorCodes::IndexAlreadyExists) {
+                        specs.erase(specs.begin() + i);
+                        i--;
+                        continue;
+                    }
+                    uassertStatusOK(status);
+                }
+            }
+        }
+        result.append("numIndexesBefore", numIndexesBefore);
+        if (specs.size() == 0) {
+            result.append("numIndexesAfter", numIndexesBefore);
+            result.append("note", "all indexes already exist");
+            return true;
+        }
 
         // now we know we have to create index(es)
         // Do not use AutoGetOrCreateDb because we may relock the DbLock in mode IX.
@@ -298,26 +334,11 @@ public:
         const boost::optional<int> dbProfilingLevel = boost::none;
         statsTracker.emplace(opCtx, ns, Top::LockType::WriteLocked, dbProfilingLevel);
 
-        auto indexSpecsWithDefaults =
-            resolveCollectionDefaultProperties(opCtx, collection, std::move(specs));
-        uassertStatusOK(indexSpecsWithDefaults.getStatus());
-        specs = std::move(indexSpecsWithDefaults.getValue());
-
-        const int numIndexesBefore = collection->getIndexCatalog()->numIndexesTotal(opCtx);
-        result.append("numIndexesBefore", numIndexesBefore);
-
         MultiIndexBlock indexer(opCtx, collection);
         indexer.allowBackgroundBuilding();
         indexer.allowInterruption();
 
-        const size_t origSpecsSize = specs.size();
         indexer.removeExistingIndexes(&specs);
-
-        if (specs.size() == 0) {
-            result.append("numIndexesAfter", numIndexesBefore);
-            result.append("note", "all indexes already exist");
-            return true;
-        }
 
         if (specs.size() != origSpecsSize) {
             result.append("note", "index already exists");

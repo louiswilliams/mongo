@@ -206,6 +206,32 @@ StatusWith<std::vector<BSONObj>> resolveCollectionDefaultProperties(
     return indexSpecsWithDefaults;
 }
 
+/**
+ * Replaces each index in 'specs' with the collection default options filled-in and removes any
+ * indexes that already exist on the collection. If 'specs' is empty after returning, no new indexes
+ * need to be built. Throws on error.
+ */
+void resolveDefaultsAndRemoveExistingIndexes(OperationContext* opCtx,
+                                             const Collection* collection,
+                                             std::vector<BSONObj>& specs) {
+    auto indexSpecsWithDefaults =
+        resolveCollectionDefaultProperties(opCtx, collection, std::move(specs));
+    uassertStatusOK(indexSpecsWithDefaults.getStatus());
+    specs = std::move(indexSpecsWithDefaults.getValue());
+
+    for (size_t i = 0; i < specs.size(); i++) {
+        Status status =
+            collection->getIndexCatalog()->prepareSpecForCreate(opCtx, specs[i]).getStatus();
+        if (status.code() == ErrorCodes::IndexAlreadyExists) {
+            specs.erase(specs.begin() + i);
+            i--;
+            continue;
+        }
+        uassertStatusOK(status);
+    }
+}
+
+
 }  // namespace
 
 /**
@@ -255,36 +281,20 @@ public:
         auto specs = std::move(specsWithStatus.getValue());
         const size_t origSpecsSize = specs.size();
 
-        // Before taking a strong database lock, first take a weaker collection lock to remove
-        // index specs that  already exist. Only continue if new indexes need to be built.
+        // Before taking an exclusive database lock, first take a collection shared intent lock to
+        // eliminate index specs that already exist. Only continue if new indexes should be built.
         int numIndexesBefore = 0;
         {
             AutoGetCollection autoColl(opCtx, ns, MODE_IS);
             auto collection = autoColl.getCollection();
+
             if (collection) {
-                auto indexSpecsWithDefaults =
-                    resolveCollectionDefaultProperties(opCtx, collection, std::move(specs));
-                uassertStatusOK(indexSpecsWithDefaults.getStatus());
-                specs = std::move(indexSpecsWithDefaults.getValue());
-
                 numIndexesBefore = collection->getIndexCatalog()->numIndexesTotal(opCtx);
-
-                // Remove indexes that already exist.
-                for (size_t i = 0; i < specs.size(); i++) {
-                    Status status = collection->getIndexCatalog()
-                                        ->prepareSpecForCreate(opCtx, specs[i])
-                                        .getStatus();
-                    if (status.code() == ErrorCodes::IndexAlreadyExists) {
-                        specs.erase(specs.begin() + i);
-                        i--;
-                        continue;
-                    }
-                    uassertStatusOK(status);
-                }
+                resolveDefaultsAndRemoveExistingIndexes(opCtx, collection, specs);
             }
         }
-        result.append("numIndexesBefore", numIndexesBefore);
         if (specs.size() == 0) {
+            result.append("numIndexesBefore", numIndexesBefore);
             result.append("numIndexesAfter", numIndexesBefore);
             result.append("note", "all indexes already exist");
             return true;
@@ -327,6 +337,9 @@ public:
                 wunit.commit();
             });
             result.appendBool("createdCollectionAutomatically", true);
+
+            numIndexesBefore = collection->getIndexCatalog()->numIndexesTotal(opCtx);
+            resolveDefaultsAndRemoveExistingIndexes(opCtx, collection, specs);
         }
 
         // Use AutoStatsTracker to update Top.
@@ -334,11 +347,11 @@ public:
         const boost::optional<int> dbProfilingLevel = boost::none;
         statsTracker.emplace(opCtx, ns, Top::LockType::WriteLocked, dbProfilingLevel);
 
+        result.append("numIndexesBefore", numIndexesBefore);
+
         MultiIndexBlock indexer(opCtx, collection);
         indexer.allowBackgroundBuilding();
         indexer.allowInterruption();
-
-        indexer.removeExistingIndexes(&specs);
 
         if (specs.size() != origSpecsSize) {
             result.append("note", "index already exists");

@@ -362,6 +362,9 @@ Status MultiIndexBlockImpl::insertAllDocumentsInCollection() {
     auto exec =
         InternalPlanner::collectionScan(_opCtx, _collection->ns().ns(), _collection, yieldPolicy);
 
+    // Hint to the storage engine that this collection scan should not keep data in the cache.
+    _opCtx->recoveryUnit()->setReadOnce(true);
+
     Snapshotted<BSONObj> objToIndex;
     RecordId loc;
     PlanExecutor::ExecState state;

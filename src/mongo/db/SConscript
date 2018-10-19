@@ -1088,6 +1088,7 @@ env.Library(
         'stats/serveronly_stats',
         'storage/oplog_hack',
         'storage/storage_options',
+        'storage/parallel_cursor',
         'update/update_driver',
     ],
     LIBDEPS_PRIVATE=[

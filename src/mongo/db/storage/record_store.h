@@ -36,6 +36,7 @@
 #include "mongo/bson/mutable/damage_vector.h"
 #include "mongo/db/exec/collection_scan_common.h"
 #include "mongo/db/record_id.h"
+#include "mongo/db/storage/parallel_cursor.h"
 #include "mongo/db/storage/record_data.h"
 
 namespace mongo {
@@ -50,6 +51,8 @@ class OperationContext;
 
 class RecordStoreCompactAdaptor;
 class RecordStore;
+
+class SharedScanScheduler;
 
 struct ValidateResults;
 class ValidateAdaptor;
@@ -582,6 +585,10 @@ public:
     virtual Status updateCappedSize(OperationContext* opCtx, long long cappedSize) {
         return Status(ErrorCodes::CommandNotSupported,
                       "this storage engine does not support updateCappedSize");
+    }
+
+    virtual SharedScanScheduler* getSharedScanScheduler() const {
+        return nullptr;
     }
 
 protected:

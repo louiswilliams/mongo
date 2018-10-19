@@ -677,6 +677,9 @@ WiredTigerRecordStore::WiredTigerRecordStore(WiredTigerKVEngine* kvEngine,
         sizeRecoveryState(getGlobalServiceContext())
             .markCollectionAsAlwaysNeedsSizeAdjustment(_uri);
     }
+    if (ns() == "test.bulkInsertTest") {
+        _sharedScanScheduler = std::make_unique<SharedScanScheduler>(this);
+    }
 }
 
 WiredTigerRecordStore::~WiredTigerRecordStore() {
@@ -695,6 +698,10 @@ WiredTigerRecordStore::~WiredTigerRecordStore() {
         // Delete oplog visibility manager on KV engine.
         _kvEngine->haltOplogManager();
     }
+
+    if (_sharedScanScheduler) {
+        _sharedScanScheduler->stop();
+    }
 }
 
 void WiredTigerRecordStore::postConstructorInit(OperationContext* opCtx) {
@@ -703,8 +710,11 @@ void WiredTigerRecordStore::postConstructorInit(OperationContext* opCtx) {
     _sizeInfo =
         _sizeStorer ? _sizeStorer->load(_uri) : std::make_shared<WiredTigerSizeStorer::SizeInfo>();
 
+    RecordId minRecord;
+    RecordId maxRecord;
     if (auto record = cursor->next()) {
-        int64_t max = record->id.repr();
+        maxRecord = record->id;
+        int64_t max = maxRecord.repr();
         _nextIdNum.store(1 + max);
 
         if (!_sizeStorer) {
@@ -741,7 +751,17 @@ void WiredTigerRecordStore::postConstructorInit(OperationContext* opCtx) {
 
         // Need to start at 1 so we are always higher than RecordId::min()
         _nextIdNum.store(1);
+        minRecord = RecordId(1);
+        maxRecord = minRecord;
     }
+
+    std::unique_ptr<SeekableRecordCursor> forwardCursor = getCursor(opCtx, /*forward=*/true);
+    if (auto record = forwardCursor->next()) {
+        minRecord = record->id;
+    }
+    if (minRecord == RecordId::min())
+        minRecord = RecordId(1);
+
 
     if (_sizeStorer)
         _sizeStorer->store(_uri, _sizeInfo);
@@ -753,6 +773,11 @@ void WiredTigerRecordStore::postConstructorInit(OperationContext* opCtx) {
     if (_isOplog) {
         invariant(_kvEngine);
         _kvEngine->startOplogManager(opCtx, _uri, this);
+    }
+
+    static uint32_t kWorkers = 10;
+    if (_sharedScanScheduler) {
+        _sharedScanScheduler->start(kWorkers, minRecord, maxRecord);
     }
 }
 

@@ -279,6 +279,10 @@ public:
         return _oplogStones.get();
     };
 
+    SharedScanScheduler* getSharedScanScheduler() const override {
+        return _sharedScanScheduler.get();
+    }
+
 protected:
     virtual RecordId getKey(WT_CURSOR* cursor) const = 0;
 
@@ -374,6 +378,8 @@ private:
 
     // Non-null if this record store is underlying the active oplog.
     std::shared_ptr<OplogStones> _oplogStones;
+
+    std::unique_ptr<SharedScanScheduler> _sharedScanScheduler;
 };
 
 

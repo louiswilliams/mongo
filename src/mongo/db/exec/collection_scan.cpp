@@ -116,6 +116,11 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
             }
 
             _cursor = _params.collection->getCursor(getOpCtx(), forward);
+            if (_params.collection->getRecordStore()->getSharedScanScheduler()) {
+                _sharedCursor = stdx::make_unique<SharedScanCursor>(
+                    _params.collection->getRecordStore(), _filter);
+                _sharedCursor->init();
+            }
 
             if (!_lastSeenId.isNull()) {
                 invariant(_params.tailable);
@@ -142,6 +147,8 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
 
         if (_lastSeenId.isNull() && !_params.start.isNull()) {
             record = _cursor->seekExact(_params.start);
+        } else if (_sharedCursor) {
+            record = _sharedCursor->next();
         } else {
             record = _cursor->next();
         }

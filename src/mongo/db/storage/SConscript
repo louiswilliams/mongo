@@ -273,6 +273,19 @@ env.Library(
 )
 
 env.Library(
+    target='parallel_cursor',
+    source=[
+        'parallel_cursor.cpp',
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/db/db_raii',
+        '$BUILD_DIR/mongo/util/background_job',
+    ],
+    LIBDEPS_PRIVATE=[
+        '$BUILD_DIR/mongo/base',
+    ],
+)
+env.Library(
     target='storage_repair_observer',
     source=[
         'storage_repair_observer.cpp',

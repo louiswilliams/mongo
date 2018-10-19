@@ -34,6 +34,7 @@
 #include "mongo/db/exec/plan_stage.h"
 #include "mongo/db/matcher/expression_leaf.h"
 #include "mongo/db/record_id.h"
+#include "mongo/db/storage/parallel_cursor.h"
 
 namespace mongo {
 
@@ -103,6 +104,7 @@ private:
     std::unique_ptr<GTEMatchExpression> _endCondition;
 
     std::unique_ptr<SeekableRecordCursor> _cursor;
+    std::unique_ptr<SharedScanCursor> _sharedCursor;
 
     CollectionScanParams _params;
 

@@ -66,7 +66,7 @@ void SharedScanCursor::completeWorkUnit(WorkUnit* done) {
         ++it;
     }
 
-    LOG(0) << "completed " << removed->id << " with " << removed->out.size() << " records";
+    LOG(1) << "completed " << removed->id << " with " << removed->out.size() << " records";
 
     _completed.push(std::move(removed));
     _completedCond.notify_all();
@@ -150,8 +150,9 @@ void SharedScanWorker::run() {
 
     auto opCtx = cc().makeOperationContext();
 
-    while (!_shutdown.load()) {
-        _scanRange(opCtx.get());
+    auto inShutdown = _shutdown.load();
+    while (!inShutdown) {
+        inShutdown = !_scanRange(opCtx.get());
     }
 
     LOG(0) << "SharedScanWorker stopping on " << _recordStore->ns() << ". RecordId("
@@ -163,7 +164,7 @@ std::string SharedScanWorker::name() const {
     return str::stream() << "SharedScanWorker-" << _id;
 };
 
-void SharedScanWorker::_scanRange(OperationContext* opCtx) {
+bool SharedScanWorker::_scanRange(OperationContext* opCtx) {
 
     const NamespaceString nss(_recordStore->ns());
 
@@ -171,11 +172,11 @@ void SharedScanWorker::_scanRange(OperationContext* opCtx) {
     std::vector<WorkUnit*> localQueue;
     {
         stdx::unique_lock<stdx::mutex> lk(_workMutex);
-        while (_work.empty() && !_shutdown.load()) {
+        while (_work.empty()) {
+            if (_shutdown.load())
+                return false;
             _workReadyCond.wait(lk);
         }
-        if (_shutdown.load())
-            return;
 
         std::swap(_work, localQueue);
     }
@@ -203,7 +204,7 @@ void SharedScanWorker::_scanRange(OperationContext* opCtx) {
         }
         record = cursor->next();
     }
-    LOG(0) << "scanned " << scanned << " documents and processed " << localQueue.size()
+    LOG(1) << "scanned " << scanned << " documents and processed " << localQueue.size()
            << " work items";
 
     // Notify cursors waiting for results.
@@ -211,6 +212,7 @@ void SharedScanWorker::_scanRange(OperationContext* opCtx) {
         // TODO: mark ready?
         _scheduler->markDone(workUnit);
     }
+    return true;
 }
 
 void SharedScanWorker::enqueueWork(WorkUnit* work) {
@@ -266,7 +268,7 @@ uint64_t SharedScanScheduler::schedule(WorkUnit* work) {
         work->id = _nextTaskId.fetchAndAdd(1);
     }
 
-    LOG(0) << "scheduling " << work->id << " from " << work->inRange.first << " -> "
+    LOG(1) << "scheduling " << work->id << " from " << work->inRange.first << " -> "
            << work->inRange.second;
 
     stdx::unique_lock<stdx::mutex> workerLk(_workerMutex);

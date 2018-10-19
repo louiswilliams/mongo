@@ -209,7 +209,7 @@ PlanStage::StageState CollectionScan::returnIfMatches(WorkingSetMember* member,
                                                       WorkingSetID* out) {
     ++_specificStats.docsTested;
 
-    if (Filter::passes(member, _filter)) {
+    if (_sharedCursor || Filter::passes(member, _filter)) {
         if (_params.stopApplyingFilterAfterFirstMatch) {
             _filter = nullptr;
         }

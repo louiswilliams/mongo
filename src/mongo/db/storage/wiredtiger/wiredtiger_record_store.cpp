@@ -775,7 +775,7 @@ void WiredTigerRecordStore::postConstructorInit(OperationContext* opCtx) {
         _kvEngine->startOplogManager(opCtx, _uri, this);
     }
 
-    static uint32_t kWorkers = 10;
+    static uint32_t kWorkers = 20;
     if (_sharedScanScheduler) {
         _sharedScanScheduler->start(kWorkers, minRecord, maxRecord);
     }

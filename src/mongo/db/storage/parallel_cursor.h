@@ -122,7 +122,7 @@ public:
     }
 
 private:
-    void _scanRange(OperationContext* opCtx);
+    bool _scanRange(OperationContext* opCtx);
 
     SharedScanScheduler* _scheduler;
     RecordStore* _recordStore;

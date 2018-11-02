@@ -62,6 +62,8 @@
 
 namespace mongo {
 
+MONGO_EXPORT_SERVER_PARAMETER(useReadOnceCursorsForIndexBuilds, bool, true);
+
 using std::unique_ptr;
 using std::string;
 using std::endl;
@@ -359,7 +361,7 @@ Status MultiIndexBlockImpl::insertAllDocumentsInCollection() {
         _collection->makePlanExecutor(_opCtx, yieldPolicy, Collection::ScanDirection::kForward);
 
     // Hint to the storage engine that this collection scan should not keep data in the cache.
-    _opCtx->recoveryUnit()->setReadOnce(true);
+    _opCtx->recoveryUnit()->setReadOnce(useReadOnceCursorsForIndexBuilds.load());
 
     Snapshotted<BSONObj> objToIndex;
     RecordId loc;

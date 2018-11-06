@@ -9,9 +9,9 @@
         cacheSizeGB: 2,
         dbpath: '/data/db/perf',
         docSize: 4000,
-        docsPercentOfCache: 0.9,
+        docsPercentOfCache: 0.75,
         numThreads: 16,
-        readOnce: false,
+        readOnce: true,
 
         // Only change these to 'true' when loading data for the first time.
         load: false,
@@ -80,7 +80,7 @@
         assert.commandWorked(hotDB.adminCommand({fsync: 1}));
     }
 
-    assert.commandWorked(coldColl.dropIndex({indexField: 1}));
+    coldColl.dropIndex({indexField: 1});
 
     print("reading hotColl into cache");
 
@@ -89,6 +89,11 @@
     while (cur.hasNext()) {
         cur.next();
     }
+
+    print("Hot cache: ");
+    printjson(hotColl.stats().wiredTiger.cache);
+    print("Cold cache: ");
+    printjson(coldColl.stats().wiredTiger.cache);
 
     // Start readers to fill up the cache.
     TestData.background = config.background;
@@ -134,9 +139,24 @@
     jsTest.log("Performed " + totalOps + " ops in " + (its * benchInterval) +
                " seconds. avg ops/s: " + (totalOps / its * benchInterval));
 
+    print("Hot cache: ");
+    printjson(hotColl.stats().wiredTiger.cache);
+    print("Cold cache: ");
+    printjson(coldColl.stats().wiredTiger.cache);
+
     // Stop updater thread(s).
     shellAwait();
     print("stopped worker thread ");
+
+    print("final collection scan ");
+    // Do a collection scan of the hot collection to fill up the cache.
+    let startTime = Date.now();
+    cur = hotColl.find();
+    while (cur.hasNext()) {
+        cur.next();
+    }
+    let endTime = Date.now();
+    jsTest.log("Collection scan took " + (endTime - startTime) + " ms.");
 
     MongoRunner.stopMongod(conn);
 

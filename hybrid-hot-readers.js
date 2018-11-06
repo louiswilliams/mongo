@@ -6,11 +6,16 @@
     // Configuration
     const config = {
         background: false,
-        cacheSizeGB: 1,
+        cacheSizeGB: 2,
+        dbpath: '/data/db/perf',
         docSize: 4000,
         docsPercentOfCache: 0.9,
         numThreads: 16,
-        readOnce: true
+        readOnce: false,
+
+        // Only change these to 'true' when loading data for the first time.
+        load: false,
+        clean: false
     };
 
     jsTestLog(config);
@@ -21,7 +26,13 @@
 
     jsTestLog("numDocs: " + numDocs);
 
+    if (config.clean) {
+        resetDbpath(config.dbpath);
+    }
+
     let conn = MongoRunner.runMongod({
+        dbpath: config.dbpath,
+        noCleanData: !config.clean,
         wiredTigerCacheSizeGB: config.cacheSizeGB,
         setParameter: {useReadOnceCursorsForIndexBuilds: config.readOnce}
     });
@@ -37,34 +48,47 @@
     let hotColl = hotDB.hotColl;
     let coldColl = coldDB.coldColl;
 
-    hotColl.drop();
-    coldColl.drop();
+    // Load first
+    if (config.load) {
+        hotColl.drop();
+        coldColl.drop();
 
-    jsTestLog("Inserting into cold collection");
-    const bulkSize = 1000;
-    for (let i = 0; i < numDocs / bulkSize; i++) {
-        let bulk = coldColl.initializeUnorderedBulkOp();
-        for (let j = 0; j < bulkSize; j++) {
-            bulk.insert({indexField: (i * bulkSize + j), padding: padding});
+        jsTestLog("Inserting into cold collection");
+        const bulkSize = 1000;
+        for (let i = 0; i < numDocs / bulkSize; i++) {
+            let bulk = coldColl.initializeUnorderedBulkOp();
+            for (let j = 0; j < bulkSize; j++) {
+                bulk.insert({indexField: (i * bulkSize + j), padding: padding});
+            }
+            assert.commandWorked(bulk.execute());
+            print("Inserted docs: " + (i * bulkSize));
         }
-        assert.commandWorked(bulk.execute());
-        print("Inserted docs: " + (i * bulkSize));
-    }
-    print("inserted documents into coldColl: " + numDocs);
+        print("inserted documents into coldColl: " + numDocs);
 
-    // Insert documents into hotColl such that they all fit in cache.
-    jsTestLog("Inserting into hot collection");
-    for (let i = 0; i < numDocs / bulkSize; i++) {
-        let bulk = hotColl.initializeUnorderedBulkOp();
-        for (let j = 0; j < bulkSize; j++) {
-            bulk.insert({_id: (i * bulkSize + j), padding: padding});
+        // Insert documents into hotColl such that they all fit in cache.
+        jsTestLog("Inserting into hot collection");
+        for (let i = 0; i < numDocs / bulkSize; i++) {
+            let bulk = hotColl.initializeUnorderedBulkOp();
+            for (let j = 0; j < bulkSize; j++) {
+                bulk.insert({_id: (i * bulkSize + j), padding: padding});
+            }
+            assert.commandWorked(bulk.execute());
+            print("Inserted docs: " + (i * bulkSize));
         }
-        assert.commandWorked(bulk.execute());
-        print("Inserted docs: " + (i * bulkSize));
-    }
-    print("inserted documents into hotColl: " + numDocs);
+        print("inserted documents into hotColl: " + numDocs);
 
-    assert.commandWorked(hotDB.adminCommand({fsync: 1}));
+        assert.commandWorked(hotDB.adminCommand({fsync: 1}));
+    }
+
+    assert.commandWorked(coldColl.dropIndex({indexField: 1}));
+
+    print("reading hotColl into cache");
+
+    // Do a collection scan of the hot collection to fill up the cache.
+    let cur = hotColl.find();
+    while (cur.hasNext()) {
+        cur.next();
+    }
 
     // Start readers to fill up the cache.
     TestData.background = config.background;

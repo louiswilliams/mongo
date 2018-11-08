@@ -535,23 +535,39 @@ Status MultiIndexBlockImpl::_doneInserting(std::set<RecordId>* dupRecords,
             return status;
         }
     }
+    LOG(0) << "draining writes received during index build";
+    return _drainSideWrites(dupKeysInserted);
+}
 
-    // Drain side-writes collections.
+
+Status MultiIndexBlockImpl::drainBackgroundWrites() {
+    invariant(!_opCtx->lockState()->inAWriteUnitOfWork());
+
+    LOG(0) << "final draining of writes received while draining";
+    return _drainSideWrites(nullptr);
+}
+
+Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInserted) {
+    // Drain side-writes collections. This only drains what is visible. Assuming weak locks are held
+    // on the collection, more writes can come in after this drain completes. A caller is
+    // responsible for holding a stong lock while draining later on.
     for (size_t i = 0; i < _indexes.size(); i++) {
         auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();
         if (!interceptor)
             continue;
 
-        auto status =
-            interceptor->drainOps(_opCtx, _indexes[i].block.accessMethod(), _indexes[i].options, 0);
+        LOG(0) << "\tdraining writes for index: "
+               << _indexes[i].block->getEntry()->descriptor()->indexName();
+        WriteUnitOfWork wunit(_opCtx);
+        auto status = interceptor->drainOps(_opCtx, _indexes[i].real, _indexes[i].options);
         if (!status.isOK()) {
             return status;
         }
+        wunit.commit();
     }
-
-
     return Status::OK();
 }
+
 
 void MultiIndexBlockImpl::abortWithoutCleanup() {
     _indexes.clear();

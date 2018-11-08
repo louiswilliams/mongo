@@ -111,6 +111,12 @@ public:
                           const InsertDeleteOptions& options,
                           int64_t* numDeleted) = 0;
 
+    virtual Status removeKeys(OperationContext* opCtx,
+                              const BSONObjSet& keys,
+                              const RecordId& loc,
+                              const InsertDeleteOptions& options,
+                              int64_t* numDeleted) = 0;
+
     /**
      * Checks whether the index entries for the document 'from', which is placed at location
      * 'loc' on disk, can be changed to the index entries for the doc 'to'. Provides a ticket
@@ -460,6 +466,12 @@ public:
                   const RecordId& loc,
                   const InsertDeleteOptions& options,
                   int64_t* numDeleted) final;
+
+    Status removeKeys(OperationContext* opCtx,
+                      const BSONObjSet& keys,
+                      const RecordId& loc,
+                      const InsertDeleteOptions& options,
+                      int64_t* numDeleted) final;
 
     Status validateUpdate(OperationContext* opCtx,
                           const BSONObj& from,

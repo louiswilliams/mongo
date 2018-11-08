@@ -80,35 +80,69 @@ void IndexBuildInterceptor::removeSideWritesCollection(OperationContext* opCtx) 
 
 Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
                                        IndexAccessMethod* indexAccessMethod,
-                                       const InsertDeleteOptions& options,
-                                       int64_t startId) {
+                                       const InsertDeleteOptions& options) {
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
 
-    int64_t currentId = startId;
+    // TODO: Read at the right timestamp.
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
 
     auto collection = autoColl.getCollection();
-    auto collScan = InternalPlanner::collectionScan(
-        opCtx, collection->ns().ns(), collection, PlanExecutor::YieldPolicy::YIELD_AUTO);
+    // TODO: Should this be INTERRUPT_ONLY?
+    auto collScan = InternalPlanner::collectionScan(opCtx,
+                                                    collection->ns().ns(),
+                                                    collection,
+                                                    PlanExecutor::YieldPolicy::YIELD_AUTO,
+                                                    InternalPlanner::FORWARD,
+                                                    _lastAppliedRecord);
+    if (!_lastAppliedRecord.isNull()) {
+        LOG(0) << "Resuming drain from Record: " << _lastAppliedRecord.repr();
+    }
 
     BSONObj operation;
+    RecordId recordId;
     PlanExecutor::ExecState state;
-    while (PlanExecutor::ExecState::ADVANCED == (state = collScan->getNext(&operation, nullptr))) {
-        currentId = operation["_id"].Long();
-        if (currentId < startId) {
+
+    int64_t appliedAtStart = _numApplied;
+
+    while (PlanExecutor::ExecState::ADVANCED ==
+           (state = collScan->getNext(&operation, &recordId))) {
+        if (recordId == _lastAppliedRecord)
             continue;
-        }
 
         BSONObj key = operation["key"].Obj();
-        RecordId loc = RecordId(operation["loc"].Long());
+        RecordId recordId = RecordId(operation["recordId"].Long());
         Op op = std::string(operation.getStringField("op")).compare("i") == 0 ? Op::kInsert
                                                                               : Op::kDelete;
+        BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
 
-        InsertResult result;
-        indexAccessMethod->insertKeys(opCtx, {key}, {}, {}, loc, options, &result);
+        Status s = Status::OK();
+        if (op == Op::kInsert) {
+            // TODO: Report duplicates.
+            InsertResult result;
+            s = indexAccessMethod->insertKeys(opCtx,
+                                              keySet,
+                                              SimpleBSONObjComparator::kInstance.makeBSONObjSet(),
+                                              {},
+                                              recordId,
+                                              options,
+                                              &result);
+        } else {
+            int64_t numDeleted;
+            s = indexAccessMethod->removeKeys(opCtx, keySet, recordId, options, &numDeleted);
+        }
+        if (!s.isOK()) {
+            return s;
+        }
+
+        // Since drain is resumable, keep track of which records we have applied.
+        _lastAppliedRecord = recordId;
+        _numApplied++;
     }
+
+    LOG(0) << "Applied " << (_numApplied - appliedAtStart) << " side writes. Total: " << _numApplied
+           << ". Last Record: " << _lastAppliedRecord.repr();
 
     if (PlanExecutor::IS_EOF != state) {
         return WorkingSetCommon::getMemberObjectStatus(operation);

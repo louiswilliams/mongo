@@ -248,6 +248,7 @@ Status AbstractIndexAccessMethod::insertKeys(OperationContext* opCtx,
     if (shouldMarkIndexAsMultikey(keys, multikeyMetadataKeys, multikeyPaths)) {
         _btreeState->setMultikey(opCtx, multikeyPaths);
     }
+    return Status::OK();
 }
 
 void AbstractIndexAccessMethod::removeOneKey(OperationContext* opCtx,
@@ -295,12 +296,20 @@ Status AbstractIndexAccessMethod::remove(OperationContext* opCtx,
     getKeys(
         obj, GetKeysMode::kRelaxConstraintsUnfiltered, &keys, multikeyMetadataKeys, multikeyPaths);
 
+    return removeKeys(opCtx, keys, loc, options, numDeleted);
+}
+
+Status AbstractIndexAccessMethod::removeKeys(OperationContext* opCtx,
+                                             const BSONObjSet& keys,
+                                             const RecordId& loc,
+                                             const InsertDeleteOptions& options,
+                                             int64_t* numDeleted) {
+
     for (const auto& key : keys) {
         removeOneKey(opCtx, key, loc, options.dupsAllowed);
     }
 
     *numDeleted = keys.size();
-
     return Status::OK();
 }
 

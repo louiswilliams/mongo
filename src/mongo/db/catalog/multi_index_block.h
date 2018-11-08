@@ -154,6 +154,8 @@ public:
     virtual Status doneInserting(std::set<RecordId>* const dupRecords) = 0;
     virtual Status doneInserting(std::vector<BSONObj>* const dupKeysInserted) = 0;
 
+    virtual Status drainBackgroundWrites() = 0;
+
     /**
      * Marks the index ready for use. Should only be called as the last method after
      * doneInserting() or insertAllDocumentsInCollection() return success.

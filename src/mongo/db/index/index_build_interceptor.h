@@ -68,10 +68,16 @@ public:
 
     Status drainOps(OperationContext* opCtx,
                     IndexAccessMethod* indexAccessMethod,
-                    const InsertDeleteOptions& options,
-                    int64_t startId);
+                    const InsertDeleteOptions& options);
+
+    int64_t writesDrained() const {
+        return _numApplied;
+    }
 
 private:
+    RecordId _lastAppliedRecord;
+    int64_t _numApplied{0};
+
     NamespaceString _sideWritesNs;
     boost::optional<MultikeyPaths> _multikeyPaths;
 };

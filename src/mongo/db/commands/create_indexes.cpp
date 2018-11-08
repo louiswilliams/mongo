@@ -408,6 +408,28 @@ public:
             }
             throw;
         }
+
+        // Stop inserts into the collection while draining writes.
+        try {
+            Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_S);
+            uassertStatusOK(indexer.drainBackgroundWrites());
+        } catch (const DBException& e) {
+            invariant(e.code() != ErrorCodes::WriteConflict);
+            // Must have exclusive DB lock before we clean up the index build via the
+            // destructor of 'indexer'.
+            if (indexer.getBuildInBackground()) {
+                try {
+                    // This function cannot throw today, but we will preemptively prepare for
+                    // that day, to avoid data corruption due to lack of index cleanup.
+                    opCtx->recoveryUnit()->abandonSnapshot();
+                    dbLock.relockWithMode(MODE_X);
+                } catch (...) {
+                    std::terminate();
+                }
+            }
+            throw;
+        }
+
         // Need to return db lock back to exclusive, to complete the index build.
         if (indexer.getBuildInBackground()) {
             opCtx->recoveryUnit()->abandonSnapshot();

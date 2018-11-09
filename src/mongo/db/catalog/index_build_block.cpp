@@ -171,6 +171,9 @@ void IndexCatalogImpl::IndexBuildBlock::success() {
 
     _entry->setIsReady(true);
     if (_indexBuildInterceptor) {
+        // An index build should never be completed with writes remaining in the interceptor.
+        invariant(_indexBuildInterceptor->isEof(_opCtx));
+
         _indexBuildInterceptor->removeSideWritesCollection(_opCtx);
         _entry->setIndexBuildInterceptor(nullptr);
     }

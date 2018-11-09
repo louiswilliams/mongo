@@ -70,6 +70,8 @@ public:
                     IndexAccessMethod* indexAccessMethod,
                     const InsertDeleteOptions& options);
 
+    bool isEof(OperationContext* opCtx);
+
     int64_t writesDrained() const {
         return _numApplied;
     }

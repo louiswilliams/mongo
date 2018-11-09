@@ -83,7 +83,7 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
                                        const InsertDeleteOptions& options) {
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
 
-    // TODO: Don't yield if we are in an exclusive lock.
+    // TODO: Don't yield if we are in X or S mode.
 
     // TODO: Read at the right timestamp.
 
@@ -91,7 +91,6 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
     invariant(autoColl.getCollection());
 
     auto collection = autoColl.getCollection();
-    // TODO: Should this be INTERRUPT_ONLY?
     auto collScan = InternalPlanner::collectionScan(opCtx,
                                                     collection->ns().ns(),
                                                     collection,
@@ -162,6 +161,27 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
         return WorkingSetCommon::getMemberObjectStatus(operation);
     }
     return Status::OK();
+}
+
+bool IndexBuildInterceptor::isEof(OperationContext* opCtx) {
+    AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
+    invariant(autoColl.getCollection());
+
+    auto collection = autoColl.getCollection();
+    auto collScan = InternalPlanner::collectionScan(opCtx,
+                                                    collection->ns().ns(),
+                                                    collection,
+                                                    PlanExecutor::YieldPolicy::YIELD_AUTO,
+                                                    InternalPlanner::FORWARD,
+                                                    _lastAppliedRecord);
+
+    BSONObj next;
+    RecordId nextRecord;
+    PlanExecutor::ExecState state = (state = collScan->getNext(&next, &nextRecord));
+    invariant(state == PlanExecutor::ExecState::ADVANCED);
+    invariant(nextRecord == _lastAppliedRecord);
+
+    return collScan->getNext(nullptr, nullptr) == PlanExecutor::ExecState::IS_EOF;
 }
 
 Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,

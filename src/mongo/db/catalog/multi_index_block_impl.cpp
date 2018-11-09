@@ -554,6 +554,13 @@ Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
 Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInserted) {
     invariant(!_opCtx->lockState()->inAWriteUnitOfWork());
 
+    // When holding MODE_S or MODE_X (which covers MODE_S), do not yield when scanning the side
+    // writes collection. Callers request these lock modes to ensure they have seen all writes, at
+    // least until locks are released.
+    auto scanYield = _opCtx->lockState()->isCollectionLockedForMode(_collection->ns().ns(), MODE_S)
+        ? IndexBuildInterceptor::ScanYield::kInterruptOnly
+        : IndexBuildInterceptor::ScanYield::kYieldAuto;
+
     // Drain side-writes collections. This only drains what is visible. Assuming weak locks are held
     // on the collection, more writes can come in after this drain completes. A caller is
     // responsible for holding a stong lock while draining later on.
@@ -565,7 +572,8 @@ Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInsert
         LOG(1) << "\tdraining writes for index: "
                << _indexes[i].block->getEntry()->descriptor()->indexName();
         WriteUnitOfWork wunit(_opCtx);
-        auto status = interceptor->drainOps(_opCtx, _indexes[i].real, _indexes[i].options);
+        auto status =
+            interceptor->drainOps(_opCtx, _indexes[i].real, _indexes[i].options, scanYield);
         if (!status.isOK()) {
             return status;
         }

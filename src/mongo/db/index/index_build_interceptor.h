@@ -43,6 +43,7 @@ class OperationContext;
 class IndexBuildInterceptor {
 public:
     enum class Op { kInsert, kDelete };
+    enum ScanYield { kYieldAuto, kInterruptOnly };
 
     IndexBuildInterceptor() : _sideWritesNs(makeTempSideWritesNs()) {}
     IndexBuildInterceptor(NamespaceString sideWritesNs) : _sideWritesNs(sideWritesNs) {}
@@ -68,7 +69,8 @@ public:
 
     Status drainOps(OperationContext* opCtx,
                     IndexAccessMethod* indexAccessMethod,
-                    const InsertDeleteOptions& options);
+                    const InsertDeleteOptions& options,
+                    ScanYield scanYield);
 
     bool isEof(OperationContext* opCtx);
 

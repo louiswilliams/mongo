@@ -80,21 +80,25 @@ void IndexBuildInterceptor::removeSideWritesCollection(OperationContext* opCtx) 
 
 Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
                                        IndexAccessMethod* indexAccessMethod,
-                                       const InsertDeleteOptions& options) {
+                                       const InsertDeleteOptions& options,
+                                       ScanYield scanYield) {
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
-
-    // TODO: Don't yield if we are in X or S mode.
 
     // TODO: Read at the right timestamp.
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
 
+    // Callers that are holding strong locks may not want to yield.
+    auto yieldPolicy = (scanYield = ScanYield::kInterruptOnly)
+        ? PlanExecutor::YieldPolicy::INTERRUPT_ONLY
+        : PlanExecutor::YieldPolicy::YIELD_AUTO;
+
     auto collection = autoColl.getCollection();
     auto collScan = InternalPlanner::collectionScan(opCtx,
                                                     collection->ns().ns(),
                                                     collection,
-                                                    PlanExecutor::YieldPolicy::YIELD_AUTO,
+                                                    yieldPolicy,
                                                     InternalPlanner::FORWARD,
                                                     _lastAppliedRecord);
     if (!_lastAppliedRecord.isNull()) {

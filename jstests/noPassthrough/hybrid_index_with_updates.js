@@ -1,5 +1,4 @@
 
-
 (function() {
     "use strict";
 
@@ -73,6 +72,7 @@
     // Wait for final drain.
     turnFailPointOff("hangAfterIndexBuildReleasesSharedLock");
 
+    // Wait for build to complete.
     bgBuild();
 
     assert.eq(25, testDB.hybrid.count());
@@ -80,4 +80,3 @@
 
     MongoRunner.stopMongod(conn);
 })();
-

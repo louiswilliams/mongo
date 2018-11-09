@@ -178,6 +178,13 @@ bool IndexBuildInterceptor::isEof(OperationContext* opCtx) {
     BSONObj next;
     RecordId nextRecord;
     PlanExecutor::ExecState state = collScan->getNext(&next, &nextRecord);
+
+    // The first read can be EOF if the collection is empty.
+    if (state == PlanExecutor::ExecState::IS_EOF) {
+        invariant(_lastAppliedRecord.isNull());
+        return true;
+    }
+
     invariant(state == PlanExecutor::ExecState::ADVANCED);
     invariant(nextRecord == _lastAppliedRecord);
 

@@ -35,6 +35,7 @@
 
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/catalog_raii.h"
+#include "mongo/db/curop.h"
 #include "mongo/db/db_raii.h"
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/multi_key_path_tracker.h"
@@ -86,6 +87,13 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
 
     // TODO: Read at the right timestamp.
 
+    // Setup the progress meter.
+    static const char* curopMessage = "Index build draining writes";
+    stdx::unique_lock<Client> lk(*opCtx->getClient());
+    ProgressMeterHolder progress(
+        CurOp::get(opCtx)->setMessage_inlock(curopMessage, curopMessage, _sideWritesId.load(), 1));
+    lk.unlock();
+
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
 
@@ -95,12 +103,15 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
         : PlanExecutor::YieldPolicy::YIELD_AUTO;
 
     auto collection = autoColl.getCollection();
+
+    // This collection scan is resumable at the _lastAppliedRecord.
     auto collScan = InternalPlanner::collectionScan(opCtx,
                                                     collection->ns().ns(),
                                                     collection,
                                                     yieldPolicy,
                                                     InternalPlanner::FORWARD,
                                                     _lastAppliedRecord);
+
     if (!_lastAppliedRecord.isNull()) {
         LOG(0) << "Resuming drain from Record: " << _lastAppliedRecord.repr();
     }
@@ -117,6 +128,8 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
            (state = collScan->getNext(&operation, &currentRecord))) {
         if (currentRecord == _lastAppliedRecord)
             continue;
+
+        progress->setTotalWhileRunning(_sideWritesId.load());
 
         BSONObj key = operation["key"].Obj();
         RecordId opRecordId = RecordId(operation["recordId"].Long());
@@ -152,10 +165,14 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
             totalDeleted += numDeleted;
         }
 
+        progress->hit();
+
         // Since drain is resumable, keep track of which records we have applied.
         _lastAppliedRecord = currentRecord;
         _numApplied++;
     }
+
+    progress->finished();
 
     LOG(0) << "Applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
            << ", d: " << totalDeleted << ", total:" << _numApplied

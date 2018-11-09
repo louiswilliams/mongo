@@ -16,7 +16,7 @@
         assert.commandWorked(testDB.adminCommand({configureFailPoint: failPointName, mode: "off"}));
     };
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 100; i++) {
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
@@ -32,13 +32,13 @@
     checkLog.contains(conn, "Hanging before index build of i=" + stopKey);
 
     // Do some updates, inserts and deletes while building.
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 50; i++) {
         assert.commandWorked(testDB.hybrid.update({i: i}, {i: -1}));
     }
-    for (let i = 5; i < 10; i++) {
+    for (let i = 50; i < 100; i++) {
         assert.commandWorked(testDB.hybrid.remove({i: i}));
     }
-    for (let i = 10; i < 15; i++) {
+    for (let i = 100; i < 150; i++) {
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
@@ -51,7 +51,7 @@
     checkLog.contains(conn, "Hanging after dumping inserts from bulk builder");
 
     // Add inserts that must be consumed in the second drain.
-    for (let i = 15; i < 25; i++) {
+    for (let i = 150; i < 250; i++) {
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
@@ -65,7 +65,7 @@
     checkLog.contains(conn, "Hanging after releasing shared lock");
 
     // Add inserts that must be consumed in the final drain.
-    for (let i = 25; i < 30; i++) {
+    for (let i = 250; i < 300; i++) {
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
@@ -75,7 +75,7 @@
     // Wait for build to complete.
     bgBuild();
 
-    assert.eq(25, testDB.hybrid.count());
+    assert.eq(250, testDB.hybrid.count());
     assert.commandWorked(testDB.hybrid.validate());
 
     MongoRunner.stopMongod(conn);

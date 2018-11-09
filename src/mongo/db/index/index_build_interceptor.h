@@ -33,6 +33,7 @@
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/record_id.h"
 #include "mongo/platform/atomic_word.h"
+#include "mongo/util/progress_meter.h"
 
 namespace mongo {
 

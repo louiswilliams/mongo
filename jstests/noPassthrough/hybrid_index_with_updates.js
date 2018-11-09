@@ -43,26 +43,39 @@
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
-    // Pause after done inserting.
+    // Enable pause after bulk dump into index and first drain.
     turnFailPointOn("hangAfterDumpInsertsFromBulk");
-
-    // Allow index build to finish.
+    // Allow first drain to finish.
     turnFailPointOff("hangBeforeIndexBuildOf");
 
-    // Wait for final drain.
-    checkLog.contains(conn, "Hanging after done inserting");
+    // Wait for first drain to complete.
+    checkLog.contains(conn, "Hanging after dumping inserts from bulk builder");
 
-    // Add inserts that must be consumed in the final drain.
+    // Add inserts that must be consumed in the second drain.
     for (let i = 15; i < 25; i++) {
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
-    // Pause after done inserting.
+    // Enable pause after final drain.
+    turnFailPointOn("hangAfterIndexBuildReleasesSharedLock");
+
+    // Allow second drain to complete.
     turnFailPointOff("hangAfterDumpInsertsFromBulk");
+
+    // Wait for second drain to finish.
+    checkLog.contains(conn, "Hanging after releasing shared lock");
+
+    // Add inserts that must be consumed in the final drain.
+    for (let i = 25; i < 30; i++) {
+        assert.commandWorked(testDB.hybrid.insert({i: i}));
+    }
+
+    // Wait for final drain.
+    turnFailPointOff("hangAfterIndexBuildReleasesSharedLock");
 
     bgBuild();
 
-    assert.eq(20, testDB.hybrid.count());
+    assert.eq(25, testDB.hybrid.count());
     assert.commandWorked(testDB.hybrid.validate());
 
     MongoRunner.stopMongod(conn);

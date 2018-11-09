@@ -177,7 +177,7 @@ bool IndexBuildInterceptor::isEof(OperationContext* opCtx) {
 
     BSONObj next;
     RecordId nextRecord;
-    PlanExecutor::ExecState state = (state = collScan->getNext(&next, &nextRecord));
+    PlanExecutor::ExecState state = collScan->getNext(&next, &nextRecord);
     invariant(state == PlanExecutor::ExecState::ADVANCED);
     invariant(nextRecord == _lastAppliedRecord);
 

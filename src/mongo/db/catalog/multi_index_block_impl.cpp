@@ -539,7 +539,7 @@ Status MultiIndexBlockImpl::_dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
     Status status = _drainSideWrites(dupKeysInserted);
 
     if (MONGO_FAIL_POINT(hangAfterDumpInsertsFromBulk)) {
-        LOG(0) << "Hanging after done inserting";
+        LOG(0) << "Hanging after dumping inserts from bulk builder";
         MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterDumpInsertsFromBulk);
     }
 

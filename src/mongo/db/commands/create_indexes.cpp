@@ -28,6 +28,8 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kIndex
+
 #include "mongo/platform/basic.h"
 
 #include <string>
@@ -60,6 +62,8 @@
 #include "mongo/db/server_options.h"
 #include "mongo/db/views/view_catalog.h"
 #include "mongo/s/shard_key_pattern.h"
+#include "mongo/util/fail_point.h"
+#include "mongo/util/log.h"
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
@@ -67,6 +71,8 @@ namespace mongo {
 using std::string;
 
 using IndexVersion = IndexDescriptor::IndexVersion;
+
+MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildReleasesSharedLock);
 
 namespace {
 
@@ -428,6 +434,11 @@ public:
                 }
             }
             throw;
+        }
+
+        if (MONGO_FAIL_POINT(hangAfterIndexBuildReleasesSharedLock)) {
+            LOG(0) << "Hanging after releasing shared lock";
+            MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildReleasesSharedLock);
         }
 
         // Need to return db lock back to exclusive, to complete the index build.

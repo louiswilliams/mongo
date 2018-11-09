@@ -101,48 +101,60 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
     }
 
     BSONObj operation;
-    RecordId recordId;
+    RecordId currentRecord;
     PlanExecutor::ExecState state;
 
     int64_t appliedAtStart = _numApplied;
+    int64_t totalDeleted = 0;
+    int64_t totalInserted = 0;
 
     while (PlanExecutor::ExecState::ADVANCED ==
-           (state = collScan->getNext(&operation, &recordId))) {
-        if (recordId == _lastAppliedRecord)
+           (state = collScan->getNext(&operation, &currentRecord))) {
+        if (currentRecord == _lastAppliedRecord)
             continue;
 
         BSONObj key = operation["key"].Obj();
-        RecordId recordId = RecordId(operation["recordId"].Long());
+        RecordId opRecordId = RecordId(operation["recordId"].Long());
         Op op = std::string(operation.getStringField("op")).compare("i") == 0 ? Op::kInsert
                                                                               : Op::kDelete;
         BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
 
-        Status s = Status::OK();
         if (op == Op::kInsert) {
             // TODO: Report duplicates.
             InsertResult result;
-            s = indexAccessMethod->insertKeys(opCtx,
+            Status s =
+                indexAccessMethod->insertKeys(opCtx,
                                               keySet,
                                               SimpleBSONObjComparator::kInstance.makeBSONObjSet(),
                                               {},
-                                              recordId,
+                                              opRecordId,
                                               options,
                                               &result);
+            if (!s.isOK())
+                return s;
+
+            // TODO: Deal with dups
+            invariant(!result.dupsInserted.size());
+            totalInserted += result.numInserted;
         } else {
             int64_t numDeleted;
-            s = indexAccessMethod->removeKeys(opCtx, keySet, recordId, options, &numDeleted);
-        }
-        if (!s.isOK()) {
-            return s;
+            Status s =
+                indexAccessMethod->removeKeys(opCtx, keySet, opRecordId, options, &numDeleted);
+            if (!s.isOK()) {
+                return s;
+            }
+
+            totalDeleted += numDeleted;
         }
 
         // Since drain is resumable, keep track of which records we have applied.
-        _lastAppliedRecord = recordId;
+        _lastAppliedRecord = currentRecord;
         _numApplied++;
     }
 
-    LOG(0) << "Applied " << (_numApplied - appliedAtStart) << " side writes. Total: " << _numApplied
-           << ". Last Record: " << _lastAppliedRecord.repr();
+    LOG(0) << "Applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
+           << ", d: " << totalDeleted << ", total:" << _numApplied
+           << ", last record: " << _lastAppliedRecord.repr();
 
     if (PlanExecutor::IS_EOF != state) {
         return WorkingSetCommon::getMemberObjectStatus(operation);

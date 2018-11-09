@@ -74,6 +74,7 @@ MONGO_FAIL_POINT_DEFINE(hangAfterStartingIndexBuildUnlocked);
 MONGO_FAIL_POINT_DEFINE(slowBackgroundIndexBuild);
 MONGO_FAIL_POINT_DEFINE(hangBeforeIndexBuildOf);
 MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildOf);
+MONGO_FAIL_POINT_DEFINE(hangAfterDoneInserting);
 
 AtomicInt32 maxIndexBuildMemoryUsageMegabytes(500);
 
@@ -536,7 +537,14 @@ Status MultiIndexBlockImpl::_doneInserting(std::set<RecordId>* dupRecords,
         }
     }
     LOG(0) << "draining writes received during index build";
-    return _drainSideWrites(dupKeysInserted);
+    Status status = _drainSideWrites(dupKeysInserted);
+
+    if (MONGO_FAIL_POINT(hangAfterDoneInserting)) {
+        LOG(0) << "Hanging after done inserting";
+        MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterDoneInserting);
+    }
+
+    return status;
 }
 
 

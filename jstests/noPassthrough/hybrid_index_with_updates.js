@@ -32,7 +32,10 @@
 
     checkLog.contains(conn, "Hanging before index build of i=" + stopKey);
 
-    // Do some inserts and removals while building.
+    // Do some updates, inserts and deletes while building.
+    for (let i = 0; i < 5; i++) {
+        assert.commandWorked(testDB.hybrid.update({i: i}, {i: -1}));
+    }
     for (let i = 5; i < 10; i++) {
         assert.commandWorked(testDB.hybrid.remove({i: i}));
     }
@@ -41,7 +44,7 @@
     }
 
     // Pause after done inserting.
-    turnFailPointOn("hangAfterDoneInserting");
+    turnFailPointOn("hangAfterDumpInsertsFromBulk");
 
     // Allow index build to finish.
     turnFailPointOff("hangBeforeIndexBuildOf");
@@ -55,7 +58,7 @@
     }
 
     // Pause after done inserting.
-    turnFailPointOff("hangAfterDoneInserting");
+    turnFailPointOff("hangAfterDumpInsertsFromBulk");
 
     bgBuild();
 

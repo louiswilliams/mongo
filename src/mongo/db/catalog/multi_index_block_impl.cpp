@@ -74,7 +74,7 @@ MONGO_FAIL_POINT_DEFINE(hangAfterStartingIndexBuildUnlocked);
 MONGO_FAIL_POINT_DEFINE(slowBackgroundIndexBuild);
 MONGO_FAIL_POINT_DEFINE(hangBeforeIndexBuildOf);
 MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildOf);
-MONGO_FAIL_POINT_DEFINE(hangAfterdumpInsertsFromBulk);
+MONGO_FAIL_POINT_DEFINE(hangAfterDumpInsertsFromBulk);
 
 AtomicInt32 maxIndexBuildMemoryUsageMegabytes(500);
 
@@ -524,7 +524,7 @@ Status MultiIndexBlockImpl::_dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
     for (size_t i = 0; i < _indexes.size(); i++) {
         if (_indexes[i].bulk == NULL)
             continue;
-        LOG(1) << "\t bulk commit starting for index: "
+        LOG(1) << "\t dumping from external sorter into index: "
                << _indexes[i].block->getEntry()->descriptor()->indexName();
         Status status = _indexes[i].real->commitBulk(_opCtx,
                                                      _indexes[i].bulk.get(),
@@ -538,17 +538,16 @@ Status MultiIndexBlockImpl::_dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
     }
     Status status = _drainSideWrites(dupKeysInserted);
 
-    if (MONGO_FAIL_POINT(hangAfterdumpInsertsFromBulk)) {
+    if (MONGO_FAIL_POINT(hangAfterDumpInsertsFromBulk)) {
         LOG(0) << "Hanging after done inserting";
-        MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterdumpInsertsFromBulk);
+        MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterDumpInsertsFromBulk);
     }
 
     return status;
 }
 
-
 Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
-    LOG(0) << "draining background writes into index";
+    LOG(1) << "draining background writes into index";
     return _drainSideWrites(nullptr);
 }
 
@@ -563,7 +562,7 @@ Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInsert
         if (!interceptor)
             continue;
 
-        LOG(0) << "\tdraining writes for index: "
+        LOG(1) << "\tdraining writes for index: "
                << _indexes[i].block->getEntry()->descriptor()->indexName();
         WriteUnitOfWork wunit(_opCtx);
         auto status = interceptor->drainOps(_opCtx, _indexes[i].real, _indexes[i].options);

@@ -144,7 +144,7 @@ StatusWith<CompactStats> compactCollection(OperationContext* opCtx,
         return StatusWith<CompactStats>(status);
 
     log() << "starting index commits";
-    status = indexer.doneInserting();
+    status = indexer.dumpInsertsFromBulk();
     if (!status.isOK())
         return StatusWith<CompactStats>(status);
 

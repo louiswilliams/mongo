@@ -412,7 +412,7 @@ public:
         // Stop inserts into the collection while draining writes.
         try {
             Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_S);
-            uassertStatusOK(indexer.drainBackgroundWrites());
+            uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
         } catch (const DBException& e) {
             invariant(e.code() != ErrorCodes::WriteConflict);
             // Must have exclusive DB lock before we clean up the index build via the
@@ -443,6 +443,8 @@ public:
             uassert(28551, "database dropped during index build", db);
             uassert(28552, "collection dropped during index build", db->getCollection(opCtx, ns));
         }
+
+        uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
 
         writeConflictRetry(opCtx, kCommandName, ns.ns(), [&] {
             WriteUnitOfWork wunit(opCtx);

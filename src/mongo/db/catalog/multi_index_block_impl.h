@@ -83,21 +83,12 @@ public:
                   const RecordId& loc,
                   std::vector<BSONObj>* const dupKeysInserted = nullptr) override;
 
-    Status doneInserting() override;
-    Status doneInserting(std::set<RecordId>* dupRecords) override;
-    Status doneInserting(std::vector<BSONObj>* dupKeysInserted) override;
+    Status dumpInsertsFromBulk() override;
+    Status dumpInsertsFromBulk(std::set<RecordId>* dupRecords) override;
+    Status dumpInsertsFromBulk(std::vector<BSONObj>* dupKeysInserted) override;
 
-    Status drainBackgroundWrites() override;
+    Status drainBackgroundWritesIfNeeded() override;
 
-    /**
-     * Marks the index ready for use. Should only be called as the last method after
-     * doneInserting() or insertAllDocumentsInCollection() return success.
-     *
-     * Should be called inside of a WriteUnitOfWork. If the index building is to be logOp'd,
-     * logOp() should be called from the same unit of work as commit().
-     *
-     * Requires holding an exclusive database lock.
-     */
     void commit() override;
     void commit(stdx::function<void(const BSONObj& spec)> onCreateFn) override;
 
@@ -121,7 +112,8 @@ private:
         InsertDeleteOptions options;
     };
 
-    Status _doneInserting(std::set<RecordId>* dupRecords, std::vector<BSONObj>* dupKeysInserted);
+    Status _dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
+                                std::vector<BSONObj>* dupKeysInserted);
     Status _drainSideWrites(std::vector<BSONObj>* dupKeysInserted);
 
     std::vector<IndexToBuild> _indexes;

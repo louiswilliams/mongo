@@ -83,6 +83,8 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
                                        const InsertDeleteOptions& options) {
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
 
+    // TODO: Don't yield if we are in an exclusive lock.
+
     // TODO: Read at the right timestamp.
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);

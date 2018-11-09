@@ -74,7 +74,7 @@ MONGO_FAIL_POINT_DEFINE(hangAfterStartingIndexBuildUnlocked);
 MONGO_FAIL_POINT_DEFINE(slowBackgroundIndexBuild);
 MONGO_FAIL_POINT_DEFINE(hangBeforeIndexBuildOf);
 MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildOf);
-MONGO_FAIL_POINT_DEFINE(hangAfterDoneInserting);
+MONGO_FAIL_POINT_DEFINE(hangAfterdumpInsertsFromBulk);
 
 AtomicInt32 maxIndexBuildMemoryUsageMegabytes(500);
 
@@ -470,7 +470,7 @@ Status MultiIndexBlockImpl::insertAllDocumentsInCollection() {
 
     progress->finished();
 
-    Status ret = doneInserting();
+    Status ret = dumpInsertsFromBulk();
     if (!ret.isOK())
         return ret;
 
@@ -506,20 +506,20 @@ Status MultiIndexBlockImpl::insert(const BSONObj& doc,
     return Status::OK();
 }
 
-Status MultiIndexBlockImpl::doneInserting() {
-    return _doneInserting(nullptr, nullptr);
+Status MultiIndexBlockImpl::dumpInsertsFromBulk() {
+    return _dumpInsertsFromBulk(nullptr, nullptr);
 }
 
-Status MultiIndexBlockImpl::doneInserting(std::set<RecordId>* dupRecords) {
-    return _doneInserting(dupRecords, nullptr);
+Status MultiIndexBlockImpl::dumpInsertsFromBulk(std::set<RecordId>* dupRecords) {
+    return _dumpInsertsFromBulk(dupRecords, nullptr);
 }
 
-Status MultiIndexBlockImpl::doneInserting(std::vector<BSONObj>* dupKeysInserted) {
-    return _doneInserting(nullptr, dupKeysInserted);
+Status MultiIndexBlockImpl::dumpInsertsFromBulk(std::vector<BSONObj>* dupKeysInserted) {
+    return _dumpInsertsFromBulk(nullptr, dupKeysInserted);
 }
 
-Status MultiIndexBlockImpl::_doneInserting(std::set<RecordId>* dupRecords,
-                                           std::vector<BSONObj>* dupKeysInserted) {
+Status MultiIndexBlockImpl::_dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
+                                                 std::vector<BSONObj>* dupKeysInserted) {
     invariant(_opCtx->lockState()->isNoop() || !_opCtx->lockState()->inAWriteUnitOfWork());
     for (size_t i = 0; i < _indexes.size(); i++) {
         if (_indexes[i].bulk == NULL)
@@ -536,26 +536,25 @@ Status MultiIndexBlockImpl::_doneInserting(std::set<RecordId>* dupRecords,
             return status;
         }
     }
-    LOG(0) << "draining writes received during index build";
     Status status = _drainSideWrites(dupKeysInserted);
 
-    if (MONGO_FAIL_POINT(hangAfterDoneInserting)) {
+    if (MONGO_FAIL_POINT(hangAfterdumpInsertsFromBulk)) {
         LOG(0) << "Hanging after done inserting";
-        MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterDoneInserting);
+        MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterdumpInsertsFromBulk);
     }
 
     return status;
 }
 
 
-Status MultiIndexBlockImpl::drainBackgroundWrites() {
-    invariant(!_opCtx->lockState()->inAWriteUnitOfWork());
-
-    LOG(0) << "final draining of writes received while draining";
+Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
+    LOG(0) << "draining background writes into index";
     return _drainSideWrites(nullptr);
 }
 
 Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInserted) {
+    invariant(!_opCtx->lockState()->inAWriteUnitOfWork());
+
     // Drain side-writes collections. This only drains what is visible. Assuming weak locks are held
     // on the collection, more writes can come in after this drain completes. A caller is
     // responsible for holding a stong lock while draining later on.

@@ -98,7 +98,9 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     // The progress meter should consistently report the number of operations applied over the
     // number remaining. If we are resuming from a previous drain, start the meter where it would
     // have left off, even though the total may have increased.
-    progress->hit(_numApplied);
+    if (_numApplied) {
+        progress->hit(_numApplied);
+    }
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
@@ -277,6 +279,8 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
                                               RecordId::ReservedId::kWildcardMultikeyMetadataId)));
         }
     }
+
+    _sideWritesCounter.fetchAndAdd(keys.size());
 
     OpDebug* const opDebug = nullptr;
     const bool fromMigrate = false;

@@ -40,6 +40,7 @@
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/multi_key_path_tracker.h"
 #include "mongo/db/operation_context.h"
+#include "mongo/db/query/internal_plans.h"
 #include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/util/log.h"
 #include "mongo/util/uuid.h"
@@ -79,10 +80,10 @@ void IndexBuildInterceptor::removeSideWritesCollection(OperationContext* opCtx) 
     fassert(50994, local.getDb()->dropCollectionEvenIfSystem(opCtx, _sideWritesNs, repl::OpTime()));
 }
 
-Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
-                                       IndexAccessMethod* indexAccessMethod,
-                                       const InsertDeleteOptions& options,
-                                       ScanYield scanYield) {
+Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
+                                                   IndexAccessMethod* indexAccessMethod,
+                                                   const InsertDeleteOptions& options,
+                                                   ScanYield scanYield) {
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
 
     // TODO: Read at the right timestamp.
@@ -90,9 +91,14 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
     // Setup the progress meter.
     static const char* curopMessage = "Index build draining writes";
     stdx::unique_lock<Client> lk(*opCtx->getClient());
-    ProgressMeterHolder progress(
-        CurOp::get(opCtx)->setMessage_inlock(curopMessage, curopMessage, _sideWritesId.load(), 1));
+    ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
+        curopMessage, curopMessage, _sideWritesCounter.load(), 1));
     lk.unlock();
+
+    // The progress meter should consistently report the number of operations applied over the
+    // number remaining. If we are resuming from a previous drain, start the meter where it would
+    // have left off, even though the total may have increased.
+    progress->hit(_numApplied);
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
@@ -129,7 +135,7 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
         if (currentRecord == _lastAppliedRecord)
             continue;
 
-        progress->setTotalWhileRunning(_sideWritesId.load());
+        progress->setTotalWhileRunning(_sideWritesCounter.load());
 
         BSONObj key = operation["key"].Obj();
         RecordId opRecordId = RecordId(operation["recordId"].Long());
@@ -175,7 +181,7 @@ Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
     progress->finished();
 
     LOG(0) << "Applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
-           << ", d: " << totalDeleted << ", total:" << _numApplied
+           << ", d: " << totalDeleted << ", total: " << _numApplied
            << ", last record: " << _lastAppliedRecord.repr();
 
     if (PlanExecutor::IS_EOF != state) {

@@ -1160,8 +1160,7 @@ Status IndexCatalogImpl::_indexFilteredRecords(OperationContext* opCtx,
         }
 
         Status status = Status::OK();
-        const bool hybridBuildsEnabled = false;
-        if (hybridBuildsEnabled && index->isBuilding()) {
+        if (index->isBuilding()) {
             int64_t inserted;
             status = index->indexBuildInterceptor()->sideWrite(opCtx,
                                                                index->accessMethod(),
@@ -1211,8 +1210,7 @@ Status IndexCatalogImpl::_unindexRecord(OperationContext* opCtx,
                                         const RecordId& loc,
                                         bool logIfError,
                                         int64_t* keysDeletedOut) {
-    const bool hybridBuildsEnabled = false;
-    if (hybridBuildsEnabled && index->isBuilding()) {
+    if (index->isBuilding()) {
         int64_t removed;
         auto status = index->indexBuildInterceptor()->sideWrite(
             opCtx, index->accessMethod(), &obj, loc, IndexBuildInterceptor::Op::kDelete, &removed);

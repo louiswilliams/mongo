@@ -572,8 +572,8 @@ Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInsert
         LOG(1) << "\tdraining writes for index: "
                << _indexes[i].block->getEntry()->descriptor()->indexName();
         WriteUnitOfWork wunit(_opCtx);
-        auto status =
-            interceptor->drainOps(_opCtx, _indexes[i].real, _indexes[i].options, scanYield);
+        auto status = interceptor->drainWritesIntoIndex(
+            _opCtx, _indexes[i].real, _indexes[i].options, scanYield);
         if (!status.isOK()) {
             return status;
         }

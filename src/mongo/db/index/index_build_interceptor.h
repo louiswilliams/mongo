@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include "mongo/db/index/index_access_method.h"
 #include "mongo/db/index/multikey_paths.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/record_id.h"
@@ -68,10 +69,10 @@ public:
                      Op op,
                      int64_t* numKeysOut);
 
-    Status drainOps(OperationContext* opCtx,
-                    IndexAccessMethod* indexAccessMethod,
-                    const InsertDeleteOptions& options,
-                    ScanYield scanYield);
+    Status drainWritesIntoIndex(OperationContext* opCtx,
+                                IndexAccessMethod* indexAccessMethod,
+                                const InsertDeleteOptions& options,
+                                ScanYield scanYield);
 
     bool isEof(OperationContext* opCtx);
 
@@ -84,7 +85,10 @@ private:
     int64_t _numApplied{0};
 
     NamespaceString _sideWritesNs;
+    AtomicInt64 _sideWritesCounter{0};
+
     boost::optional<MultikeyPaths> _multikeyPaths;
 };
+
 
 }  // namespace mongo

@@ -92,15 +92,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     static const char* curopMessage = "Index build draining writes";
     stdx::unique_lock<Client> lk(*opCtx->getClient());
     ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
-        curopMessage, curopMessage, _sideWritesCounter.load(), 1));
+        curopMessage, curopMessage, _sideWritesCounter.load() - _numApplied, 0));
     lk.unlock();
-
-    // The progress meter should consistently report the number of operations applied over the
-    // number remaining. If we are resuming from a previous drain, start the meter where it would
-    // have left off, even though the total may have increased.
-    if (_numApplied) {
-        progress->hit(_numApplied);
-    }
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
@@ -124,28 +117,30 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         LOG(0) << "Resuming drain from Record: " << _lastAppliedRecord.repr();
     }
 
-    BSONObj operation;
-    RecordId currentRecord;
-    PlanExecutor::ExecState state;
 
+    // These are used for logging only.
     int64_t appliedAtStart = _numApplied;
     int64_t totalDeleted = 0;
     int64_t totalInserted = 0;
+
+    BSONObj operation;
+    RecordId currentRecord;
+    PlanExecutor::ExecState state;
 
     while (PlanExecutor::ExecState::ADVANCED ==
            (state = collScan->getNext(&operation, &currentRecord))) {
         if (currentRecord == _lastAppliedRecord)
             continue;
 
-        progress->setTotalWhileRunning(_sideWritesCounter.load());
+        // progress->setTotalWhileRunning(_sideWritesCounter.load());
 
-        BSONObj key = operation["key"].Obj();
-        RecordId opRecordId = RecordId(operation["recordId"].Long());
-        Op op = std::string(operation.getStringField("op")).compare("i") == 0 ? Op::kInsert
-                                                                              : Op::kDelete;
-        BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
+        const BSONObj key = operation["key"].Obj();
+        const RecordId opRecordId = RecordId(operation["recordId"].Long());
+        const Op opType =
+            (operation.getStringField("op") == std::string("i")) ? Op::kInsert : Op::kDelete;
+        const BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
 
-        if (op == Op::kInsert) {
+        if (opType == Op::kInsert) {
             // TODO: Report duplicates.
             InsertResult result;
             Status s =
@@ -156,13 +151,16 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                                               opRecordId,
                                               options,
                                               &result);
-            if (!s.isOK())
+            if (!s.isOK()) {
                 return s;
+            }
 
             // TODO: Deal with dups
             invariant(!result.dupsInserted.size());
             totalInserted += result.numInserted;
         } else {
+            invariant(opType == Op::kDelete);
+
             int64_t numDeleted;
             Status s =
                 indexAccessMethod->removeKeys(opCtx, keySet, opRecordId, options, &numDeleted);

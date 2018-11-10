@@ -38,7 +38,7 @@
     for (let i = 50; i < 100; i++) {
         assert.commandWorked(testDB.hybrid.remove({i: i}));
     }
-    for (let i = 100; i < 150; i++) {
+    for (let i = 100; i < 1500; i++) {
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
@@ -51,7 +51,7 @@
     checkLog.contains(conn, "Hanging after dumping inserts from bulk builder");
 
     // Add inserts that must be consumed in the second drain.
-    for (let i = 150; i < 250; i++) {
+    for (let i = 150; i < 1500; i++) {
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
@@ -65,7 +65,7 @@
     checkLog.contains(conn, "Hanging after releasing shared lock");
 
     // Add inserts that must be consumed in the final drain.
-    for (let i = 250; i < 300; i++) {
+    for (let i = 250; i < 1300; i++) {
         assert.commandWorked(testDB.hybrid.insert({i: i}));
     }
 
@@ -75,7 +75,7 @@
     // Wait for build to complete.
     bgBuild();
 
-    assert.eq(250, testDB.hybrid.count());
+    assert.eq(3850, testDB.hybrid.count());
     assert.commandWorked(testDB.hybrid.validate());
 
     MongoRunner.stopMongod(conn);

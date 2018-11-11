@@ -395,11 +395,8 @@ public:
             dbLock.relockWithMode(MODE_IX);
         }
 
-        try {
-            Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_IX);
-            uassertStatusOK(indexer.insertAllDocumentsInCollection());
-        } catch (const DBException& e) {
-            invariant(e.code() != ErrorCodes::WriteConflict);
+        auto relockOnErrorGuard = MakeGuard([&] {
+            // invariant(e.code() != ErrorCodes::WriteConflict);
             // Must have exclusive DB lock before we clean up the index build via the
             // destructor of 'indexer'.
             if (indexer.getBuildInBackground()) {
@@ -411,35 +408,28 @@ public:
                 } catch (...) {
                     std::terminate();
                 }
+                throw;
             }
-            throw;
+        });
+
+        // Collection scan and insert into index.
+        {
+            Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_IX);
+            uassertStatusOK(indexer.insertAllDocumentsInCollection());
         }
 
         // Stop inserts into the collection while draining writes.
-        try {
+        {
             Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_S);
             uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
-        } catch (const DBException& e) {
-            invariant(e.code() != ErrorCodes::WriteConflict);
-            // Must have exclusive DB lock before we clean up the index build via the
-            // destructor of 'indexer'.
-            if (indexer.getBuildInBackground()) {
-                try {
-                    // This function cannot throw today, but we will preemptively prepare for
-                    // that day, to avoid data corruption due to lack of index cleanup.
-                    opCtx->recoveryUnit()->abandonSnapshot();
-                    dbLock.relockWithMode(MODE_X);
-                } catch (...) {
-                    std::terminate();
-                }
-            }
-            throw;
         }
 
         if (MONGO_FAIL_POINT(hangAfterIndexBuildReleasesSharedLock)) {
             LOG(0) << "Hanging after releasing shared lock";
             MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildReleasesSharedLock);
         }
+
+        relockOnErrorGuard.Dismiss();
 
         // Need to return db lock back to exclusive, to complete the index build.
         if (indexer.getBuildInBackground()) {

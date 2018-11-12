@@ -408,7 +408,6 @@ public:
                 } catch (...) {
                     std::terminate();
                 }
-                throw;
             }
         });
 

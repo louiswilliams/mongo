@@ -656,73 +656,20 @@ RecordId CollectionImpl::updateDocument(OperationContext* opCtx,
                                 << " != "
                                 << newDoc.objsize());
 
-    // At the end of this step, we will have a map of UpdateTickets, one per index, which
-    // represent the index updates needed to be done, based on the changes between oldDoc and
-    // newDoc.
-    OwnedPointerMap<IndexDescriptor*, UpdateTicket> updateTickets;
-    if (indexesAffected) {
-        std::unique_ptr<IndexCatalog::IndexIterator> ii =
-            _indexCatalog->getIndexIterator(opCtx, true);
-        while (ii->more()) {
-            IndexCatalogEntry* entry = ii->next();
-            IndexDescriptor* descriptor = entry->descriptor();
-            IndexAccessMethod* iam = entry->accessMethod();
-
-            InsertDeleteOptions options;
-            _indexCatalog->prepareInsertDeleteOptions(opCtx, descriptor, &options);
-
-            // Building indexes don't need tickets because we manually decompose into removals
-            // and insertions.
-            if (entry->isBuilding()) {
-                continue;
-            }
-            UpdateTicket* updateTicket = new UpdateTicket();
-            updateTickets.mutableMap()[descriptor] = updateTicket;
-            uassertStatusOK(iam->validateUpdate(opCtx,
-                                                oldDoc.value(),
-                                                newDoc,
-                                                oldLocation,
-                                                options,
-                                                updateTicket,
-                                                entry->getFilterExpression()));
-        }
-    }
-
     args->preImageDoc = oldDoc.value().getOwned();
 
     Status updateStatus =
         _recordStore->updateRecord(opCtx, oldLocation, newDoc.objdata(), newDoc.objsize());
 
-    // Update each index with each respective UpdateTicket.
     if (indexesAffected) {
-        std::unique_ptr<IndexCatalog::IndexIterator> ii =
-            _indexCatalog->getIndexIterator(opCtx, true);
-        while (ii->more()) {
-            IndexCatalogEntry* entry = ii->next();
-            IndexDescriptor* descriptor = entry->descriptor();
-            IndexAccessMethod* iam = entry->accessMethod();
+        int64_t keysInserted, keysDeleted;
 
-            int64_t keysInserted;
-            int64_t keysDeleted;
+        uassertStatusOK(_indexCatalog->updateRecord(
+            opCtx, args->preImageDoc.get(), newDoc, oldLocation, &keysInserted, &keysDeleted));
 
-            // Decompose into deletes and inserts when building.
-            if (entry->isBuilding()) {
-                // No tickets should be generated for building indexes.
-                invariant(!updateTickets.mutableMap()[descriptor]);
-
-                _indexCatalog->unindexRecord(
-                    opCtx, args->preImageDoc.get(), oldLocation, false /*nowarn*/, &keysDeleted);
-
-                BsonRecord record{oldLocation, Timestamp(), &args->preImageDoc.get()};
-                uassertStatusOK(_indexCatalog->indexRecords(opCtx, {record}, &keysInserted));
-            } else {
-                uassertStatusOK(iam->update(
-                    opCtx, *updateTickets.mutableMap()[descriptor], &keysInserted, &keysDeleted));
-            }
-            if (opDebug) {
-                opDebug->additiveMetrics.incrementKeysInserted(keysInserted);
-                opDebug->additiveMetrics.incrementKeysDeleted(keysDeleted);
-            }
+        if (opDebug) {
+            opDebug->additiveMetrics.incrementKeysInserted(keysInserted);
+            opDebug->additiveMetrics.incrementKeysDeleted(keysDeleted);
         }
     }
 

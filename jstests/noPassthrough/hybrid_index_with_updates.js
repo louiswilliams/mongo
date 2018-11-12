@@ -33,7 +33,7 @@
 
     // Do some updates, inserts and deletes while building.
     for (let i = 0; i < 50; i++) {
-        assert.commandWorked(testDB.hybrid.update({i: i}, {i: -1}));
+        assert.commandWorked(testDB.hybrid.update({i: i}, {i: -i}));
     }
     for (let i = 50; i < 100; i++) {
         assert.commandWorked(testDB.hybrid.remove({i: i}));

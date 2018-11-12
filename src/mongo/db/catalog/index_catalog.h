@@ -361,6 +361,13 @@ public:
                                 const std::vector<BsonRecord>& bsonRecords,
                                 int64_t* const keysInsertedOut) = 0;
 
+    virtual Status updateRecord(OperationContext* const opCtx,
+                                const BSONObj& oldDoc,
+                                const BSONObj& newDoc,
+                                const RecordId& recordId,
+                                int64_t* const keysInsertedOut,
+                                int64_t* const keysDeletedOut) = 0;
+
     /**
      * When 'keysDeletedOut' is not null, it will be set to the number of index keys removed by
      * this operation.
@@ -374,7 +381,8 @@ public:
     virtual std::string getAccessMethodName(const BSONObj& keyPattern) = 0;
 
     /**
-     * Creates an instance of IndexBuildBlockInterface for building an index with the provided index
+     * Creates an instance of IndexBuildBlockInterface for building an index with the provided
+     * index
      * spex and OperationContext.
      */
     virtual std::unique_ptr<IndexBuildBlockInterface> createIndexBuildBlock(

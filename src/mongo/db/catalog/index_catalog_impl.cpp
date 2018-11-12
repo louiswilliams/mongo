@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "mongo/base/init.h"
+#include "mongo/base/owned_pointer_map.h"
 #include "mongo/bson/simple_bsonelement_comparator.h"
 #include "mongo/bson/simple_bsonobj_comparator.h"
 #include "mongo/db/audit.h"
@@ -1268,6 +1269,53 @@ Status IndexCatalogImpl::indexRecords(OperationContext* opCtx,
             return s;
     }
 
+    return Status::OK();
+}
+
+Status IndexCatalogImpl::updateRecord(OperationContext* const opCtx,
+                                      const BSONObj& oldDoc,
+                                      const BSONObj& newDoc,
+                                      const RecordId& recordId,
+                                      int64_t* const keysInsertedOut,
+                                      int64_t* const keysDeletedOut) {
+
+    if (keysInsertedOut) {
+        *keysInsertedOut = 0;
+    }
+    if (keysDeletedOut) {
+        *keysDeletedOut = 0;
+    }
+
+    // Ready indexes inserted directly into the IndexAccessMethod.
+    for (IndexCatalogEntryContainer::const_iterator it = _readyIndexes.begin();
+         it != _readyIndexes.end();
+         ++it) {
+        IndexCatalogEntry* entry = it->get();
+
+        IndexDescriptor* descriptor = entry->descriptor();
+        IndexAccessMethod* iam = entry->accessMethod();
+
+        InsertDeleteOptions options;
+        prepareInsertDeleteOptions(opCtx, descriptor, &options);
+
+        UpdateTicket updateTicket;
+
+        uassertStatusOK(iam->validateUpdate(
+            opCtx, oldDoc, newDoc, recordId, options, &updateTicket, entry->getFilterExpression()));
+
+        uassertStatusOK(iam->update(opCtx, updateTicket, keysInsertedOut, keysDeletedOut));
+    }
+
+    // Building indexes go through the interceptor.
+    BsonRecord record{recordId, Timestamp(), &newDoc};
+    for (IndexCatalogEntryContainer::const_iterator it = _buildingIndexes.begin();
+         it != _buildingIndexes.end();
+         ++it) {
+        IndexCatalogEntry* entry = it->get();
+
+        invariant(_unindexRecord(opCtx, entry, oldDoc, recordId, keysDeletedOut));
+        uassertStatusOK(_indexRecords(opCtx, entry, {record}, keysInsertedOut));
+    }
     return Status::OK();
 }
 

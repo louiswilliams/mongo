@@ -281,6 +281,8 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
 
     _sideWritesCounter.fetchAndAdd(toInsert.size());
 
+    repl::UnreplicatedWritesBlock urwb(opCtx);
+
     OpDebug* const opDebug = nullptr;
     const bool fromMigrate = false;
     return coll.getCollection()->insertDocuments(

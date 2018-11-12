@@ -1,4 +1,9 @@
-
+/**
+ * Tests that write operations are accepted and result in correct indexing behavior for each phase
+ * of hybrid index builds.
+ *
+ * @tags: [requires_document_locking]
+ */
 (function() {
     "use strict";
 

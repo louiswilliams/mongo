@@ -66,6 +66,11 @@ public:
                      Op op,
                      int64_t* numKeysOut);
 
+    Status drainOps(OperationContext* opCtx,
+                    IndexAccessMethod* indexAccessMethod,
+                    const InsertDeleteOptions& options,
+                    int64_t startId);
+
 private:
     NamespaceString _sideWritesNs;
     boost::optional<MultikeyPaths> _multikeyPaths;

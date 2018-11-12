@@ -536,6 +536,20 @@ Status MultiIndexBlockImpl::_doneInserting(std::set<RecordId>* dupRecords,
         }
     }
 
+    // Drain side-writes collections.
+    for (size_t i = 0; i < _indexes.size(); i++) {
+        auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();
+        if (!interceptor)
+            continue;
+
+        auto status =
+            interceptor->drainOps(_opCtx, _indexes[i].block.accessMethod(), _indexes[i].options, 0);
+        if (!status.isOK()) {
+            return status;
+        }
+    }
+
+
     return Status::OK();
 }
 

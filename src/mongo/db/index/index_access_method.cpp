@@ -184,12 +184,24 @@ Status AbstractIndexAccessMethod::insert(OperationContext* opCtx,
                                          const RecordId& loc,
                                          const InsertDeleteOptions& options,
                                          InsertResult* result) {
-    bool checkIndexKeySize = shouldCheckIndexKeySize(opCtx);
     BSONObjSet multikeyMetadataKeys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     MultikeyPaths multikeyPaths;
+
     // Delegate to the subclass.
     getKeys(obj, options.getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths);
+
+    return insertKeys(opCtx, keys, multikeyMetadataKeys, multikeyPaths, loc, options, result);
+}
+
+Status AbstractIndexAccessMethod::insertKeys(OperationContext* opCtx,
+                                             const BSONObjSet& keys,
+                                             const BSONObjSet& multikeyMetadataKeys,
+                                             const MultikeyPaths& multikeyPaths,
+                                             const RecordId& loc,
+                                             const InsertDeleteOptions& options,
+                                             InsertResult* result) {
+    bool checkIndexKeySize = shouldCheckIndexKeySize(opCtx);
 
     // Add all new data keys, and all new multikey metadata keys, into the index. When iterating
     // over the data keys, each of them should point to the doc's RecordId. When iterating over
@@ -236,8 +248,6 @@ Status AbstractIndexAccessMethod::insert(OperationContext* opCtx,
     if (shouldMarkIndexAsMultikey(keys, multikeyMetadataKeys, multikeyPaths)) {
         _btreeState->setMultikey(opCtx, multikeyPaths);
     }
-
-    return Status::OK();
 }
 
 void AbstractIndexAccessMethod::removeOneKey(OperationContext* opCtx,

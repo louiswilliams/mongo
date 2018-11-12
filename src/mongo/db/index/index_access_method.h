@@ -93,6 +93,14 @@ public:
                           const InsertDeleteOptions& options,
                           InsertResult* result) = 0;
 
+    virtual Status insertKeys(OperationContext* opCtx,
+                              const BSONObjSet& keys,
+                              const BSONObjSet& multikeyMetadataKeys,
+                              const MultikeyPaths& multikeyPaths,
+                              const RecordId& loc,
+                              const InsertDeleteOptions& options,
+                              InsertResult* result) = 0;
+
     /**
      * Analogous to above, but remove the records instead of inserting them.
      * 'numDeleted' will be set to the number of keys removed from the index for the document.
@@ -438,6 +446,14 @@ public:
                   const RecordId& loc,
                   const InsertDeleteOptions& options,
                   InsertResult* result) final;
+
+    Status insertKeys(OperationContext* opCtx,
+                      const BSONObjSet& keys,
+                      const BSONObjSet& multikeyMetadataKeys,
+                      const MultikeyPaths& multikeyPaths,
+                      const RecordId& loc,
+                      const InsertDeleteOptions& options,
+                      InsertResult* result) final;
 
     Status remove(OperationContext* opCtx,
                   const BSONObj& obj,

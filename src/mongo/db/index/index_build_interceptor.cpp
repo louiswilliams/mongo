@@ -78,6 +78,44 @@ void IndexBuildInterceptor::removeSideWritesCollection(OperationContext* opCtx) 
     fassert(50994, local.getDb()->dropCollectionEvenIfSystem(opCtx, _sideWritesNs, repl::OpTime()));
 }
 
+Status IndexBuildInterceptor::drainOps(OperationContext* opCtx,
+                                       IndexAccessMethod* indexAccessMethod,
+                                       const InsertDeleteOptions& options,
+                                       int64_t startId) {
+    invariant(opCtx->lockState()->inAWriteUnitOfWork());
+
+    int64_t currentId = startId;
+
+    AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
+    invariant(autoColl.getCollection());
+
+    auto collection = autoColl.getCollection();
+    auto collScan = InternalPlanner::collectionScan(
+        opCtx, collection->ns().ns(), collection, PlanExecutor::YieldPolicy::YIELD_AUTO);
+
+    BSONObj operation;
+    PlanExecutor::ExecState state;
+    while (PlanExecutor::ExecState::ADVANCED == (state = collScan->getNext(&operation, nullptr))) {
+        currentId = operation["_id"].Long();
+        if (currentId < startId) {
+            continue;
+        }
+
+        BSONObj key = operation["key"].Obj();
+        RecordId loc = RecordId(operation["loc"].Long());
+        Op op = std::string(operation.getStringField("op")).compare("i") == 0 ? Op::kInsert
+                                                                              : Op::kDelete;
+
+        InsertResult result;
+        indexAccessMethod->insertKeys(opCtx, {key}, {}, {}, loc, options, &result);
+    }
+
+    if (PlanExecutor::IS_EOF != state) {
+        return WorkingSetCommon::getMemberObjectStatus(operation);
+    }
+    return Status::OK();
+}
+
 Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
                                         IndexAccessMethod* indexAccessMethod,
                                         const BSONObj* obj,

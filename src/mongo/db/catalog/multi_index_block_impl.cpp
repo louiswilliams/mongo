@@ -574,15 +574,25 @@ Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInsert
         if (!interceptor)
             continue;
 
-        LOG(1) << "\tdraining writes for index: "
-               << _indexes[i].block->getEntry()->descriptor()->indexName();
-        WriteUnitOfWork wunit(_opCtx);
-        auto status = interceptor->drainWritesIntoIndex(
-            _opCtx, _indexes[i].real, _indexes[i].options, scanYield);
+        std::string message = str::stream()
+            << "side write drain for index "
+            << _indexes[i].block->getEntry()->descriptor()->indexName();
+
+        // TODO: Are WCEs expected or allowed?
+        auto status = writeConflictRetry(_opCtx, message, _collection->ns().ns(), [&] {
+            WriteUnitOfWork wunit(_opCtx);
+            auto status = interceptor->drainWritesIntoIndex(
+                _opCtx, _indexes[i].real, _indexes[i].options, scanYield);
+            if (!status.isOK()) {
+                return status;
+            }
+            wunit.commit();
+            return Status::OK();
+        });
+
         if (!status.isOK()) {
             return status;
         }
-        wunit.commit();
     }
     return Status::OK();
 }

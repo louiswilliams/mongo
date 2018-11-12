@@ -88,13 +88,6 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     // TODO: Read at the right timestamp.
 
-    // Setup the progress meter.
-    static const char* curopMessage = "Index build draining writes";
-    stdx::unique_lock<Client> lk(*opCtx->getClient());
-    ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
-        curopMessage, curopMessage, _sideWritesCounter.load() - _numApplied, 0));
-    lk.unlock();
-
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
 
@@ -123,6 +116,14 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     int64_t totalDeleted = 0;
     int64_t totalInserted = 0;
 
+    // Setup the progress meter.
+    static const char* curopMessage = "Index build draining writes";
+    stdx::unique_lock<Client> lk(*opCtx->getClient());
+    ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
+        curopMessage, curopMessage, _sideWritesCounter.load() - appliedAtStart, 0));
+    lk.unlock();
+
+
     BSONObj operation;
     RecordId currentRecord;
     PlanExecutor::ExecState state;
@@ -132,7 +133,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         if (currentRecord == _lastAppliedRecord)
             continue;
 
-        // progress->setTotalWhileRunning(_sideWritesCounter.load());
+        progress->setTotalWhileRunning(_sideWritesCounter.load() - appliedAtStart);
 
         const BSONObj key = operation["key"].Obj();
         const RecordId opRecordId = RecordId(operation["recordId"].Long());
@@ -147,7 +148,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 indexAccessMethod->insertKeys(opCtx,
                                               keySet,
                                               SimpleBSONObjComparator::kInstance.makeBSONObjSet(),
-                                              {},
+                                              _multikeyPaths.get_value_or({}),
                                               opRecordId,
                                               options,
                                               &result);
@@ -278,7 +279,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
         }
     }
 
-    _sideWritesCounter.fetchAndAdd(keys.size());
+    _sideWritesCounter.fetchAndAdd(toInsert.size());
 
     OpDebug* const opDebug = nullptr;
     const bool fromMigrate = false;

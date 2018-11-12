@@ -698,6 +698,8 @@ RecordId CollectionImpl::updateDocument(OperationContext* opCtx,
 
             int64_t keysInserted;
             int64_t keysDeleted;
+
+            // TODO: This needs to pass through the interceptor.
             uassertStatusOK(iam->update(
                 opCtx, *updateTickets.mutableMap()[descriptor], &keysInserted, &keysDeleted));
             if (opDebug) {

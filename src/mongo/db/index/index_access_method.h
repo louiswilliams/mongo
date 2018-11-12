@@ -417,6 +417,8 @@ struct InsertDeleteOptions {
     // Are duplicate keys allowed in the index?
     bool dupsAllowed = false;
 
+    bool isIndexer = false;
+
     // Should we relax the index constraints?
     IndexAccessMethod::GetKeysMode getKeysMode =
         IndexAccessMethod::GetKeysMode::kEnforceConstraints;

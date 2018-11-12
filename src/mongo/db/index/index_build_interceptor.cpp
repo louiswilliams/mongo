@@ -281,6 +281,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
 
     _sideWritesCounter.fetchAndAdd(toInsert.size());
 
+    // This is necessary for operations in transactions to not generate operations for each insert.
     repl::UnreplicatedWritesBlock urwb(opCtx);
 
     OpDebug* const opDebug = nullptr;

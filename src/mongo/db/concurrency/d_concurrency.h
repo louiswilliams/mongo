@@ -319,7 +319,7 @@ public:
             return _result == LOCK_OK;
         }
 
-        bool mode() const {
+        LockMode mode() const {
             return _mode;
         }
 

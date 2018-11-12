@@ -120,7 +120,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     static const char* curopMessage = "Index build draining writes";
     stdx::unique_lock<Client> lk(*opCtx->getClient());
     ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
-        curopMessage, curopMessage, _sideWritesCounter.load() - appliedAtStart, 0));
+        curopMessage, curopMessage, _sideWritesCounter.load() - appliedAtStart, 1));
     lk.unlock();
 
 

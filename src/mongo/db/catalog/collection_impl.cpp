@@ -710,20 +710,11 @@ RecordId CollectionImpl::updateDocument(OperationContext* opCtx,
                 // No tickets should be generated for building indexes.
                 invariant(!updateTickets.mutableMap()[descriptor]);
 
-                uassertStatusOK(
-                    entry->indexBuildInterceptor()->sideWrite(opCtx,
-                                                              iam,
-                                                              &args->preImageDoc.get(),
-                                                              oldLocation,
-                                                              IndexBuildInterceptor::Op::kDelete,
-                                                              &keysDeleted));
-                uassertStatusOK(
-                    entry->indexBuildInterceptor()->sideWrite(opCtx,
-                                                              iam,
-                                                              &newDoc,
-                                                              oldLocation,
-                                                              IndexBuildInterceptor::Op::kInsert,
-                                                              &keysInserted));
+                _indexCatalog->unindexRecord(
+                    opCtx, args->preImageDoc.get(), oldLocation, false /*nowarn*/, &keysDeleted);
+
+                BsonRecord record{oldLocation, Timestamp(), &args->preImageDoc.get()};
+                uassertStatusOK(_indexCatalog->indexRecords(opCtx, {record}, &keysInserted));
             } else {
                 uassertStatusOK(iam->update(
                     opCtx, *updateTickets.mutableMap()[descriptor], &keysInserted, &keysDeleted));

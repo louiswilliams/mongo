@@ -191,7 +191,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     return Status::OK();
 }
 
-bool IndexBuildInterceptor::isEof(OperationContext* opCtx) {
+bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
 
@@ -199,7 +199,7 @@ bool IndexBuildInterceptor::isEof(OperationContext* opCtx) {
     auto collScan = InternalPlanner::collectionScan(opCtx,
                                                     collection->ns().ns(),
                                                     collection,
-                                                    PlanExecutor::YieldPolicy::YIELD_AUTO,
+                                                    PlanExecutor::YieldPolicy::INTERRUPT_ONLY,
                                                     InternalPlanner::FORWARD,
                                                     _lastAppliedRecord);
 

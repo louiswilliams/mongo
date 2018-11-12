@@ -537,6 +537,9 @@ Status MultiIndexBlockImpl::_dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
             return status;
         }
     }
+
+    // Always perform a drain once, if necessary, and then leave the caller responsible for any
+    // subsequent drains.
     Status status = _drainSideWrites(dupKeysInserted);
 
     if (MONGO_FAIL_POINT(hangAfterDumpInsertsFromBulk)) {
@@ -563,8 +566,9 @@ Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInsert
         : IndexBuildInterceptor::ScanYield::kYieldAuto;
 
     // Drain side-writes collections. This only drains what is visible. Assuming weak locks are held
-    // on the collection, more writes can come in after this drain completes. A caller is
-    // responsible for holding a stong lock while draining later on.
+    // on the collection, more writes can come in after this drain completes. Callers are
+    // responsible for stopping writes by holding a stong lock while draining before completing the
+    // index build.
     for (size_t i = 0; i < _indexes.size(); i++) {
         auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();
         if (!interceptor)

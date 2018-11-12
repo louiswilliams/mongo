@@ -396,7 +396,6 @@ public:
         }
 
         auto relockOnErrorGuard = MakeGuard([&] {
-            // invariant(e.code() != ErrorCodes::WriteConflict);
             // Must have exclusive DB lock before we clean up the index build via the
             // destructor of 'indexer'.
             if (indexer.getBuildInBackground()) {
@@ -444,6 +443,8 @@ public:
             uassert(28552, "collection dropped during index build", db->getCollection(opCtx, ns));
         }
 
+        // Drain again after releasing a shared lock and reacquiring an exclusive lock on the
+        // database.
         uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
 
         writeConflictRetry(opCtx, kCommandName, ns.ns(), [&] {

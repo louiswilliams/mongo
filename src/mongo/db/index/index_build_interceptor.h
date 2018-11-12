@@ -69,16 +69,28 @@ public:
                      Op op,
                      int64_t* numKeysOut);
 
+    /**
+     * Performs a resumable collection scan on the side writes collection, and either inserts or
+     * removes each key from the underlying IndexAccessMethod. This will only insert as many records
+     * as are visible in the current snapshot.
+     *
+     * This is resumable, so subsequent calls will start the collection scan at the record
+     * immediately following the last inserted record from a previous call to drainWritesIntoIndex.
+     *
+     * If 'scanYield' is kYieldAuto, the collection scan will yield locks, and will not if it is set
+     * to kInterruptOnly.
+     *
+     */
     Status drainWritesIntoIndex(OperationContext* opCtx,
                                 IndexAccessMethod* indexAccessMethod,
                                 const InsertDeleteOptions& options,
                                 ScanYield scanYield);
 
-    bool isEof(OperationContext* opCtx);
-
-    int64_t writesDrained() const {
-        return _numApplied;
-    }
+    /**
+     * Returns 'true' if there are no visible records remaining to be applied from the side writes
+     * collection. Ensure that this returns 'true' when an index build is completed.
+     */
+    bool areAllWritesApplied(OperationContext* opCtx) const;
 
 private:
     RecordId _lastAppliedRecord;

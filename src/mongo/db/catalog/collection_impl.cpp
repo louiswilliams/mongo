@@ -670,6 +670,12 @@ RecordId CollectionImpl::updateDocument(OperationContext* opCtx,
 
             InsertDeleteOptions options;
             _indexCatalog->prepareInsertDeleteOptions(opCtx, descriptor, &options);
+
+            // Building indexes don't need tickets because we manually decompose into removals
+            // and insertions.
+            if (entry->isBuilding()) {
+                continue;
+            }
             UpdateTicket* updateTicket = new UpdateTicket();
             updateTickets.mutableMap()[descriptor] = updateTicket;
             uassertStatusOK(iam->validateUpdate(opCtx,
@@ -699,9 +705,29 @@ RecordId CollectionImpl::updateDocument(OperationContext* opCtx,
             int64_t keysInserted;
             int64_t keysDeleted;
 
-            // TODO: This needs to pass through the interceptor.
-            uassertStatusOK(iam->update(
-                opCtx, *updateTickets.mutableMap()[descriptor], &keysInserted, &keysDeleted));
+            // Decompose into deletes and inserts when building.
+            if (entry->isBuilding()) {
+                // No tickets should be generated for building indexes.
+                invariant(!updateTickets.mutableMap()[descriptor]);
+
+                uassertStatusOK(
+                    entry->indexBuildInterceptor()->sideWrite(opCtx,
+                                                              iam,
+                                                              &args->preImageDoc.get(),
+                                                              oldLocation,
+                                                              IndexBuildInterceptor::Op::kDelete,
+                                                              &keysDeleted));
+                uassertStatusOK(
+                    entry->indexBuildInterceptor()->sideWrite(opCtx,
+                                                              iam,
+                                                              &newDoc,
+                                                              oldLocation,
+                                                              IndexBuildInterceptor::Op::kInsert,
+                                                              &keysInserted));
+            } else {
+                uassertStatusOK(iam->update(
+                    opCtx, *updateTickets.mutableMap()[descriptor], &keysInserted, &keysDeleted));
+            }
             if (opDebug) {
                 opDebug->additiveMetrics.incrementKeysInserted(keysInserted);
                 opDebug->additiveMetrics.incrementKeysDeleted(keysDeleted);

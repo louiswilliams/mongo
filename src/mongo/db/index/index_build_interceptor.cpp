@@ -87,6 +87,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
 
     // TODO: Read at the right timestamp.
+    // TODO: Handle rollback in case of WCEs.
+    // TODO: Deal with duplicates
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
@@ -156,7 +158,6 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 return s;
             }
 
-            // TODO: Deal with dups
             invariant(!result.dupsInserted.size());
             totalInserted += result.numInserted;
         } else {

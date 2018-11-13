@@ -93,6 +93,8 @@ public:
     bool areAllWritesApplied(OperationContext* opCtx) const;
 
 private:
+    RecordId _peekAtLastRecord(OperationContext* opCtx) const;
+
     RecordId _lastAppliedRecord;
     int64_t _numApplied{0};
 

@@ -1313,7 +1313,8 @@ Status IndexCatalogImpl::updateRecord(OperationContext* const opCtx,
          ++it) {
         IndexCatalogEntry* entry = it->get();
 
-        invariant(_unindexRecord(opCtx, entry, oldDoc, recordId, keysDeletedOut));
+        bool logIfError = false;
+        invariant(_unindexRecord(opCtx, entry, oldDoc, recordId, logIfError, keysDeletedOut));
         uassertStatusOK(_indexRecords(opCtx, entry, {record}, keysInsertedOut));
     }
     return Status::OK();

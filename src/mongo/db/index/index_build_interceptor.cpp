@@ -37,18 +37,20 @@
 #include "mongo/db/catalog_raii.h"
 #include "mongo/db/curop.h"
 #include "mongo/db/db_raii.h"
+#include "mongo/db/exec/working_set_common.h"
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/multi_key_path_tracker.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/db/query/internal_plans.h"
 #include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/util/log.h"
+#include "mongo/util/scopeguard.h"
 #include "mongo/util/uuid.h"
 
 namespace mongo {
 
 namespace {
-const bool makeCollections = false;
+const bool makeCollections = true;
 }
 
 NamespaceString IndexBuildInterceptor::makeTempSideWritesNs() {
@@ -86,9 +88,21 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                                                    ScanYield scanYield) {
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
 
-    // TODO: Read at the right timestamp.
-    // TODO: Handle rollback in case of WCEs.
     // TODO: Deal with duplicates
+
+    // Only drain writes up to the last visible record
+    RecordId applyToRecord = _peekAtLastRecord(opCtx);
+
+    // Collection is empty.
+    if (applyToRecord.isNull())
+        return Status::OK();
+
+    // There are no records to apply.
+    if (_lastAppliedRecord == applyToRecord)
+        return Status::OK();
+
+    LOG(0) << "draining writes from record " << _lastAppliedRecord.repr() << " to "
+           << applyToRecord.repr();
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
@@ -98,9 +112,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         ? PlanExecutor::YieldPolicy::INTERRUPT_ONLY
         : PlanExecutor::YieldPolicy::YIELD_AUTO;
 
-    auto collection = autoColl.getCollection();
-
     // This collection scan is resumable at the _lastAppliedRecord.
+    auto collection = autoColl.getCollection();
     auto collScan = InternalPlanner::collectionScan(opCtx,
                                                     collection->ns().ns(),
                                                     collection,
@@ -108,15 +121,18 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                                                     InternalPlanner::FORWARD,
                                                     _lastAppliedRecord);
 
-    if (!_lastAppliedRecord.isNull()) {
-        LOG(0) << "Resuming drain from Record: " << _lastAppliedRecord.repr();
-    }
-
-
     // These are used for logging only.
-    int64_t appliedAtStart = _numApplied;
     int64_t totalDeleted = 0;
     int64_t totalInserted = 0;
+
+    // In the case of an unnexpected WriteConflict or other exception that causes inserts to roll
+    // back, reset the counters back to what they were at the start.
+    const int64_t appliedAtStart = _numApplied;
+    const RecordId lastAppliedAtStart = _lastAppliedRecord;
+    opCtx->recoveryUnit()->onRollback([&] {
+        _numApplied = appliedAtStart;
+        _lastAppliedRecord = lastAppliedAtStart;
+    });
 
     // Setup the progress meter.
     static const char* curopMessage = "Index build draining writes";
@@ -132,10 +148,10 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     while (PlanExecutor::ExecState::ADVANCED ==
            (state = collScan->getNext(&operation, &currentRecord))) {
+
+        // Seeking may result in seeing the same document when resuming a scan.
         if (currentRecord == _lastAppliedRecord)
             continue;
-
-        progress->setTotalWhileRunning(_sideWritesCounter.load() - appliedAtStart);
 
         const BSONObj key = operation["key"].Obj();
         const RecordId opRecordId = RecordId(operation["recordId"].Long());
@@ -144,7 +160,6 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         const BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
 
         if (opType == Op::kInsert) {
-            // TODO: Report duplicates.
             InsertResult result;
             Status s =
                 indexAccessMethod->insertKeys(opCtx,
@@ -178,13 +193,21 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         // Since drain is resumable, keep track of which records we have applied.
         _lastAppliedRecord = currentRecord;
         _numApplied++;
+
+        // Stop after inserting the last record we know has no "holes" before it.
+        if (currentRecord == applyToRecord)
+            break;
     }
 
     progress->finished();
 
-    LOG(0) << "Applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
-           << ", d: " << totalDeleted << ", total: " << _numApplied
-           << ", last record: " << _lastAppliedRecord.repr();
+    LOG(0) << "applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
+           << ", d: " << totalDeleted << ", total: " << _numApplied;
+
+    if (PlanExecutor::ADVANCED == state) {
+        invariant(currentRecord == applyToRecord);
+        return Status::OK();
+    }
 
     if (PlanExecutor::IS_EOF != state) {
         return WorkingSetCommon::getMemberObjectStatus(operation);
@@ -193,31 +216,27 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 }
 
 bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
-    AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
+
+    RecordId lastRecord = _peekAtLastRecord(opCtx);
+    return lastRecord == _lastAppliedRecord;
+}
+
+RecordId IndexBuildInterceptor::_peekAtLastRecord(OperationContext* opCtx) const {
+
+    // Stop writes on the side writes collection to look at the last record. By stopping writes on
+    // the side collection, this will prevent seeing "holes" of writes with lower RecordIds that are
+    // not visible in this snapshot.
+    AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_S);
     invariant(autoColl.getCollection());
 
-    auto collection = autoColl.getCollection();
-    auto collScan = InternalPlanner::collectionScan(opCtx,
-                                                    collection->ns().ns(),
-                                                    collection,
-                                                    PlanExecutor::YieldPolicy::INTERRUPT_ONLY,
-                                                    InternalPlanner::FORWARD,
-                                                    _lastAppliedRecord);
+    auto cursor = autoColl.getCollection()->getCursor(opCtx, false /* forward */);
+    auto record = cursor->next();
 
-    BSONObj next;
-    RecordId nextRecord;
-    PlanExecutor::ExecState state = collScan->getNext(&next, &nextRecord);
+    // The collection is empty.
+    if (!record)
+        return RecordId();
 
-    // The first read can be EOF if the collection is empty.
-    if (state == PlanExecutor::ExecState::IS_EOF) {
-        invariant(_lastAppliedRecord.isNull());
-        return true;
-    }
-
-    invariant(state == PlanExecutor::ExecState::ADVANCED);
-    invariant(nextRecord == _lastAppliedRecord);
-
-    return collScan->getNext(nullptr, nullptr) == PlanExecutor::ExecState::IS_EOF;
+    return record->id;
 }
 
 Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,

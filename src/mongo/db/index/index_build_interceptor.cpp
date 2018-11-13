@@ -226,7 +226,8 @@ RecordId IndexBuildInterceptor::_peekAtLastRecord(OperationContext* opCtx) const
     // Stop writes on the side writes collection to look at the last record. By stopping writes on
     // the side collection, this will prevent seeing "holes" of writes with lower RecordIds that are
     // not visible in this snapshot.
-    AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_S);
+    AutoGetCollection autoColl(
+        opCtx, _sideWritesNs, LockMode::MODE_IS /* modeDB */, LockMode::MODE_S /* modeColl */);
     invariant(autoColl.getCollection());
 
     auto cursor = autoColl.getCollection()->getCursor(opCtx, false /* forward */);

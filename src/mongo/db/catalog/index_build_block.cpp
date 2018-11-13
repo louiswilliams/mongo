@@ -90,7 +90,8 @@ Status IndexCatalogImpl::IndexBuildBlock::init() {
     _entry = _catalog->_setupInMemoryStructures(
         _opCtx, std::move(descriptor), initFromDisk, isReadyIndex);
 
-    if (isBackgroundIndex) {
+    const bool useHybrid = isBackgroundIndex && !descriptorPtr->unique();
+    if (useHybrid) {
         _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>();
         _indexBuildInterceptor->ensureSideWritesCollectionExists(_opCtx);
         _entry->setIndexBuildInterceptor(_indexBuildInterceptor.get());

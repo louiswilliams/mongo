@@ -74,7 +74,6 @@ MONGO_FAIL_POINT_DEFINE(hangAfterStartingIndexBuildUnlocked);
 MONGO_FAIL_POINT_DEFINE(slowBackgroundIndexBuild);
 MONGO_FAIL_POINT_DEFINE(hangBeforeIndexBuildOf);
 MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildOf);
-MONGO_FAIL_POINT_DEFINE(hangAfterDumpInsertsFromBulk);
 
 AtomicInt32 maxIndexBuildMemoryUsageMegabytes(500);
 
@@ -272,7 +271,7 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlockImpl::init(const std::vector<BSO
         _collection->getIndexCatalog()->prepareInsertDeleteOptions(
             _opCtx, descriptor, &index.options);
         index.options.dupsAllowed = index.options.dupsAllowed || _ignoreUnique;
-        index.options.isIndexer = true;
+        index.options.fromIndexBuilder = true;
         if (_ignoreUnique) {
             index.options.getKeysMode = IndexAccessMethod::GetKeysMode::kRelaxConstraints;
         }
@@ -537,26 +536,13 @@ Status MultiIndexBlockImpl::_dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
             return status;
         }
     }
-
-    // Always perform a drain once, if necessary, and then leave the caller responsible for any
-    // subsequent drains.
-    Status status = _drainSideWrites(dupKeysInserted);
-
-    if (MONGO_FAIL_POINT(hangAfterDumpInsertsFromBulk)) {
-        LOG(0) << "Hanging after dumping inserts from bulk builder";
-        MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterDumpInsertsFromBulk);
-    }
-
-    return status;
+    return Status::OK();
 }
 
 Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
-    LOG(1) << "draining background writes into index";
-    return _drainSideWrites(nullptr);
-}
-
-Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInserted) {
     invariant(!_opCtx->lockState()->inAWriteUnitOfWork());
+
+    LOG(1) << "draining background writes into index";
 
     // When holding MODE_S or MODE_X (which covers MODE_S), do not yield when scanning the side
     // writes collection. Callers request these lock modes to ensure they have seen all writes, at
@@ -567,7 +553,7 @@ Status MultiIndexBlockImpl::_drainSideWrites(std::vector<BSONObj>* dupKeysInsert
 
     // Drain side-writes collections. This only drains what is visible. Assuming weak locks are held
     // on the collection, more writes can come in after this drain completes. Callers are
-    // responsible for stopping writes by holding a stong lock while draining before completing the
+    // responsible for stopping writes by holding a strong lock while draining before completing the
     // index build.
     for (size_t i = 0; i < _indexes.size(); i++) {
         auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();

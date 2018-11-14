@@ -184,7 +184,7 @@ Status AbstractIndexAccessMethod::insert(OperationContext* opCtx,
                                          const RecordId& loc,
                                          const InsertDeleteOptions& options,
                                          InsertResult* result) {
-    invariant(options.isIndexer || !_btreeState->isBuilding());
+    invariant(options.fromIndexBuilder || !_btreeState->isBuilding());
 
     BSONObjSet multikeyMetadataKeys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();

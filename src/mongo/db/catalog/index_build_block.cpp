@@ -90,6 +90,8 @@ Status IndexCatalogImpl::IndexBuildBlock::init() {
     _entry = _catalog->_setupInMemoryStructures(
         _opCtx, std::move(descriptor), initFromDisk, isReadyIndex);
 
+    // Hybrid indexes are only enabled for background, non-unique indexes.
+    // TODO: Remove when SERVER-38036 and SERVER-37270 are complete.
     const bool useHybrid = isBackgroundIndex && !descriptorPtr->unique();
     if (useHybrid) {
         _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>();

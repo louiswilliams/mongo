@@ -87,6 +87,9 @@ public:
     Status dumpInsertsFromBulk(std::set<RecordId>* dupRecords) override;
     Status dumpInsertsFromBulk(std::vector<BSONObj>* dupKeysInserted) override;
 
+    /**
+     * See MultiIndexBlock::drainBackgroundWritesIfNeeded()
+     */
     Status drainBackgroundWritesIfNeeded() override;
 
     void commit() override;
@@ -114,7 +117,6 @@ private:
 
     Status _dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
                                 std::vector<BSONObj>* dupKeysInserted);
-    Status _drainSideWrites(std::vector<BSONObj>* dupKeysInserted);
 
     std::vector<IndexToBuild> _indexes;
 

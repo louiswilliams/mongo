@@ -362,8 +362,8 @@ public:
                                 int64_t* const keysInsertedOut) = 0;
 
     /**
-     * When 'keysInsertedOut' or 'keysDeletedOut' is not null, they will be set to the number of
-     * index keys inserted and deleted by this operation, respectively.
+     * Both 'keysInsertedOut' and 'keysDeletedOut' are required and will be set to the number of
+     * ndex keys inserted and deleted by this operation, respectively.
      *
      * This method may throw.
      */

@@ -42,25 +42,19 @@
 #include "mongo/db/multi_key_path_tracker.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/db/query/internal_plans.h"
+#include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/util/log.h"
-#include "mongo/util/scopeguard.h"
+#include "mongo/util/progress_meter.h"
 #include "mongo/util/uuid.h"
 
 namespace mongo {
-
-namespace {
-const bool makeCollections = true;
-}
 
 NamespaceString IndexBuildInterceptor::makeTempSideWritesNs() {
     return NamespaceString("local.system.sideWrites-" + UUID::gen().toString());
 }
 
 void IndexBuildInterceptor::ensureSideWritesCollectionExists(OperationContext* opCtx) {
-    if (!makeCollections) {
-        return;
-    }
 
     // TODO SERVER-38027 Consider pushing this higher into the createIndexes command logic.
     OperationShardingState::get(opCtx).setAllowImplicitCollectionCreation(BSONElement());
@@ -74,10 +68,6 @@ void IndexBuildInterceptor::ensureSideWritesCollectionExists(OperationContext* o
 }
 
 void IndexBuildInterceptor::removeSideWritesCollection(OperationContext* opCtx) {
-    if (!makeCollections) {
-        return;
-    }
-
     AutoGetDb local(opCtx, "local", LockMode::MODE_X);
     fassert(50994, local.getDb()->dropCollectionEvenIfSystem(opCtx, _sideWritesNs, repl::OpTime()));
 }
@@ -108,7 +98,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     invariant(autoColl.getCollection());
 
     // Callers that are holding strong locks may not want to yield.
-    auto yieldPolicy = (scanYield = ScanYield::kInterruptOnly)
+    auto yieldPolicy = (scanYield == ScanYield::kInterruptOnly)
         ? PlanExecutor::YieldPolicy::INTERRUPT_ONLY
         : PlanExecutor::YieldPolicy::YIELD_AUTO;
 
@@ -143,7 +133,6 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         curopMessage, curopMessage, _sideWritesCounter.load() - appliedAtStart, 1));
     lk.unlock();
 
-
     BSONObj operation;
     RecordId currentRecord;
     PlanExecutor::ExecState state;
@@ -158,7 +147,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         const BSONObj key = operation["key"].Obj();
         const RecordId opRecordId = RecordId(operation["recordId"].Long());
         const Op opType =
-            (operation.getStringField("op") == std::string("i")) ? Op::kInsert : Op::kDelete;
+            (strcmp(operation.getStringField("op"), "i") == 0) ? Op::kInsert : Op::kDelete;
         const BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
 
         if (opType == Op::kInsert) {
@@ -180,6 +169,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
             totalInserted += result.numInserted;
         } else {
             invariant(opType == Op::kDelete);
+            DEV invariant(strcmp(operation.getStringField("op"), "d") == 0);
 
             int64_t numDeleted;
             Status s =
@@ -204,8 +194,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     progress->finished();
 
-    LOG(0) << "applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
-           << ", d: " << totalDeleted << ", total: " << _numApplied;
+    log() << "applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
+          << ", d: " << totalDeleted << ", total: " << _numApplied;
 
     if (PlanExecutor::ADVANCED == state) {
         invariant(currentRecord == applyToRecord);
@@ -225,6 +215,20 @@ bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
 }
 
 RecordId IndexBuildInterceptor::_peekAtLastRecord(OperationContext* opCtx) const {
+
+    // In a replica set configuration, read at the "no holes" oplog visibility timestamp instead of
+    // stopping writes.
+    const bool useOplogVisibility = false;
+    if (useOplogVisibility &&
+        repl::ReplicationCoordinator::get(opCtx)->getReplicationMode() ==
+            repl::ReplicationCoordinator::modeReplSet) {
+
+        opCtx->recoveryUnit()->abandonSnapshot();
+        opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kProvided,
+                                                      Timestamp());
+    }
+
+    // In this case we are on a standalone or not using timestamps.
 
     // Stop writes on the side writes collection to look at the last record. By stopping writes on
     // the side collection, this will prevent seeing "holes" of writes with lower RecordIds that are
@@ -317,7 +321,8 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
 
     _sideWritesCounter.fetchAndAdd(toInsert.size());
 
-    // This is necessary for operations in transactions to not generate operations for each insert.
+    // This is necessary for operations in multi-document transactions to not generate oplog writes
+    // for each insert.
     repl::UnreplicatedWritesBlock urwb(opCtx);
 
     OpDebug* const opDebug = nullptr;

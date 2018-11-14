@@ -304,6 +304,9 @@ public:
                         const std::vector<BsonRecord>& bsonRecords,
                         int64_t* keysInsertedOut) override;
 
+    /**
+     * See IndexCatalog::updateRecord
+     */
     Status updateRecord(OperationContext* const opCtx,
                         const BSONObj& oldDoc,
                         const BSONObj& newDoc,

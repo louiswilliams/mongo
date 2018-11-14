@@ -73,6 +73,7 @@ using std::string;
 using IndexVersion = IndexDescriptor::IndexVersion;
 
 MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildReleasesSharedLock);
+MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildDumpsInsertsFromBulk);
 
 namespace {
 
@@ -410,20 +411,29 @@ public:
             }
         });
 
-        // Collection scan and insert into index.
+        // Collection scan and insert into index, followed by a drain of writes received in the
+        // background.
         {
             Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_IX);
             uassertStatusOK(indexer.insertAllDocumentsInCollection());
+
+            // Perform the first drain while holding an intent lock.
+            uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
+
+            if (MONGO_FAIL_POINT(hangAfterIndexBuildDumpsInsertsFromBulk)) {
+                log() << "Hanging after dumping inserts from bulk builder";
+                MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildDumpsInsertsFromBulk);
+            }
         }
 
-        // Stop inserts into the collection while draining writes.
+        // Perform the second drain while stopping writes on the collection.
         {
             Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_S);
             uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
         }
 
         if (MONGO_FAIL_POINT(hangAfterIndexBuildReleasesSharedLock)) {
-            LOG(0) << "Hanging after releasing shared lock";
+            log() << "Hanging after releasing shared lock";
             MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildReleasesSharedLock);
         }
 
@@ -443,8 +453,8 @@ public:
             uassert(28552, "collection dropped during index build", db->getCollection(opCtx, ns));
         }
 
-        // Drain again after releasing a shared lock and reacquiring an exclusive lock on the
-        // database.
+        // Perform the third and final drain after releasing a shared lock and reacquiring an
+        // exclusive lock on the database.
         uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
 
         writeConflictRetry(opCtx, kCommandName, ns.ns(), [&] {

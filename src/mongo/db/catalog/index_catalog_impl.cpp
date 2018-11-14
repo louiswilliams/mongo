@@ -1278,13 +1278,11 @@ Status IndexCatalogImpl::updateRecord(OperationContext* const opCtx,
                                       const RecordId& recordId,
                                       int64_t* const keysInsertedOut,
                                       int64_t* const keysDeletedOut) {
+    invariant(keysInsertedOut);
+    invariant(keysDeletedOut);
 
-    if (keysInsertedOut) {
-        *keysInsertedOut = 0;
-    }
-    if (keysDeletedOut) {
-        *keysDeletedOut = 0;
-    }
+    *keysInsertedOut = 0;
+    *keysDeletedOut = 0;
 
     // Ready indexes inserted directly into the IndexAccessMethod.
     for (IndexCatalogEntryContainer::const_iterator it = _readyIndexes.begin();
@@ -1300,10 +1298,14 @@ Status IndexCatalogImpl::updateRecord(OperationContext* const opCtx,
 
         UpdateTicket updateTicket;
 
-        uassertStatusOK(iam->validateUpdate(
-            opCtx, oldDoc, newDoc, recordId, options, &updateTicket, entry->getFilterExpression()));
+        auto status = iam->validateUpdate(
+            opCtx, oldDoc, newDoc, recordId, options, &updateTicket, entry->getFilterExpression());
+        if (!status.isOK())
+            return status;
 
-        uassertStatusOK(iam->update(opCtx, updateTicket, keysInsertedOut, keysDeletedOut));
+        status = iam->update(opCtx, updateTicket, keysInsertedOut, keysDeletedOut);
+        if (!status.isOK())
+            return status;
     }
 
     // Building indexes go through the interceptor.
@@ -1315,7 +1317,10 @@ Status IndexCatalogImpl::updateRecord(OperationContext* const opCtx,
 
         bool logIfError = false;
         invariant(_unindexRecord(opCtx, entry, oldDoc, recordId, logIfError, keysDeletedOut));
-        uassertStatusOK(_indexRecords(opCtx, entry, {record}, keysInsertedOut));
+
+        auto status = _indexRecords(opCtx, entry, {record}, keysInsertedOut);
+        if (!status.isOK())
+            return status;
     }
     return Status::OK();
 }

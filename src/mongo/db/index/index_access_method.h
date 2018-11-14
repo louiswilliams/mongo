@@ -417,7 +417,9 @@ struct InsertDeleteOptions {
     // Are duplicate keys allowed in the index?
     bool dupsAllowed = false;
 
-    bool isIndexer = false;
+    // Only an index builder is allowed to insert into the index while it is building, so only the
+    // index builder should set this to 'true'.
+    bool fromIndexBuilder = false;
 
     // Should we relax the index constraints?
     IndexAccessMethod::GetKeysMode getKeysMode =

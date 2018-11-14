@@ -34,7 +34,6 @@
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/record_id.h"
 #include "mongo/platform/atomic_word.h"
-#include "mongo/util/progress_meter.h"
 
 namespace mongo {
 
@@ -45,7 +44,7 @@ class OperationContext;
 class IndexBuildInterceptor {
 public:
     enum class Op { kInsert, kDelete };
-    enum ScanYield { kYieldAuto, kInterruptOnly };
+    enum class ScanYield { kYieldAuto, kInterruptOnly };
 
     IndexBuildInterceptor() : _sideWritesNs(makeTempSideWritesNs()) {}
     IndexBuildInterceptor(NamespaceString sideWritesNs) : _sideWritesNs(sideWritesNs) {}
@@ -92,6 +91,10 @@ public:
      */
     bool areAllWritesApplied(OperationContext* opCtx) const;
 
+    /**
+      * When an index builder wants to commit, use this to retrieve any recorded multikey paths
+      * that were tracked during the build.
+      */
     boost::optional<MultikeyPaths> getMultikeyPaths() const;
 
 private:

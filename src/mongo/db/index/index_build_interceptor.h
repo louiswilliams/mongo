@@ -98,9 +98,10 @@ private:
     RecordId _lastAppliedRecord;
     int64_t _numApplied{0};
 
-    NamespaceString _sideWritesNs;
+    const NamespaceString _sideWritesNs;
     AtomicInt64 _sideWritesCounter{0};
 
+    stdx::mutex _multikeyPathMutex;
     boost::optional<MultikeyPaths> _multikeyPaths;
 };
 

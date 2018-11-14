@@ -148,6 +148,12 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     RecordId currentRecord;
     PlanExecutor::ExecState state;
 
+    MultikeyPaths multikeyPaths;
+    {
+        stdx::unique_lock<stdx::mutex> lk(_multikeyPathMutex);
+        multikeyPaths = _multikeyPaths.get_value_or({});
+    }
+
     while (PlanExecutor::ExecState::ADVANCED ==
            (state = collScan->getNext(&operation, &currentRecord))) {
 
@@ -162,12 +168,13 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         const BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
 
         if (opType == Op::kInsert) {
+
             InsertResult result;
             Status s =
                 indexAccessMethod->insertKeys(opCtx,
                                               keySet,
                                               SimpleBSONObjComparator::kInstance.makeBSONObjSet(),
-                                              _multikeyPaths.get_value_or({}),
+                                              multikeyPaths,
                                               opRecordId,
                                               options,
                                               &result);
@@ -262,12 +269,15 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     // `multikeyMetadataKeys` when inserting.
     *numKeysOut = keys.size() + (op == Op::kInsert ? multikeyMetadataKeys.size() : 0);
 
-    if (_multikeyPaths) {
-        MultikeyPathTracker::mergeMultikeyPaths(&_multikeyPaths.get(), multikeyPaths);
-    } else {
-        // `mergeMultikeyPaths` is sensitive to the two inputs having the same multikey
-        // "shape". Initialize `_multikeyPaths` with the right shape from the first result.
-        _multikeyPaths = multikeyPaths;
+    {
+        stdx::unique_lock<stdx::mutex> lk(_multikeyPathMutex);
+        if (_multikeyPaths) {
+            MultikeyPathTracker::mergeMultikeyPaths(&_multikeyPaths.get(), multikeyPaths);
+        } else {
+            // `mergeMultikeyPaths` is sensitive to the two inputs having the same multikey
+            // "shape". Initialize `_multikeyPaths` with the right shape from the first result.
+            _multikeyPaths = multikeyPaths;
+        }
     }
 
     AutoGetCollection coll(opCtx, _sideWritesNs, LockMode::MODE_IX);
@@ -300,6 +310,10 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
                                        << static_cast<int64_t>(
                                               RecordId::ReservedId::kWildcardMultikeyMetadataId)));
         }
+    }
+
+    if (toInsert.size() == 0) {
+        return Status::OK();
     }
 
     _sideWritesCounter.fetchAndAdd(toInsert.size());

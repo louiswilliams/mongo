@@ -129,7 +129,9 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     // back, reset the counters back to what they were at the start.
     const int64_t appliedAtStart = _numApplied;
     const RecordId lastAppliedAtStart = _lastAppliedRecord;
-    opCtx->recoveryUnit()->onRollback([&] {
+    opCtx->recoveryUnit()->onRollback([=] {
+        LOG(2) << "drain rolling back writes from " << _lastAppliedRecord << " to "
+               << lastAppliedAtStart;
         _numApplied = appliedAtStart;
         _lastAppliedRecord = lastAppliedAtStart;
     });

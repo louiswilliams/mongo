@@ -260,7 +260,10 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlockImpl::init(const std::vector<BSO
         if (!status.isOK())
             return status;
 
-        if (!_buildInBackground) {
+        // Foreground builds and background builds using an interceptor can use the bulk builder.
+        const bool useBulk =
+            !_buildInBackground || index.block->getEntry()->indexBuildInterceptor();
+        if (useBulk) {
             // Bulk build process requires foreground building as it assumes nothing is changing
             // under it.
             index.bulk = index.real->initiateBulk(eachIndexBuildMaxMemoryUsageBytes);

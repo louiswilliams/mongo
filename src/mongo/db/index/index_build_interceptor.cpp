@@ -216,20 +216,6 @@ bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
 
 RecordId IndexBuildInterceptor::_peekAtLastRecord(OperationContext* opCtx) const {
 
-    // In a replica set configuration, read at the "no holes" oplog visibility timestamp instead of
-    // stopping writes.
-    const bool useOplogVisibility = false;
-    if (useOplogVisibility &&
-        repl::ReplicationCoordinator::get(opCtx)->getReplicationMode() ==
-            repl::ReplicationCoordinator::modeReplSet) {
-
-        opCtx->recoveryUnit()->abandonSnapshot();
-        opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kProvided,
-                                                      Timestamp());
-    }
-
-    // In this case we are on a standalone or not using timestamps.
-
     // Stop writes on the side writes collection to look at the last record. By stopping writes on
     // the side collection, this will prevent seeing "holes" of writes with lower RecordIds that are
     // not visible in this snapshot.

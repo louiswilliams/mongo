@@ -148,12 +148,6 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     RecordId currentRecord;
     PlanExecutor::ExecState state;
 
-    MultikeyPaths multikeyPaths;
-    {
-        stdx::unique_lock<stdx::mutex> lk(_multikeyPathMutex);
-        multikeyPaths = _multikeyPaths.get_value_or({});
-    }
-
     while (PlanExecutor::ExecState::ADVANCED ==
            (state = collScan->getNext(&operation, &currentRecord))) {
 
@@ -174,7 +168,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 indexAccessMethod->insertKeys(opCtx,
                                               keySet,
                                               SimpleBSONObjComparator::kInstance.makeBSONObjSet(),
-                                              multikeyPaths,
+                                              MultikeyPaths{},
                                               opRecordId,
                                               options,
                                               &result);
@@ -247,6 +241,11 @@ RecordId IndexBuildInterceptor::_peekAtLastRecord(OperationContext* opCtx) const
         return RecordId();
 
     return record->id;
+}
+
+boost::optional<MultikeyPaths> IndexBuildInterceptor::getMultikeyPaths() const {
+    stdx::unique_lock<stdx::mutex> lk(_multikeyPathMutex);
+    return _multikeyPaths;
 }
 
 Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,

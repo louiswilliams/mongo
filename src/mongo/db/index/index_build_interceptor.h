@@ -92,6 +92,8 @@ public:
      */
     bool areAllWritesApplied(OperationContext* opCtx) const;
 
+    boost::optional<MultikeyPaths> getMultikeyPaths() const;
+
 private:
     RecordId _peekAtLastRecord(OperationContext* opCtx) const;
 
@@ -101,7 +103,7 @@ private:
     const NamespaceString _sideWritesNs;
     AtomicInt64 _sideWritesCounter{0};
 
-    stdx::mutex _multikeyPathMutex;
+    mutable stdx::mutex _multikeyPathMutex;
     boost::optional<MultikeyPaths> _multikeyPaths;
 };
 

@@ -638,6 +638,14 @@ void MultiIndexBlockImpl::commit(stdx::function<void(const BSONObj& spec)> onCre
                 _indexes[i].block->getEntry()->setMultikey(_opCtx, *multikeyPaths);
             }
         }
+
+        auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();
+        if (interceptor) {
+            auto multikeyPaths = interceptor->getMultikeyPaths();
+            if (multikeyPaths) {
+                _indexes[i].block->getEntry()->setMultikey(_opCtx, multikeyPaths.get());
+            }
+        }
     }
 
     _opCtx->recoveryUnit()->registerChange(new SetNeedToCleanupOnRollback(this));

@@ -449,8 +449,8 @@ public:
                 DatabaseShardingState::get(db).checkDbVersion(opCtx);
             }
 
-            uassert(28551, "database dropped during index build", db);
-            uassert(28552, "collection dropped during index build", db->getCollection(opCtx, ns));
+            invariant(db);
+            invariant(db->getCollection(opCtx, ns));
         }
 
         // Perform the third and final drain after releasing a shared lock and reacquiring an

@@ -1278,9 +1278,6 @@ Status IndexCatalogImpl::updateRecord(OperationContext* const opCtx,
                                       const RecordId& recordId,
                                       int64_t* const keysInsertedOut,
                                       int64_t* const keysDeletedOut) {
-    invariant(keysInsertedOut);
-    invariant(keysDeletedOut);
-
     *keysInsertedOut = 0;
     *keysDeletedOut = 0;
 

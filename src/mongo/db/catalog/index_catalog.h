@@ -363,7 +363,7 @@ public:
 
     /**
      * Both 'keysInsertedOut' and 'keysDeletedOut' are required and will be set to the number of
-     * ndex keys inserted and deleted by this operation, respectively.
+     * index keys inserted and deleted by this operation, respectively.
      *
      * This method may throw.
      */

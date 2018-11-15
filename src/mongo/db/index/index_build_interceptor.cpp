@@ -42,7 +42,6 @@
 #include "mongo/db/multi_key_path_tracker.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/db/query/internal_plans.h"
-#include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/util/log.h"
 #include "mongo/util/progress_meter.h"
@@ -258,6 +257,10 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     // `multikeyMetadataKeys` when inserting.
     *numKeysOut = keys.size() + (op == Op::kInsert ? multikeyMetadataKeys.size() : 0);
 
+    if (numKeysOut == 0) {
+        return Status::OK();
+    }
+
     {
         stdx::unique_lock<stdx::mutex> lk(_multikeyPathMutex);
         if (_multikeyPaths) {
@@ -299,10 +302,6 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
                                        << static_cast<int64_t>(
                                               RecordId::ReservedId::kWildcardMultikeyMetadataId)));
         }
-    }
-
-    if (toInsert.size() == 0) {
-        return Status::OK();
     }
 
     _sideWritesCounter.fetchAndAdd(toInsert.size());

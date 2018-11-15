@@ -40,13 +40,14 @@
 
     // Do some updates, inserts and deletes while building.
     bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (let i = 0; i < 50; i++) {
+    let i = 0;
+    for (; i < 50; i++) {
         bulk.find({i: 1}).update({$set: {i: -i}});
     }
-    for (let i = 50; i < 100; i++) {
+    for (; i < 100; i++) {
         bulk.find({i: i}).remove();
     }
-    for (let i = 1000; i < 1500; i++) {
+    for (; i < 1500; i++) {
         bulk.insert({i: i});
     }
     assert.commandWorked(bulk.execute());
@@ -61,7 +62,7 @@
 
     // Add inserts that must be consumed in the second drain.
     bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (let i = 1500; i < 2000; i++) {
+    for (; i < 2000; i++) {
         bulk.insert({i: i});
     }
     assert.commandWorked(bulk.execute());
@@ -77,7 +78,7 @@
 
     // Add inserts that must be consumed in the final drain.
     bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (let i = 2000; i < 3000; i++) {
+    for (; i < 3000; i++) {
         bulk.insert({i: i});
     }
     assert.commandWorked(bulk.execute());
@@ -88,7 +89,7 @@
     // Wait for build to complete.
     bgBuild();
 
-    assert.eq(2950, testDB.hybrid.count());
+    assert.eq(3850, testDB.hybrid.count());
     assert.commandWorked(testDB.hybrid.validate());
 
     MongoRunner.stopMongod(conn);

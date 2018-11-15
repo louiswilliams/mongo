@@ -156,10 +156,10 @@ public:
 
     /**
      * For background indexes using an IndexBuildInterceptor to capture inserts during a build,
-     * drain these writes into the index. If weak intent locks are held on the collection, more
-     * writes may come in after this drain completes. To ensure that all writes are completely
-     * drained before calling commit(), stop writes on the collection by holding a strong S or X
-     * while calling this method.
+     * drain these writes into the index. If intent locks are held on the collection, more writes
+     * may come in after this drain completes. To ensure that all writes are completely drained
+     * before calling commit(), stop writes on the collection by holding a S or X while calling this
+     * method.
      *
      * Must not be in a WriteUnitOfWork.
      */

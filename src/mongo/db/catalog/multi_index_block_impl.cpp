@@ -609,6 +609,15 @@ void MultiIndexBlockImpl::commit(stdx::function<void(const BSONObj& spec)> onCre
             onCreateFn(_indexes[i].block->getSpec());
         }
 
+        // This must be done before calling success(), which destroys the interceptor.
+        auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();
+        if (interceptor) {
+            auto multikeyPaths = interceptor->getMultikeyPaths();
+            if (multikeyPaths) {
+                _indexes[i].block->getEntry()->setMultikey(_opCtx, multikeyPaths.get());
+            }
+        }
+
         _indexes[i].block->success();
 
         // The bulk builder will track multikey information itself. Non-bulk builders re-use the
@@ -625,14 +634,6 @@ void MultiIndexBlockImpl::commit(stdx::function<void(const BSONObj& spec)> onCre
                     _collection->ns(), _indexes[i].block->getIndexName()));
             if (multikeyPaths) {
                 _indexes[i].block->getEntry()->setMultikey(_opCtx, *multikeyPaths);
-            }
-        }
-
-        auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();
-        if (interceptor) {
-            auto multikeyPaths = interceptor->getMultikeyPaths();
-            if (multikeyPaths) {
-                _indexes[i].block->getEntry()->setMultikey(_opCtx, multikeyPaths.get());
             }
         }
     }

@@ -75,23 +75,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                                                    IndexAccessMethod* indexAccessMethod,
                                                    const InsertDeleteOptions& options,
                                                    ScanYield scanYield) {
-    invariant(opCtx->lockState()->inAWriteUnitOfWork());
-
-    // TODO: Deal with duplicates
-
-    // Only drain writes up to the last visible record
-    RecordId applyToRecord = _peekAtLastRecord(opCtx);
-
-    // Collection is empty.
-    if (applyToRecord.isNull())
-        return Status::OK();
-
-    // There are no records to apply.
-    if (_lastAppliedRecord == applyToRecord)
-        return Status::OK();
-
-    LOG(0) << "draining writes from record " << _lastAppliedRecord.repr() << " to "
-           << applyToRecord.repr();
+    invariant(!opCtx->lockState()->inAWriteUnitOfWork());
 
     AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
     invariant(autoColl.getCollection());
@@ -101,29 +85,15 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         ? PlanExecutor::YieldPolicy::INTERRUPT_ONLY
         : PlanExecutor::YieldPolicy::YIELD_AUTO;
 
-    // This collection scan is resumable at the _lastAppliedRecord.
     auto collection = autoColl.getCollection();
-    auto collScan = InternalPlanner::collectionScan(opCtx,
-                                                    collection->ns().ns(),
-                                                    collection,
-                                                    yieldPolicy,
-                                                    InternalPlanner::FORWARD,
-                                                    _lastAppliedRecord);
+    auto collScan = InternalPlanner::collectionScan(
+        opCtx, collection->ns().ns(), collection, yieldPolicy, InternalPlanner::FORWARD);
 
     // These are used for logging only.
     int64_t totalDeleted = 0;
     int64_t totalInserted = 0;
 
-    // In the case of an unnexpected WriteConflict or other exception that causes inserts to roll
-    // back, reset the counters back to what they were at the start.
     const int64_t appliedAtStart = _numApplied;
-    const RecordId lastAppliedAtStart = _lastAppliedRecord;
-    opCtx->recoveryUnit()->onRollback([=] {
-        LOG(2) << "drain rolling back writes from " << _lastAppliedRecord << " to "
-               << lastAppliedAtStart;
-        _numApplied = appliedAtStart;
-        _lastAppliedRecord = lastAppliedAtStart;
-    });
 
     // Setup the progress meter.
     static const char* curopMessage = "Index build draining writes";
@@ -132,63 +102,86 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         curopMessage, curopMessage, _sideWritesCounter.load() - appliedAtStart, 1));
     lk.unlock();
 
-    BSONObj operation;
-    RecordId currentRecord;
-    PlanExecutor::ExecState state;
+    // Buffer operations into a batches to insert per WriteUnitOfWork. Impose an upper limit on the
+    // number of documents and the total size of the batch.
+    const int32_t kBatchMaxSize = 1000;
+    const int64_t kBatchMaxBytes = BSONObjMaxInternalSize;
 
-    while (PlanExecutor::ExecState::ADVANCED ==
-           (state = collScan->getNext(&operation, &currentRecord))) {
+    int64_t batchSizeBytes = 0;
 
-        // Seeking may result in seeing the same document when resuming a scan.
-        if (currentRecord == _lastAppliedRecord)
-            continue;
+    std::vector<SideWriteRecord> batch;
+    batch.reserve(kBatchMaxSize);
 
-        const BSONObj key = operation["key"].Obj();
-        const RecordId opRecordId = RecordId(operation["recordId"].Long());
-        const Op opType =
-            (strcmp(operation.getStringField("op"), "i") == 0) ? Op::kInsert : Op::kDelete;
-        const BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
+    // Hold on to documents that would exceed the per-batch memory limit. Always insert this first
+    // into the next batch.
+    boost::optional<SideWriteRecord> stashed;
 
-        if (opType == Op::kInsert) {
+    bool atEof = false;
+    while (!atEof) {
 
-            InsertResult result;
-            Status s =
-                indexAccessMethod->insertKeys(opCtx,
-                                              keySet,
-                                              SimpleBSONObjComparator::kInstance.makeBSONObjSet(),
-                                              MultikeyPaths{},
-                                              opRecordId,
-                                              options,
-                                              &result);
-            if (!s.isOK()) {
-                return s;
-            }
-
-            invariant(!result.dupsInserted.size());
-            totalInserted += result.numInserted;
-        } else {
-            invariant(opType == Op::kDelete);
-            DEV invariant(strcmp(operation.getStringField("op"), "d") == 0);
-
-            int64_t numDeleted;
-            Status s =
-                indexAccessMethod->removeKeys(opCtx, keySet, opRecordId, options, &numDeleted);
-            if (!s.isOK()) {
-                return s;
-            }
-
-            totalDeleted += numDeleted;
+        // Stashed recordsshould be inserted into a batch first.
+        if (stashed) {
+            invariant(batch.empty());
+            batch.push_back(std::move(stashed.get()));
+            stashed.reset();
         }
 
-        progress->hit();
+        BSONObj docOut;
+        RecordId currentRecord;
+        PlanExecutor::ExecState state = collScan->getNext(&docOut, &currentRecord);
 
-        // Since drain is resumable, keep track of which records we have applied.
-        _lastAppliedRecord = currentRecord;
-        _numApplied++;
+        if (state == PlanExecutor::ExecState::ADVANCED) {
+            // If the total batch size in bytes would be too large, stash this document and let the
+            // current batch insert.
+            int objSize = docOut.objsize();
+            if (batchSizeBytes + objSize > kBatchMaxBytes) {
+                invariant(!stashed);
 
-        // Stop after inserting the last record we know has no "holes" before it.
-        if (currentRecord == applyToRecord)
-            break;
+                // Stash this document to be inserted in the next batch.
+                stashed.emplace(currentRecord, docOut.getOwned());
+            } else {
+                batchSizeBytes += objSize;
+                batch.emplace_back(currentRecord, docOut.getOwned());
+
+                // Continue if there is more room in the batch.
+                if (batch.size() < kBatchMaxSize) {
+                    continue;
+                }
+            }
+        } else if (state == PlanExecutor::ExecState::IS_EOF) {
+            atEof = true;
+            if (batch.empty())
+                break;
+        } else {
+            return WorkingSetCommon::getMemberObjectStatus(docOut);
+        }
+
+        invariant(!batch.empty());
+
+        // If we are here, either we have reached the end of the collection or the batch is full, so
+        // insert everything in one WriteUnitOfWork, and delete each inserted document from the side
+        // writes table.
+        WriteUnitOfWork wuow(opCtx);
+        for (auto& operation : batch) {
+            auto status = _applyWrite(
+                opCtx, indexAccessMethod, operation.second, options, &totalInserted, &totalDeleted);
+            if (!status.isOK()) {
+                return status;
+            }
+
+            // Delete the document from the collection as soon as it has beenn inserted into the
+            // index. This ensures that no key is every inserted twice and no keys are skipped.
+            collection->deleteDocument(opCtx, kUninitializedStmtId, operation.first, nullptr);
+        }
+        collScan->saveState();
+        wuow.commit();
+
+        collScan->restoreState();
+
+        progress->hit(batch.size());
+        _numApplied += batch.size();
+        batch.clear();
+        batchSizeBytes = 0;
     }
 
     progress->finished();
@@ -196,21 +189,64 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     log() << "applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
           << ", d: " << totalDeleted << ", total: " << _numApplied;
 
-    if (PlanExecutor::ADVANCED == state) {
-        invariant(currentRecord == applyToRecord);
-        return Status::OK();
-    }
+    return Status::OK();
+}
 
-    if (PlanExecutor::IS_EOF != state) {
-        return WorkingSetCommon::getMemberObjectStatus(operation);
+Status IndexBuildInterceptor::_applyWrite(OperationContext* opCtx,
+                                          IndexAccessMethod* indexAccessMethod,
+                                          const BSONObj& operation,
+                                          const InsertDeleteOptions& options,
+                                          int64_t* const keysInserted,
+                                          int64_t* const keysDeleted) {
+    const BSONObj key = operation["key"].Obj();
+    const RecordId opRecordId = RecordId(operation["recordId"].Long());
+    const Op opType =
+        (strcmp(operation.getStringField("op"), "i") == 0) ? Op::kInsert : Op::kDelete;
+    const BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
+
+    if (opType == Op::kInsert) {
+
+        InsertResult result;
+        Status s =
+            indexAccessMethod->insertKeys(opCtx,
+                                          keySet,
+                                          SimpleBSONObjComparator::kInstance.makeBSONObjSet(),
+                                          MultikeyPaths{},
+                                          opRecordId,
+                                          options,
+                                          &result);
+        if (!s.isOK()) {
+            return s;
+        }
+
+        invariant(!result.dupsInserted.size());
+        *keysInserted += result.numInserted;
+    } else {
+        invariant(opType == Op::kDelete);
+        DEV invariant(strcmp(operation.getStringField("op"), "d") == 0);
+
+        int64_t numDeleted;
+        Status s = indexAccessMethod->removeKeys(opCtx, keySet, opRecordId, options, &numDeleted);
+        if (!s.isOK()) {
+            return s;
+        }
+
+        *keysDeleted += numDeleted;
     }
     return Status::OK();
 }
 
 bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
+    AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
+    invariant(autoColl.getCollection());
+    auto cursor = autoColl.getCollection()->getCursor(opCtx, false /* forward */);
+    auto record = cursor->next();
 
-    RecordId lastRecord = _peekAtLastRecord(opCtx);
-    return lastRecord == _lastAppliedRecord;
+    // The collection is empty only when all writes are applied.
+    if (!record)
+        return true;
+
+    return false;
 }
 
 RecordId IndexBuildInterceptor::_peekAtLastRecord(OperationContext* opCtx) const {
@@ -242,7 +278,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
                                         const BSONObj* obj,
                                         RecordId loc,
                                         Op op,
-                                        int64_t* numKeysOut) {
+                                        int64_t* const numKeysOut) {
     *numKeysOut = 0;
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     BSONObjSet multikeyMetadataKeys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
@@ -257,7 +293,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     // `multikeyMetadataKeys` when inserting.
     *numKeysOut = keys.size() + (op == Op::kInsert ? multikeyMetadataKeys.size() : 0);
 
-    if (numKeysOut == 0) {
+    if (*numKeysOut == 0) {
         return Status::OK();
     }
 
@@ -305,6 +341,8 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     }
 
     _sideWritesCounter.fetchAndAdd(toInsert.size());
+    opCtx->recoveryUnit()->onRollback(
+        [=] { _sideWritesCounter.fetchAndSubtract(toInsert.size()); });
 
     // This is necessary for operations in multi-document transactions to not generate oplog writes
     // for each insert.

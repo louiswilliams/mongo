@@ -66,7 +66,7 @@ public:
                      const BSONObj* obj,
                      RecordId loc,
                      Op op,
-                     int64_t* numKeysOut);
+                     int64_t* const numKeysOut);
 
     /**
      * Performs a resumable collection scan on the side writes collection, and either inserts or
@@ -98,9 +98,17 @@ public:
     boost::optional<MultikeyPaths> getMultikeyPaths() const;
 
 private:
+    using SideWriteRecord = std::pair<RecordId, BSONObj>;
+
     RecordId _peekAtLastRecord(OperationContext* opCtx) const;
 
-    RecordId _lastAppliedRecord;
+    Status _applyWrite(OperationContext* opCtx,
+                       IndexAccessMethod* indexAccessMethod,
+                       const BSONObj& doc,
+                       const InsertDeleteOptions& options,
+                       int64_t* const keysInserted,
+                       int64_t* const keysDeleted);
+
     int64_t _numApplied{0};
 
     const NamespaceString _sideWritesNs;

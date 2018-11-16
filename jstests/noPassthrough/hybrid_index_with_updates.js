@@ -22,7 +22,8 @@
     };
 
     let bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (let i = 0; i < 1000; i++) {
+    let i = 0;
+    for (; i < 1001; i++) {
         bulk.insert({i: i});
     }
     assert.commandWorked(bulk.execute());
@@ -38,59 +39,78 @@
 
     checkLog.contains(conn, "Hanging before index build of i=" + stopKey);
 
-    // Do some updates, inserts and deletes while building.
+    // Phase 1: Collection scan and external sort
+    // Insert documents while doing the bulk build.
     bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    let i = 0;
-    for (; i < 50; i++) {
-        bulk.find({i: 1}).update({$set: {i: -i}});
-    }
-    for (; i < 100; i++) {
-        bulk.find({i: i}).remove();
-    }
-    for (; i < 1500; i++) {
+    for (; i < 2002; i++) {
         bulk.insert({i: i});
     }
     assert.commandWorked(bulk.execute());
 
-    // Enable pause after bulk dump into index and first drain.
+    // Enable pause after bulk dump into index.
     turnFailPointOn("hangAfterIndexBuildDumpsInsertsFromBulk");
-    // Allow first drain to finish.
-    turnFailPointOff("hangBeforeIndexBuildOf");
 
-    // Wait for first drain to complete.
+    // Wait for the bulk insert to complete.
+    turnFailPointOff("hangBeforeIndexBuildOf");
     checkLog.contains(conn, "Hanging after dumping inserts from bulk builder");
+
+    // Phase 2: First drain
+    // Do some updates, inserts and deletes after the bulk builder has finished.
+
+    // Enable pause after first drain.
+    turnFailPointOn("hangAfterIndexBuildFirstDrain");
+
+    bulk = testDB.hybrid.initializeUnorderedBulkOp();
+    for (; i < 2102; i++) {
+        bulk.find({i: 1}).update({$set: {i: -i}});
+    }
+    for (; i < 2203; i++) {
+        bulk.find({i: i}).remove();
+    }
+    for (; i < 3004; i++) {
+        bulk.insert({i: i});
+    }
+    assert.commandWorked(bulk.execute());
+
+    // Allow first drain to start.
+    turnFailPointOff("hangAfterIndexBuildDumpsInsertsFromBulk");
+
+    // Wait for first drain to finish.
+    checkLog.contains(conn, "Hanging after index build first drain");
+
+    // Phase 3: Second drain
+    // Enable pause after second drain.
+    turnFailPointOn("hangAfterIndexBuildSecondDrain");
 
     // Add inserts that must be consumed in the second drain.
     bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (; i < 2000; i++) {
+    for (; i < 4004; i++) {
         bulk.insert({i: i});
     }
     assert.commandWorked(bulk.execute());
 
-    // Enable pause after final drain.
-    turnFailPointOn("hangAfterIndexBuildReleasesSharedLock");
-
-    // Allow second drain to complete.
-    turnFailPointOff("hangAfterIndexBuildDumpsInsertsFromBulk");
+    // Allow second drain to start.
+    turnFailPointOff("hangAfterIndexBuildFirstDrain");
 
     // Wait for second drain to finish.
-    checkLog.contains(conn, "Hanging after releasing shared lock");
+    checkLog.contains(conn, "Hanging after index build second drain");
 
+    // Phase 4: Final drain and commit.
     // Add inserts that must be consumed in the final drain.
     bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (; i < 3000; i++) {
+    for (; i < 5005; i++) {
         bulk.insert({i: i});
     }
     assert.commandWorked(bulk.execute());
 
-    // Wait for final drain.
-    turnFailPointOff("hangAfterIndexBuildReleasesSharedLock");
+    // Allow final drain to start.
+    turnFailPointOff("hangAfterIndexBuildSecondDrain");
 
     // Wait for build to complete.
     bgBuild();
 
-    assert.eq(3850, testDB.hybrid.count());
-    assert.commandWorked(testDB.hybrid.validate());
+    assert.eq(4804, testDB.hybrid.count());
+    assert.commandWorked(testDB.hybrid.validate({full: true}));
 
     MongoRunner.stopMongod(conn);
 })();

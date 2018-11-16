@@ -72,7 +72,8 @@ using std::string;
 
 using IndexVersion = IndexDescriptor::IndexVersion;
 
-MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildReleasesSharedLock);
+MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildFirstDrain);
+MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildSecondDrain);
 MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildDumpsInsertsFromBulk);
 
 namespace {
@@ -416,25 +417,39 @@ public:
         {
             Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_IX);
             uassertStatusOK(indexer.insertAllDocumentsInCollection());
+        }
 
-            // Perform the first drain while holding an intent lock.
+        if (MONGO_FAIL_POINT(hangAfterIndexBuildDumpsInsertsFromBulk)) {
+            log() << "Hanging after dumping inserts from bulk builder";
+            MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildDumpsInsertsFromBulk);
+        }
+
+        // Perform the first drain while holding an intent lock.
+        {
+            opCtx->recoveryUnit()->abandonSnapshot();
+            Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_IS);
+
+            LOG(1) << "Performing first index build drain";
             uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
+        }
 
-            if (MONGO_FAIL_POINT(hangAfterIndexBuildDumpsInsertsFromBulk)) {
-                log() << "Hanging after dumping inserts from bulk builder";
-                MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildDumpsInsertsFromBulk);
-            }
+        if (MONGO_FAIL_POINT(hangAfterIndexBuildFirstDrain)) {
+            log() << "Hanging after index build first drain";
+            MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildFirstDrain);
         }
 
         // Perform the second drain while stopping writes on the collection.
         {
+            opCtx->recoveryUnit()->abandonSnapshot();
             Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_S);
+
+            LOG(1) << "Performing second index build drain";
             uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
         }
 
-        if (MONGO_FAIL_POINT(hangAfterIndexBuildReleasesSharedLock)) {
-            log() << "Hanging after releasing shared lock";
-            MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildReleasesSharedLock);
+        if (MONGO_FAIL_POINT(hangAfterIndexBuildSecondDrain)) {
+            log() << "Hanging after index build second drain";
+            MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildSecondDrain);
         }
 
         relockOnErrorGuard.Dismiss();
@@ -455,6 +470,7 @@ public:
 
         // Perform the third and final drain after releasing a shared lock and reacquiring an
         // exclusive lock on the database.
+        log() << "Performing final index build drain";
         uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
 
         writeConflictRetry(opCtx, kCommandName, ns.ns(), [&] {

@@ -563,21 +563,8 @@ Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
         if (!interceptor)
             continue;
 
-        const std::string message = str::stream()
-            << "side write drain for index "
-            << _indexes[i].block->getEntry()->descriptor()->indexName();
-
-        auto status = writeConflictRetry(_opCtx, message, _collection->ns().ns(), [&] {
-            WriteUnitOfWork wunit(_opCtx);
-            auto status = interceptor->drainWritesIntoIndex(
-                _opCtx, _indexes[i].real, _indexes[i].options, scanYield);
-            if (!status.isOK()) {
-                return status;
-            }
-            wunit.commit();
-            return Status::OK();
-        });
-
+        auto status = interceptor->drainWritesIntoIndex(
+            _opCtx, _indexes[i].real, _indexes[i].options, scanYield);
         if (!status.isOK()) {
             return status;
         }

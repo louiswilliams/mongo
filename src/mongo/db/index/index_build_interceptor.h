@@ -44,7 +44,6 @@ class OperationContext;
 class IndexBuildInterceptor {
 public:
     enum class Op { kInsert, kDelete };
-    enum class ScanYield { kYieldAuto, kInterruptOnly };
 
     IndexBuildInterceptor(){};
 
@@ -79,8 +78,7 @@ public:
      */
     Status drainWritesIntoIndex(OperationContext* opCtx,
                                 IndexAccessMethod* indexAccessMethod,
-                                const InsertDeleteOptions& options,
-                                ScanYield scanYield);
+                                const InsertDeleteOptions& options);
 
     /**
      * Returns 'true' if there are no visible records remaining to be applied from the side writes

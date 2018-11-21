@@ -547,13 +547,6 @@ Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
 
     LOG(1) << "draining background writes into index";
 
-    // When holding MODE_S or MODE_X (which covers MODE_S), do not yield when scanning the side
-    // writes collection. Callers request these lock modes to ensure they have seen all writes, at
-    // least until locks are released.
-    auto scanYield = _opCtx->lockState()->isCollectionLockedForMode(_collection->ns().ns(), MODE_S)
-        ? IndexBuildInterceptor::ScanYield::kInterruptOnly
-        : IndexBuildInterceptor::ScanYield::kYieldAuto;
-
     // Drain side-writes collections. This only drains what is visible. Assuming weak locks are held
     // on the collection, more writes can come in after this drain completes. Callers are
     // responsible for stopping writes by holding a strong lock while draining before completing the
@@ -563,8 +556,8 @@ Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
         if (!interceptor)
             continue;
 
-        auto status = interceptor->drainWritesIntoIndex(
-            _opCtx, _indexes[i].real, _indexes[i].options, scanYield);
+        auto status =
+            interceptor->drainWritesIntoIndex(_opCtx, _indexes[i].real, _indexes[i].options);
         if (!status.isOK()) {
             return status;
         }

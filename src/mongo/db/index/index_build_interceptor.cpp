@@ -59,8 +59,7 @@ void IndexBuildInterceptor::removeTempSideWritesTable(OperationContext* opCtx) {
 
 Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                                                    IndexAccessMethod* indexAccessMethod,
-                                                   const InsertDeleteOptions& options,
-                                                   ScanYield scanYield) {
+                                                   const InsertDeleteOptions& options) {
     invariant(!opCtx->lockState()->inAWriteUnitOfWork());
 
     // These are used for logging only.
@@ -95,7 +94,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     bool atEof = false;
     while (!atEof) {
 
-        // Stashed recordsshould be inserted into a batch first.
+        // Stashed records should be inserted into a batch first.
         if (stashed) {
             invariant(batch.empty());
             batch.push_back(std::move(stashed.get()));
@@ -107,6 +106,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         if (record) {
             RecordId currentRecordId = record->id;
             BSONObj docOut = record->data.releaseToBson();
+
             // If the total batch size in bytes would be too large, stash this document and let the
             // current batch insert.
             int objSize = docOut.objsize();
@@ -132,7 +132,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
         invariant(!batch.empty());
 
-        // If we are here, either we have reached the end of the collection or the batch is full, so
+        // If we are here, either we have reached the end of the table or the batch is full, so
         // insert everything in one WriteUnitOfWork, and delete each inserted document from the side
         // writes table.
         WriteUnitOfWork wuow(opCtx);
@@ -144,7 +144,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
             }
 
             // Delete the document from the collection as soon as it has beenn inserted into the
-            // index. This ensures that no key is every inserted twice and no keys are skipped.
+            // index. This ensures that no key is ever inserted twice and no keys are skipped.
             _sideWritesTable->deleteRecord(opCtx, operation.first);
         }
         cursor->save();
@@ -233,6 +233,8 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
                                         RecordId loc,
                                         Op op,
                                         int64_t* const numKeysOut) {
+    invariant(opCtx->lockState()->inAWriteUnitOfWork());
+
     *numKeysOut = 0;
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     BSONObjSet multikeyMetadataKeys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
@@ -300,8 +302,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
         records.emplace_back(Record{RecordId(), RecordData(obj.objdata(), obj.objsize())});
     }
 
-    std::vector<Timestamp> timestamps;
-    timestamps.reserve(toInsert.size());
+    std::vector<Timestamp> timestamps(records.size());
     return _sideWritesTable->insertRecords(opCtx, &records, timestamps);
 }
 }  // namespace mongo

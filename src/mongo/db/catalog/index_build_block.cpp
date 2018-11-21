@@ -95,7 +95,7 @@ Status IndexCatalogImpl::IndexBuildBlock::init() {
     const bool useHybrid = isBackgroundIndex && !descriptorPtr->unique();
     if (useHybrid) {
         _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>();
-        _indexBuildInterceptor->ensureSideWritesCollectionExists(_opCtx);
+        _indexBuildInterceptor->ensureTempSideWritesTable(_opCtx);
         _entry->setIndexBuildInterceptor(_indexBuildInterceptor.get());
 
         _opCtx->recoveryUnit()->onCommit(
@@ -132,7 +132,7 @@ void IndexCatalogImpl::IndexBuildBlock::fail() {
     if (_entry) {
         invariant(_catalog->_dropIndex(_opCtx, _entry).isOK());
         if (_indexBuildInterceptor) {
-            _indexBuildInterceptor->removeSideWritesCollection(_opCtx);
+            _indexBuildInterceptor->removeTempSideWritesTable(_opCtx);
             _entry->setIndexBuildInterceptor(nullptr);
         }
     } else {
@@ -177,7 +177,7 @@ void IndexCatalogImpl::IndexBuildBlock::success() {
         // An index build should never be completed with writes remaining in the interceptor.
         invariant(_indexBuildInterceptor->areAllWritesApplied(_opCtx));
 
-        _indexBuildInterceptor->removeSideWritesCollection(_opCtx);
+        _indexBuildInterceptor->removeTempSideWritesTable(_opCtx);
         _entry->setIndexBuildInterceptor(nullptr);
     }
 }

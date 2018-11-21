@@ -43,51 +43,25 @@
 #include "mongo/db/operation_context.h"
 #include "mongo/db/query/internal_plans.h"
 #include "mongo/db/s/operation_sharding_state.h"
+#include "mongo/db/service_context.h"
 #include "mongo/util/log.h"
 #include "mongo/util/progress_meter.h"
 #include "mongo/util/uuid.h"
 
 namespace mongo {
 
-NamespaceString IndexBuildInterceptor::makeTempSideWritesNs() {
-    return NamespaceString("local.system.sideWrites-" + UUID::gen().toString());
+void IndexBuildInterceptor::ensureTempSideWritesTable(OperationContext* opCtx) {
+    _sideWritesTable =
+        opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx);
 }
 
-void IndexBuildInterceptor::ensureSideWritesCollectionExists(OperationContext* opCtx) {
-
-    // TODO SERVER-38027 Consider pushing this higher into the createIndexes command logic.
-    OperationShardingState::get(opCtx).setAllowImplicitCollectionCreation(BSONElement());
-
-    AutoGetOrCreateDb local(opCtx, "local", LockMode::MODE_X);
-    CollectionOptions options;
-    options.setNoIdIndex();
-    options.temp = true;
-
-    local.getDb()->createCollection(opCtx, _sideWritesNs.ns(), options);
-}
-
-void IndexBuildInterceptor::removeSideWritesCollection(OperationContext* opCtx) {
-    AutoGetDb local(opCtx, "local", LockMode::MODE_X);
-    fassert(50994, local.getDb()->dropCollectionEvenIfSystem(opCtx, _sideWritesNs, repl::OpTime()));
-}
+void IndexBuildInterceptor::removeTempSideWritesTable(OperationContext* opCtx) {}
 
 Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                                                    IndexAccessMethod* indexAccessMethod,
                                                    const InsertDeleteOptions& options,
                                                    ScanYield scanYield) {
     invariant(!opCtx->lockState()->inAWriteUnitOfWork());
-
-    AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
-    invariant(autoColl.getCollection());
-
-    // Callers that are holding strong locks may not want to yield.
-    auto yieldPolicy = (scanYield == ScanYield::kInterruptOnly)
-        ? PlanExecutor::YieldPolicy::INTERRUPT_ONLY
-        : PlanExecutor::YieldPolicy::YIELD_AUTO;
-
-    auto collection = autoColl.getCollection();
-    auto collScan = InternalPlanner::collectionScan(
-        opCtx, collection->ns().ns(), collection, yieldPolicy, InternalPlanner::FORWARD);
 
     // These are used for logging only.
     int64_t totalDeleted = 0;
@@ -116,6 +90,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     // into the next batch.
     boost::optional<SideWriteRecord> stashed;
 
+    auto cursor = _sideWritesTable->getCursor(opCtx);
+
     bool atEof = false;
     while (!atEof) {
 
@@ -126,11 +102,11 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
             stashed.reset();
         }
 
-        BSONObj docOut;
-        RecordId currentRecord;
-        PlanExecutor::ExecState state = collScan->getNext(&docOut, &currentRecord);
+        auto record = cursor->next();
 
-        if (state == PlanExecutor::ExecState::ADVANCED) {
+        if (record) {
+            RecordId currentRecordId = record->id;
+            BSONObj docOut = record->data.releaseToBson();
             // If the total batch size in bytes would be too large, stash this document and let the
             // current batch insert.
             int objSize = docOut.objsize();
@@ -138,22 +114,20 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 invariant(!stashed);
 
                 // Stash this document to be inserted in the next batch.
-                stashed.emplace(currentRecord, docOut.getOwned());
+                stashed.emplace(currentRecordId, docOut);
             } else {
                 batchSizeBytes += objSize;
-                batch.emplace_back(currentRecord, docOut.getOwned());
+                batch.emplace_back(currentRecordId, docOut);
 
                 // Continue if there is more room in the batch.
                 if (batch.size() < kBatchMaxSize) {
                     continue;
                 }
             }
-        } else if (state == PlanExecutor::ExecState::IS_EOF) {
+        } else {
             atEof = true;
             if (batch.empty())
                 break;
-        } else {
-            return WorkingSetCommon::getMemberObjectStatus(docOut);
         }
 
         invariant(!batch.empty());
@@ -171,12 +145,12 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
             // Delete the document from the collection as soon as it has beenn inserted into the
             // index. This ensures that no key is every inserted twice and no keys are skipped.
-            collection->deleteDocument(opCtx, kUninitializedStmtId, operation.first, nullptr);
+            _sideWritesTable->deleteRecord(opCtx, operation.first);
         }
-        collScan->saveState();
+        cursor->save();
         wuow.commit();
 
-        collScan->restoreState();
+        cursor->restore();
 
         progress->hit(batch.size());
         _numApplied += batch.size();
@@ -237,9 +211,8 @@ Status IndexBuildInterceptor::_applyWrite(OperationContext* opCtx,
 }
 
 bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
-    AutoGetCollection autoColl(opCtx, _sideWritesNs, LockMode::MODE_IS);
-    invariant(autoColl.getCollection());
-    auto cursor = autoColl.getCollection()->getCursor(opCtx, false /* forward */);
+    invariant(_sideWritesTable);
+    auto cursor = _sideWritesTable->getCursor(opCtx, false /* forward */);
     auto record = cursor->next();
 
     // The collection is empty only when all writes are applied.
@@ -247,25 +220,6 @@ bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
         return true;
 
     return false;
-}
-
-RecordId IndexBuildInterceptor::_peekAtLastRecord(OperationContext* opCtx) const {
-
-    // Stop writes on the side writes collection to look at the last record. By stopping writes on
-    // the side collection, this will prevent seeing "holes" of writes with lower RecordIds that are
-    // not visible in this snapshot.
-    AutoGetCollection autoColl(
-        opCtx, _sideWritesNs, LockMode::MODE_IS /* modeDB */, LockMode::MODE_S /* modeColl */);
-    invariant(autoColl.getCollection());
-
-    auto cursor = autoColl.getCollection()->getCursor(opCtx, false /* forward */);
-    auto record = cursor->next();
-
-    // The collection is empty.
-    if (!record)
-        return RecordId();
-
-    return record->id;
 }
 
 boost::optional<MultikeyPaths> IndexBuildInterceptor::getMultikeyPaths() const {
@@ -308,10 +262,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
         }
     }
 
-    AutoGetCollection coll(opCtx, _sideWritesNs, LockMode::MODE_IX);
-    invariant(coll.getCollection());
-
-    std::vector<InsertStatement> toInsert;
+    std::vector<BSONObj> toInsert;
     for (const auto& key : keys) {
         // Documents inserted into this table must be consumed in insert-order. Today, we can rely
         // on storage engines to return documents in insert-order, but with clustered indexes,
@@ -344,13 +295,13 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     opCtx->recoveryUnit()->onRollback(
         [=] { _sideWritesCounter.fetchAndSubtract(toInsert.size()); });
 
-    // This is necessary for operations in multi-document transactions to not generate oplog writes
-    // for each insert.
-    repl::UnreplicatedWritesBlock urwb(opCtx);
+    std::vector<Record> records;
+    for (auto& obj : toInsert) {
+        records.emplace_back(Record{RecordId(), RecordData(obj.objdata(), obj.objsize())});
+    }
 
-    OpDebug* const opDebug = nullptr;
-    const bool fromMigrate = false;
-    return coll.getCollection()->insertDocuments(
-        opCtx, toInsert.begin(), toInsert.end(), opDebug, fromMigrate);
+    std::vector<Timestamp> timestamps;
+    timestamps.reserve(toInsert.size());
+    return _sideWritesTable->insertRecords(opCtx, &records, timestamps);
 }
 }  // namespace mongo

@@ -32,7 +32,7 @@
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/index/multikey_paths.h"
 #include "mongo/db/namespace_string.h"
-#include "mongo/db/record_id.h"
+#include "mongo/db/storage/record_store.h"
 #include "mongo/platform/atomic_word.h"
 
 namespace mongo {
@@ -46,13 +46,10 @@ public:
     enum class Op { kInsert, kDelete };
     enum class ScanYield { kYieldAuto, kInterruptOnly };
 
-    IndexBuildInterceptor() : _sideWritesNs(makeTempSideWritesNs()) {}
-    IndexBuildInterceptor(NamespaceString sideWritesNs) : _sideWritesNs(sideWritesNs) {}
+    IndexBuildInterceptor(){};
 
-    static NamespaceString makeTempSideWritesNs();
-
-    void ensureSideWritesCollectionExists(OperationContext* opCtx);
-    void removeSideWritesCollection(OperationContext* opCtx);
+    void ensureTempSideWritesTable(OperationContext* opCtx);
+    void removeTempSideWritesTable(OperationContext* opCtx);
 
     /**
      * Client writes that are concurrent with an index build will have their index updates written
@@ -100,8 +97,6 @@ public:
 private:
     using SideWriteRecord = std::pair<RecordId, BSONObj>;
 
-    RecordId _peekAtLastRecord(OperationContext* opCtx) const;
-
     Status _applyWrite(OperationContext* opCtx,
                        IndexAccessMethod* indexAccessMethod,
                        const BSONObj& doc,
@@ -109,9 +104,12 @@ private:
                        int64_t* const keysInserted,
                        int64_t* const keysDeleted);
 
+    // This temporary record store is owned by the interceptor and should be dropped when an index
+    // build finishes.
+    std::unique_ptr<RecordStore> _sideWritesTable;
+
     int64_t _numApplied{0};
 
-    const NamespaceString _sideWritesNs;
     AtomicInt64 _sideWritesCounter{0};
 
     mutable stdx::mutex _multikeyPathMutex;

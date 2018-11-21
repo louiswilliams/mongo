@@ -57,6 +57,44 @@ struct KVStorageEngineOptions {
     bool forRepair = false;
 };
 
+class UniqueRecordStore {
+public:
+    UniqueRecordStore(OperationContext* opCtx, KVEngine* kvEngine, std::unique_ptr<RecordStore> rs)
+        : _opCtx(opCtx), _kvEngine(kvEngine), _rs(std::move(rs)){};
+
+    UniqueRecordStore(UniqueRecordStore&& other) noexcept : _opCtx(other._opCtx),
+                                                            _kvEngine(other._kvEngine),
+                                                            _rs(std::move(other._rs)) {}
+
+    ~UniqueRecordStore();
+
+    RecordStore* get() {
+        return _rs.get();
+    }
+
+    const RecordStore* get() const {
+        return _rs.get();
+    }
+
+    RecordStore* operator*() {
+        return get();
+    }
+
+    const RecordStore* operator->() const {
+        return get();
+    }
+
+    RecordStore* operator->() {
+        return get();
+    }
+
+
+private:
+    OperationContext* _opCtx;
+    KVEngine* _kvEngine;
+    std::unique_ptr<RecordStore> _rs;
+};
+
 /*
  * The actual definition for this function is in
  * `src/mongo/db/storage/kv/kv_database_catalog_entry.cpp` This unusual forward declaration is to
@@ -122,7 +160,7 @@ public:
 
     virtual Status repairRecordStore(OperationContext* opCtx, const std::string& ns);
 
-    virtual std::unique_ptr<RecordStore> makeTemporaryRecordStore(OperationContext* opCtx) override;
+    virtual UniqueRecordStore makeTemporaryRecordStore(OperationContext* opCtx) override;
 
     virtual void cleanShutdown();
 

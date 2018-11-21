@@ -32,6 +32,7 @@
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/index/multikey_paths.h"
 #include "mongo/db/namespace_string.h"
+#include "mongo/db/storage/kv/kv_storage_engine.h"
 #include "mongo/db/storage/record_store.h"
 #include "mongo/platform/atomic_word.h"
 
@@ -45,10 +46,7 @@ class IndexBuildInterceptor {
 public:
     enum class Op { kInsert, kDelete };
 
-    IndexBuildInterceptor(){};
-
-    void ensureTempSideWritesTable(OperationContext* opCtx);
-    void removeTempSideWritesTable(OperationContext* opCtx);
+    IndexBuildInterceptor(OperationContext* opCtx);
 
     /**
      * Client writes that are concurrent with an index build will have their index updates written
@@ -104,7 +102,7 @@ private:
 
     // This temporary record store is owned by the interceptor and should be dropped when an index
     // build finishes.
-    std::unique_ptr<RecordStore> _sideWritesTable;
+    UniqueRecordStore _sideWritesTable;
 
     int64_t _numApplied{0};
 

@@ -627,8 +627,10 @@ Status KVStorageEngine::repairRecordStore(OperationContext* opCtx, const std::st
     return Status::OK();
 }
 
-std::unique_ptr<RecordStore> KVStorageEngine::makeTemporaryRecordStore(OperationContext* opCtx) {
-    return _engine->makeTemporaryRecordStore(opCtx, _catalog->newTempIdent());
+UniqueRecordStore KVStorageEngine::makeTemporaryRecordStore(OperationContext* opCtx) {
+    std::unique_ptr<RecordStore> rs =
+        _engine->makeTemporaryRecordStore(opCtx, _catalog->newTempIdent());
+    return {opCtx, getEngine(), std::move(rs)};
 }
 
 void KVStorageEngine::setJournalListener(JournalListener* jl) {
@@ -733,5 +735,15 @@ void KVStorageEngine::_dumpCatalog(OperationContext* opCtx) {
     }
     opCtx->recoveryUnit()->abandonSnapshot();
 }
+
+UniqueRecordStore::~UniqueRecordStore() {
+    WriteUnitOfWork wuow(_opCtx);
+    auto status = _kvEngine->dropIdent(_opCtx, _rs->getIdent());
+    if (!status.isOK()) {
+        warning() << "failed to drop temporary ident: " << _rs->getIdent();
+    }
+    wuow.commit();
+}
+
 
 }  // namespace mongo

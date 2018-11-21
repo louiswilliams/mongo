@@ -50,12 +50,9 @@
 
 namespace mongo {
 
-void IndexBuildInterceptor::ensureTempSideWritesTable(OperationContext* opCtx) {
-    _sideWritesTable =
-        opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx);
-}
-
-void IndexBuildInterceptor::removeTempSideWritesTable(OperationContext* opCtx) {}
+IndexBuildInterceptor::IndexBuildInterceptor(OperationContext* opCtx)
+    : _sideWritesTable(
+          opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx)){};
 
 Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                                                    IndexAccessMethod* indexAccessMethod,
@@ -211,7 +208,7 @@ Status IndexBuildInterceptor::_applyWrite(OperationContext* opCtx,
 }
 
 bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
-    invariant(_sideWritesTable);
+    invariant(_sideWritesTable.get());
     auto cursor = _sideWritesTable->getCursor(opCtx, false /* forward */);
     auto record = cursor->next();
 

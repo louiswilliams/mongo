@@ -51,7 +51,6 @@ class OperationContext;
 class RecoveryUnit;
 class SortedDataInterface;
 class SnapshotManager;
-class UniqueRecordStore;
 
 class KVEngine {
 public:

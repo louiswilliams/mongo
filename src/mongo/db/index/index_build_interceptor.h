@@ -117,5 +117,4 @@ private:
     boost::optional<MultikeyPaths> _multikeyPaths;
 };
 
-
 }  // namespace mongo

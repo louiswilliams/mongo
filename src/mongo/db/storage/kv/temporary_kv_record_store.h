@@ -62,5 +62,5 @@ private:
     OperationContext* _opCtx;
     KVEngine* _kvEngine;
 };
-}
 
+}  // namespace mongo

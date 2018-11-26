@@ -41,4 +41,4 @@ TemporaryKVRecordStore::~TemporaryKVRecordStore() {
     }
 }
 
-}  // mongo
+}  // namespace mongo

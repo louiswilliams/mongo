@@ -536,7 +536,7 @@ TEST_F(WiredTigerRecoveryUnitTestFixture, ReadOnceCursorsAreNotCached) {
     auto ru = WiredTigerRecoveryUnit::get(opCtx);
 
     std::unique_ptr<RecordStore> rs(harnessHelper->createRecordStore(opCtx, "test.read_once"));
-    auto uri = rs->getIdent();
+    auto uri = dynamic_cast<WiredTigerRecordStore*>(rs.get())->getURI();
 
     // Insert a record.
     ru->beginUnitOfWork(opCtx);

@@ -63,4 +63,5 @@ public:
 protected:
     std::unique_ptr<RecordStore> _rs;
 };
-}
+
+}  // namespace mongo

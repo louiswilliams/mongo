@@ -639,6 +639,7 @@ WiredTigerRecordStore::WiredTigerRecordStore(WiredTigerKVEngine* kvEngine,
                                              Params params)
     : RecordStore(params.ns),
       _uri(params.uri),
+      _ident(params.uri.substr(strlen("table:"))),
       _tableId(WiredTigerSession::genTableId()),
       _engineName(params.engineName),
       _isCapped(params.isCapped),
@@ -677,8 +678,12 @@ WiredTigerRecordStore::WiredTigerRecordStore(WiredTigerKVEngine* kvEngine,
     if (!params.isReadOnly) {
         bool replicatedWrites = getGlobalReplSettings().usingReplSets() ||
             repl::ReplSettings::shouldRecoverFromOplogAsStandalone();
-        uassertStatusOK(WiredTigerUtil::setTableLogging(
-            ctx, _uri, WiredTigerUtil::useTableLogging(NamespaceString(ns()), replicatedWrites)));
+        if (ns().size()) {
+            uassertStatusOK(WiredTigerUtil::setTableLogging(
+                ctx,
+                _uri,
+                WiredTigerUtil::useTableLogging(NamespaceString(ns()), replicatedWrites)));
+        }
     }
 
     if (_isOplog) {

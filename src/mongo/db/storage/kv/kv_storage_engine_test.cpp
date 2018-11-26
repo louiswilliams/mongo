@@ -76,7 +76,7 @@ public:
         return _storageEngine->getCatalog()->getCollectionIdent(ns.ns());
     }
 
-    std::unique_ptr<RecordStore> makeTemporary(OperationContext* opCtx) {
+    UniqueRecordStore makeTemporary(OperationContext* opCtx) {
         return _storageEngine->makeTemporaryRecordStore(opCtx);
     }
 
@@ -230,12 +230,28 @@ TEST_F(KVStorageEngineTest, ReconcileDropsTemporary) {
     auto opCtx = cc().makeOperationContext();
 
     auto rs = makeTemporary(opCtx.get());
-    ASSERT(rs);
+    ASSERT(rs.get());
     const std::string ident = rs->getIdent();
 
     ASSERT(identExists(opCtx.get(), ident));
 
     ASSERT_OK(reconcile(opCtx.get()).getStatus());
+
+    // The storage engine is responsible for dropping its temporary idents.
+    ASSERT(!identExists(opCtx.get(), ident));
+}
+
+TEST_F(KVStorageEngineTest, TemporaryDropsItself) {
+    auto opCtx = cc().makeOperationContext();
+
+    std::string ident;
+    {
+        auto rs = makeTemporary(opCtx.get());
+        ASSERT(rs.get());
+        ident = rs->getIdent();
+
+        ASSERT(identExists(opCtx.get(), ident));
+    }
 
     // The storage engine is responsible for dropping its temporary idents.
     ASSERT(!identExists(opCtx.get(), ident));

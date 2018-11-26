@@ -219,6 +219,10 @@ bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
     return false;
 }
 
+void IndexBuildInterceptor::dropSideWritesTable(OperationContext* opCtx) {
+    _sideWritesTable.drop(opCtx);
+}
+
 boost::optional<MultikeyPaths> IndexBuildInterceptor::getMultikeyPaths() const {
     stdx::unique_lock<stdx::mutex> lk(_multikeyPathMutex);
     return _multikeyPaths;

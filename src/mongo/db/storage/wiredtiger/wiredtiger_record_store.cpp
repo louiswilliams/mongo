@@ -639,7 +639,7 @@ WiredTigerRecordStore::WiredTigerRecordStore(WiredTigerKVEngine* kvEngine,
                                              Params params)
     : RecordStore(params.ns),
       _uri(params.uri),
-      _ident(params.uri.substr(strlen("table:"))),
+      _ident(_uri.substr(WiredTigerKVEngine::kTableUriPrefix.size())),
       _tableId(WiredTigerSession::genTableId()),
       _engineName(params.engineName),
       _isCapped(params.isCapped),
@@ -655,9 +655,12 @@ WiredTigerRecordStore::WiredTigerRecordStore(WiredTigerKVEngine* kvEngine,
       _cappedDeleteCheckCount(0),
       _sizeStorer(params.sizeStorer),
       _kvEngine(kvEngine) {
+    invariant(_ident.size() > 0);
+
     Status versionStatus = WiredTigerUtil::checkApplicationMetadataFormatVersion(
                                ctx, _uri, kMinimumRecordStoreVersion, kMaximumRecordStoreVersion)
                                .getStatus();
+
     if (!versionStatus.isOK()) {
         std::cout << " Version: " << versionStatus.reason() << std::endl;
         if (versionStatus.code() == ErrorCodes::FailedToParse) {
@@ -749,7 +752,7 @@ void WiredTigerRecordStore::postConstructorInit(OperationContext* opCtx) {
         // time but not as of the top of the oplog.
         LOG_FOR_RECOVERY(2) << "Record store was empty; setting count metadata to zero but marking "
                                "record store as needing size adjustment during recovery. ns: "
-                            << (isTemp() ? "(temp)" : ns()) << ", ident: " << _uri;
+                            << (isTemp() ? "(temp)" : ns()) << ", ident: " << _ident;
         sizeRecoveryState(getGlobalServiceContext())
             .markCollectionAsAlwaysNeedsSizeAdjustment(_ident);
         _sizeInfo->dataSize.store(0);
@@ -912,7 +915,7 @@ int64_t WiredTigerRecordStore::_cappedDeleteAsNeeded(OperationContext* opCtx,
     // replication recovery. If we don't mark the collection for size adjustment then we will not
     // perform the capped deletions as expected. In that case, the collection is guaranteed to be
     // empty at the stable timestamp and thus guaranteed to be marked for size adjustment.
-    if (!sizeRecoveryState(getGlobalServiceContext()).collectionNeedsSizeAdjustment(_uri)) {
+    if (!sizeRecoveryState(getGlobalServiceContext()).collectionNeedsSizeAdjustment(_ident)) {
         return 0;
     }
 
@@ -1694,7 +1697,7 @@ private:
 };
 
 void WiredTigerRecordStore::_changeNumRecords(OperationContext* opCtx, int64_t diff) {
-    if (!sizeRecoveryState(getGlobalServiceContext()).collectionNeedsSizeAdjustment(_uri)) {
+    if (!sizeRecoveryState(getGlobalServiceContext()).collectionNeedsSizeAdjustment(_ident)) {
         return;
     }
 
@@ -1717,7 +1720,7 @@ private:
 };
 
 void WiredTigerRecordStore::_increaseDataSize(OperationContext* opCtx, int64_t amount) {
-    if (!sizeRecoveryState(getGlobalServiceContext()).collectionNeedsSizeAdjustment(_uri)) {
+    if (!sizeRecoveryState(getGlobalServiceContext()).collectionNeedsSizeAdjustment(_ident)) {
         return;
     }
 

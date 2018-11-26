@@ -427,6 +427,8 @@ stdx::function<bool(StringData)> initRsOplogBackgroundThreadCallback = [](String
 };
 }  // namespace
 
+StringData WiredTigerKVEngine::kTableUriPrefix = "table:"_sd;
+
 WiredTigerKVEngine::WiredTigerKVEngine(const std::string& canonicalName,
                                        const std::string& path,
                                        ClockSource* cs,
@@ -794,10 +796,9 @@ Status WiredTigerKVEngine::_salvageIfNeeded(const char* uri) {
 Status WiredTigerKVEngine::_rebuildIdent(WT_SESSION* session, const char* uri) {
     invariant(_inRepairMode);
 
-    static const char tablePrefix[] = "table:";
-    invariant(std::string(uri).find(tablePrefix) == 0);
+    invariant(std::string(uri).find(kTableUriPrefix.rawData()) == 0);
 
-    const std::string identName(uri + sizeof(tablePrefix) - 1);
+    const std::string identName(uri + kTableUriPrefix.size());
     auto filePath = getDataFilePathForIdent(identName);
     if (filePath) {
         const boost::filesystem::path corruptFile(filePath->string() + ".corrupt");
@@ -1074,7 +1075,8 @@ std::unique_ptr<RecordStore> WiredTigerKVEngine::getGroupedRecordStore(
 }
 
 string WiredTigerKVEngine::_uri(StringData ident) const {
-    return string("table:") + ident.toString();
+    invariant(ident.find(kTableUriPrefix) == string::npos);
+    return kTableUriPrefix + ident.toString();
 }
 
 Status WiredTigerKVEngine::createGroupedSortedDataInterface(OperationContext* opCtx,

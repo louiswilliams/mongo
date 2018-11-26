@@ -687,7 +687,7 @@ WiredTigerRecordStore::WiredTigerRecordStore(WiredTigerKVEngine* kvEngine,
         // The oplog always needs to be marked for size adjustment since it is journaled and also
         // may change during replication recovery (if truncated).
         sizeRecoveryState(getGlobalServiceContext())
-            .markCollectionAsAlwaysNeedsSizeAdjustment(_uri);
+            .markCollectionAsAlwaysNeedsSizeAdjustment(_ident);
     }
 }
 
@@ -749,9 +749,9 @@ void WiredTigerRecordStore::postConstructorInit(OperationContext* opCtx) {
         // time but not as of the top of the oplog.
         LOG_FOR_RECOVERY(2) << "Record store was empty; setting count metadata to zero but marking "
                                "record store as needing size adjustment during recovery. ns: "
-                            << ns() << ", ident: " << _uri;
+                            << (isTemp() ? "(temp)" : ns()) << ", ident: " << _uri;
         sizeRecoveryState(getGlobalServiceContext())
-            .markCollectionAsAlwaysNeedsSizeAdjustment(_uri);
+            .markCollectionAsAlwaysNeedsSizeAdjustment(_ident);
         _sizeInfo->dataSize.store(0);
         _sizeInfo->numRecords.store(0);
 
@@ -1658,7 +1658,7 @@ void WiredTigerRecordStore::updateStatsAfterRepair(OperationContext* opCtx,
                                                    long long numRecords,
                                                    long long dataSize) {
     // We're correcting the size as of now, future writes should be tracked.
-    sizeRecoveryState(getGlobalServiceContext()).markCollectionAsAlwaysNeedsSizeAdjustment(_uri);
+    sizeRecoveryState(getGlobalServiceContext()).markCollectionAsAlwaysNeedsSizeAdjustment(_ident);
 
     _sizeInfo->numRecords.store(numRecords);
     _sizeInfo->dataSize.store(dataSize);

@@ -229,6 +229,7 @@ Status IndexBuilder::_build(OperationContext* opCtx,
     if (allowBackgroundBuilding) {
         _setBgIndexStarting();
         invariant(dbLock);
+        opCtx->recoveryUnit()->abandonSnapshot();
         dbLock->relockWithMode(MODE_IX);
     }
 
@@ -257,6 +258,7 @@ Status IndexBuilder::_build(OperationContext* opCtx,
     }
 
     if (allowBackgroundBuilding) {
+        opCtx->recoveryUnit()->abandonSnapshot();
         dbLock->relockWithMode(MODE_X);
     }
 

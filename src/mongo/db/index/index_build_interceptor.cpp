@@ -65,7 +65,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     const int64_t appliedAtStart = _numApplied;
 
-    // Setup the progress meter.
+    // Setup the progress meter. This will never be completely accurate, because more more writes
+    // can be read from the side writes table than are observed before draining.
     static const char* curopMessage = "Index build draining writes";
     stdx::unique_lock<Client> lk(*opCtx->getClient());
     ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
@@ -127,6 +128,9 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 break;
         }
 
+        // Account for more writes coming in after the drain starts.
+        progress->setTotalWhileRunning(_sideWritesCounter.loadRelaxed() - appliedAtStart);
+
         invariant(!batch.empty());
 
         // If we are here, either we have reached the end of the table or the batch is full, so
@@ -140,7 +144,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 return status;
             }
 
-            // Delete the document from the collection as soon as it has beenn inserted into the
+            // Delete the document from the table as soon as it has beenn inserted into the
             // index. This ensures that no key is ever inserted twice and no keys are skipped.
             _sideWritesTable->rs()->deleteRecord(opCtx, operation.first);
         }
@@ -212,7 +216,7 @@ bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
     auto cursor = _sideWritesTable->rs()->getCursor(opCtx, false /* forward */);
     auto record = cursor->next();
 
-    // The collection is empty only when all writes are applied.
+    // The table is empty only when all writes are applied.
     if (!record)
         return true;
 
@@ -291,6 +295,8 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     }
 
     _sideWritesCounter.fetchAndAdd(toInsert.size());
+    // This may rollback, not by inserting into this table necessarily, but if other write
+    // operations outside this table but in the same transaction are rolled back.
     opCtx->recoveryUnit()->onRollback(
         [=] { _sideWritesCounter.fetchAndSubtract(toInsert.size()); });
 

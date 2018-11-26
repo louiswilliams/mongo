@@ -86,7 +86,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     // into the next batch.
     boost::optional<SideWriteRecord> stashed;
 
-    auto cursor = _sideWritesTable->getCursor(opCtx);
+    auto cursor = _sideWritesTable->rs()->getCursor(opCtx);
 
     bool atEof = false;
     while (!atEof) {
@@ -102,7 +102,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
         if (record) {
             RecordId currentRecordId = record->id;
-            BSONObj docOut = record->data.releaseToBson();
+            BSONObj docOut = record->data.toBson().getOwned();
 
             // If the total batch size in bytes would be too large, stash this document and let the
             // current batch insert.
@@ -111,10 +111,10 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 invariant(!stashed);
 
                 // Stash this document to be inserted in the next batch.
-                stashed.emplace(currentRecordId, docOut);
+                stashed.emplace(currentRecordId, std::move(docOut));
             } else {
                 batchSizeBytes += objSize;
-                batch.emplace_back(currentRecordId, docOut);
+                batch.emplace_back(currentRecordId, std::move(docOut));
 
                 // Continue if there is more room in the batch.
                 if (batch.size() < kBatchMaxSize) {
@@ -142,7 +142,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
             // Delete the document from the collection as soon as it has beenn inserted into the
             // index. This ensures that no key is ever inserted twice and no keys are skipped.
-            _sideWritesTable->deleteRecord(opCtx, operation.first);
+            _sideWritesTable->rs()->deleteRecord(opCtx, operation.first);
         }
         cursor->save();
         wuow.commit();
@@ -208,8 +208,8 @@ Status IndexBuildInterceptor::_applyWrite(OperationContext* opCtx,
 }
 
 bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
-    invariant(_sideWritesTable.get());
-    auto cursor = _sideWritesTable->getCursor(opCtx, false /* forward */);
+    invariant(_sideWritesTable);
+    auto cursor = _sideWritesTable->rs()->getCursor(opCtx, false /* forward */);
     auto record = cursor->next();
 
     // The collection is empty only when all writes are applied.
@@ -217,10 +217,6 @@ bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
         return true;
 
     return false;
-}
-
-void IndexBuildInterceptor::dropSideWritesTable(OperationContext* opCtx) {
-    _sideWritesTable.drop(opCtx);
 }
 
 boost::optional<MultikeyPaths> IndexBuildInterceptor::getMultikeyPaths() const {
@@ -304,6 +300,6 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     }
 
     std::vector<Timestamp> timestamps(records.size());
-    return _sideWritesTable->insertRecords(opCtx, &records, timestamps);
+    return _sideWritesTable->rs()->insertRecords(opCtx, &records, timestamps);
 }
 }  // namespace mongo

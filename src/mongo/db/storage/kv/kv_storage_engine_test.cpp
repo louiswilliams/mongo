@@ -76,7 +76,7 @@ public:
         return _storageEngine->getCatalog()->getCollectionIdent(ns.ns());
     }
 
-    UniqueRecordStore makeTemporary(OperationContext* opCtx) {
+    std::unique_ptr<TemporaryRecordStore> makeTemporary(OperationContext* opCtx) {
         return _storageEngine->makeTemporaryRecordStore(opCtx);
     }
 
@@ -231,7 +231,7 @@ TEST_F(KVStorageEngineTest, ReconcileDropsTemporary) {
 
     auto rs = makeTemporary(opCtx.get());
     ASSERT(rs.get());
-    const std::string ident = rs->getIdent();
+    const std::string ident = rs->rs()->getIdent();
 
     ASSERT(identExists(opCtx.get(), ident));
 
@@ -248,12 +248,12 @@ TEST_F(KVStorageEngineTest, TemporaryDropsItself) {
     {
         auto rs = makeTemporary(opCtx.get());
         ASSERT(rs.get());
-        ident = rs->getIdent();
+        ident = rs->rs()->getIdent();
 
         ASSERT(identExists(opCtx.get(), ident));
     }
 
-    // The storage engine is responsible for dropping its temporary idents.
+    // The temporary record store RAII class should drop itself.
     ASSERT(!identExists(opCtx.get(), ident));
 }
 

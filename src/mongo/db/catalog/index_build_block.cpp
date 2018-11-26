@@ -131,7 +131,6 @@ void IndexCatalogImpl::IndexBuildBlock::fail() {
     if (_entry) {
         invariant(_catalog->_dropIndex(_opCtx, _entry).isOK());
         if (_indexBuildInterceptor) {
-            _indexBuildInterceptor->dropSideWritesTable(_opCtx);
             _entry->setIndexBuildInterceptor(nullptr);
         }
     } else {
@@ -175,8 +174,6 @@ void IndexCatalogImpl::IndexBuildBlock::success() {
     if (_indexBuildInterceptor) {
         // An index build should never be completed with writes remaining in the interceptor.
         invariant(_indexBuildInterceptor->areAllWritesApplied(_opCtx));
-
-        _indexBuildInterceptor->dropSideWritesTable(_opCtx);
         _entry->setIndexBuildInterceptor(nullptr);
     }
 }

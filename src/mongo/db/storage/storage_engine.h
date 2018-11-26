@@ -45,7 +45,7 @@ namespace mongo {
 class DatabaseCatalogEntry;
 class JournalListener;
 class OperationContext;
-class UniqueRecordStore;
+class TemporaryRecordStore;
 class RecoveryUnit;
 class SnapshotManager;
 struct StorageGlobalParams;
@@ -292,7 +292,8 @@ public:
      * the caller when done being used. The storage engine will drop any remaining temporary record
      * stores on startup.
      */
-    virtual UniqueRecordStore makeTemporaryRecordStore(OperationContext* opCtx) = 0;
+    virtual std::unique_ptr<TemporaryRecordStore> makeTemporaryRecordStore(
+        OperationContext* opCtx) = 0;
 
     /**
      * This method will be called before there is a clean shutdown.  Storage engines should

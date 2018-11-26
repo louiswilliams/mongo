@@ -33,7 +33,7 @@
 #include "mongo/db/index/multikey_paths.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/storage/kv/kv_storage_engine.h"
-#include "mongo/db/storage/record_store.h"
+#include "mongo/db/storage/temporary_record_store.h"
 #include "mongo/platform/atomic_word.h"
 
 namespace mongo {
@@ -46,6 +46,11 @@ class IndexBuildInterceptor {
 public:
     enum class Op { kInsert, kDelete };
 
+    /**
+     * The OperationContext is used to construct a temporary table in the storage engine to
+     * intercept side writes. This interceptor must not exist longer than the operation context used
+     * to construct it, as the underlying TemporaryRecordStore needs it to destroy itself.
+     */
     IndexBuildInterceptor(OperationContext* opCtx);
 
     /**
@@ -84,8 +89,6 @@ public:
      */
     bool areAllWritesApplied(OperationContext* opCtx) const;
 
-    void dropSideWritesTable(OperationContext* opCtx);
-
     /**
       * When an index builder wants to commit, use this to retrieve any recorded multikey paths
       * that were tracked during the build.
@@ -102,9 +105,9 @@ private:
                        int64_t* const keysInserted,
                        int64_t* const keysDeleted);
 
-    // This temporary record store is owned by the interceptor and should be dropped when an index
-    // build finishes.
-    UniqueRecordStore _sideWritesTable;
+    // This temporary record store is owned by the interceptor and must exist as long as the
+    // OperationContext used to construct it.
+    std::unique_ptr<TemporaryRecordStore> _sideWritesTable;
 
     int64_t _numApplied{0};
 

@@ -42,6 +42,7 @@
 #include "mongo/db/storage/kv/kv_database_catalog_entry_base.h"
 #include "mongo/db/storage/record_store.h"
 #include "mongo/db/storage/storage_engine.h"
+#include "mongo/db/storage/temporary_record_store.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/stdx/mutex.h"
@@ -55,44 +56,6 @@ struct KVStorageEngineOptions {
     bool directoryPerDB = false;
     bool directoryForIndexes = false;
     bool forRepair = false;
-};
-
-class UniqueRecordStore {
-public:
-    UniqueRecordStore(OperationContext* opCtx, KVEngine* kvEngine, std::unique_ptr<RecordStore> rs)
-        : _opCtx(opCtx), _kvEngine(kvEngine), _rs(std::move(rs)){};
-
-    UniqueRecordStore(UniqueRecordStore&& other) noexcept : _opCtx(other._opCtx),
-                                                            _kvEngine(other._kvEngine),
-                                                            _rs(std::move(other._rs)) {}
-
-    ~UniqueRecordStore();
-
-    RecordStore* get() {
-        return _rs.get();
-    }
-
-    const RecordStore* get() const {
-        return _rs.get();
-    }
-
-    RecordStore* operator*() {
-        return get();
-    }
-
-    const RecordStore* operator->() const {
-        return get();
-    }
-
-    RecordStore* operator->() {
-        return get();
-    }
-
-
-private:
-    OperationContext* _opCtx;
-    KVEngine* _kvEngine;
-    std::unique_ptr<RecordStore> _rs;
 };
 
 /*
@@ -160,7 +123,8 @@ public:
 
     virtual Status repairRecordStore(OperationContext* opCtx, const std::string& ns);
 
-    virtual UniqueRecordStore makeTemporaryRecordStore(OperationContext* opCtx) override;
+    virtual std::unique_ptr<TemporaryRecordStore> makeTemporaryRecordStore(
+        OperationContext* opCtx) override;
 
     virtual void cleanShutdown();
 

@@ -675,15 +675,11 @@ WiredTigerRecordStore::WiredTigerRecordStore(WiredTigerKVEngine* kvEngine,
         invariant(_cappedMaxDocs == -1);
     }
 
-    if (!params.isReadOnly) {
+    if (!params.isReadOnly && !isTemp()) {
         bool replicatedWrites = getGlobalReplSettings().usingReplSets() ||
             repl::ReplSettings::shouldRecoverFromOplogAsStandalone();
-        if (ns().size()) {
-            uassertStatusOK(WiredTigerUtil::setTableLogging(
-                ctx,
-                _uri,
-                WiredTigerUtil::useTableLogging(NamespaceString(ns()), replicatedWrites)));
-        }
+        uassertStatusOK(WiredTigerUtil::setTableLogging(
+            ctx, _uri, WiredTigerUtil::useTableLogging(NamespaceString(ns()), replicatedWrites)));
     }
 
     if (_isOplog) {
@@ -701,7 +697,11 @@ WiredTigerRecordStore::~WiredTigerRecordStore() {
         _shuttingDown = true;
     }
 
-    LOG(1) << "~WiredTigerRecordStore for: " << ns();
+    if (!isTemp()) {
+        LOG(1) << "~WiredTigerRecordStore for: " << ns();
+    } else {
+        LOG(1) << "~WiredTigerRecordStore for temporary ident: " << getIdent();
+    }
 
     if (_oplogStones) {
         _oplogStones->kill();

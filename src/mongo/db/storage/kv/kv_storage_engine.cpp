@@ -42,6 +42,7 @@
 #include "mongo/db/storage/kv/kv_catalog_feature_tracker.h"
 #include "mongo/db/storage/kv/kv_database_catalog_entry.h"
 #include "mongo/db/storage/kv/kv_engine.h"
+#include "mongo/db/storage/kv/temporary_kv_record_store.h"
 #include "mongo/db/storage/storage_repair_observer.h"
 #include "mongo/db/unclean_shutdown.h"
 #include "mongo/util/assert_util.h"
@@ -627,10 +628,12 @@ Status KVStorageEngine::repairRecordStore(OperationContext* opCtx, const std::st
     return Status::OK();
 }
 
-UniqueRecordStore KVStorageEngine::makeTemporaryRecordStore(OperationContext* opCtx) {
+std::unique_ptr<TemporaryRecordStore> KVStorageEngine::makeTemporaryRecordStore(
+    OperationContext* opCtx) {
     std::unique_ptr<RecordStore> rs =
         _engine->makeTemporaryRecordStore(opCtx, _catalog->newTempIdent());
-    return {opCtx, getEngine(), std::move(rs)};
+    LOG(1) << "created temporary record store: " << rs->getIdent();
+    return std::make_unique<TemporaryKVRecordStore>(opCtx, getEngine(), std::move(rs));
 }
 
 void KVStorageEngine::setJournalListener(JournalListener* jl) {
@@ -734,15 +737,6 @@ void KVStorageEngine::_dumpCatalog(OperationContext* opCtx) {
         rec = cursor->next();
     }
     opCtx->recoveryUnit()->abandonSnapshot();
-}
-
-UniqueRecordStore::~UniqueRecordStore() {
-    WriteUnitOfWork wuow(_opCtx);
-    auto status = _kvEngine->dropIdent(_opCtx, _rs->getIdent());
-    if (!status.isOK()) {
-        warning() << "failed to drop temporary ident: " << _rs->getIdent();
-    }
-    wuow.commit();
 }
 
 

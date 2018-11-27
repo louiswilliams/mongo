@@ -37,12 +37,9 @@
 #include "mongo/db/catalog_raii.h"
 #include "mongo/db/curop.h"
 #include "mongo/db/db_raii.h"
-#include "mongo/db/exec/working_set_common.h"
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/multi_key_path_tracker.h"
 #include "mongo/db/operation_context.h"
-#include "mongo/db/query/internal_plans.h"
-#include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/db/service_context.h"
 #include "mongo/util/log.h"
 #include "mongo/util/progress_meter.h"
@@ -56,6 +53,7 @@ IndexBuildInterceptor::IndexBuildInterceptor(OperationContext* opCtx)
 
 Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                                                    IndexAccessMethod* indexAccessMethod,
+                                                   const IndexDescriptor* indexDescriptor,
                                                    const InsertDeleteOptions& options) {
     invariant(!opCtx->lockState()->inAWriteUnitOfWork());
 
@@ -65,15 +63,15 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     const int64_t appliedAtStart = _numApplied;
 
-    // Setup the progress meter. This will never be completely accurate, because more more writes
-    // can be read from the side writes table than are observed before draining.
+    // Set up the progress meter. This will never be completely accurate, because more writes can be
+    // read from the side writes table than are observed before draining.
     static const char* curopMessage = "Index build draining writes";
     stdx::unique_lock<Client> lk(*opCtx->getClient());
     ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
         curopMessage, curopMessage, _sideWritesCounter.load() - appliedAtStart, 1));
     lk.unlock();
 
-    // Buffer operations into a batches to insert per WriteUnitOfWork. Impose an upper limit on the
+    // Buffer operations into batches to insert per WriteUnitOfWork. Impose an upper limit on the
     // number of documents and the total size of the batch.
     const int32_t kBatchMaxSize = 1000;
     const int64_t kBatchMaxBytes = BSONObjMaxInternalSize;
@@ -144,8 +142,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 return status;
             }
 
-            // Delete the document from the table as soon as it has beenn inserted into the
-            // index. This ensures that no key is ever inserted twice and no keys are skipped.
+            // Delete the document from the table as soon as it has been inserted into the index.
+            // This ensures that no key is ever inserted twice and no keys are skipped.
             _sideWritesTable->rs()->deleteRecord(opCtx, operation.first);
         }
         cursor->save();
@@ -161,7 +159,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     progress->finished();
 
-    log() << "applied " << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
+    log() << "index build for " << indexDescriptor->indexName() << ": drain applied "
+          << (_numApplied - appliedAtStart) << " side writes. i: " << totalInserted
           << ", d: " << totalDeleted << ", total: " << _numApplied;
 
     return Status::OK();
@@ -180,7 +179,6 @@ Status IndexBuildInterceptor::_applyWrite(OperationContext* opCtx,
     const BSONObjSet keySet = SimpleBSONObjComparator::kInstance.makeBSONObjSet({key});
 
     if (opType == Op::kInsert) {
-
         InsertResult result;
         Status s =
             indexAccessMethod->insertKeys(opCtx,
@@ -295,16 +293,19 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     }
 
     _sideWritesCounter.fetchAndAdd(toInsert.size());
-    // This may rollback, not by inserting into this table necessarily, but if other write
-    // operations outside this table but in the same transaction are rolled back.
+    // This insert may roll back, but not necessarily from inserting into this table. If other write
+    // operations outside this table and in the same transaction are rolled back, this counter also
+    // needs to be rolled back.
     opCtx->recoveryUnit()->onRollback(
-        [=] { _sideWritesCounter.fetchAndSubtract(toInsert.size()); });
+        [ this, size = toInsert.size() ] { _sideWritesCounter.fetchAndSubtract(size); });
 
     std::vector<Record> records;
     for (auto& obj : toInsert) {
         records.emplace_back(Record{RecordId(), RecordData(obj.objdata(), obj.objsize())});
     }
 
+    // By passing a vector of null timestamps, these inserts are not timestamped individually, but
+    // rather with the timestamp as the owning operation.
     std::vector<Timestamp> timestamps(records.size());
     return _sideWritesTable->rs()->insertRecords(opCtx, &records, timestamps);
 }

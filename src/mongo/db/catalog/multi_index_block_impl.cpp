@@ -545,19 +545,22 @@ Status MultiIndexBlockImpl::_dumpInsertsFromBulk(std::set<RecordId>* dupRecords,
 Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
     invariant(!_opCtx->lockState()->inAWriteUnitOfWork());
 
-    LOG(1) << "draining background writes into index";
-
-    // Drain side-writes collections. This only drains what is visible. Assuming weak locks are held
-    // on the collection, more writes can come in after this drain completes. Callers are
-    // responsible for stopping writes by holding a strong lock while draining before completing the
-    // index build.
+    // Drain side-writes table for each index. This only drains what is visible. Assuming intent
+    // locks are held on the user collection, more writes can come in after this drain completes.
+    // Callers are responsible for stopping writes by holding an S or X lock while draining before
+    // completing the index build.
     for (size_t i = 0; i < _indexes.size(); i++) {
         auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();
         if (!interceptor)
             continue;
 
-        auto status =
-            interceptor->drainWritesIntoIndex(_opCtx, _indexes[i].real, _indexes[i].options);
+        LOG(1) << "draining background writes into index: "
+               << _indexes[i].block->getEntry()->descriptor()->indexName();
+
+        auto status = interceptor->drainWritesIntoIndex(_opCtx,
+                                                        _indexes[i].real,
+                                                        _indexes[i].block->getEntry()->descriptor(),
+                                                        _indexes[i].options);
         if (!status.isOK()) {
             return status;
         }

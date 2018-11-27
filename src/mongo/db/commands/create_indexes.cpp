@@ -429,7 +429,7 @@ public:
             opCtx->recoveryUnit()->abandonSnapshot();
             Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_IS);
 
-            LOG(1) << "Performing first index build drain";
+            LOG(1) << "performing first index build drain";
             uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
         }
 
@@ -443,7 +443,7 @@ public:
             opCtx->recoveryUnit()->abandonSnapshot();
             Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_S);
 
-            LOG(1) << "Performing second index build drain";
+            LOG(1) << "performing second index build drain";
             uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
         }
 
@@ -470,7 +470,7 @@ public:
 
         // Perform the third and final drain after releasing a shared lock and reacquiring an
         // exclusive lock on the database.
-        log() << "Performing final index build drain";
+        LOG(1) << "performing final index build drain";
         uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
 
         writeConflictRetry(opCtx, kCommandName, ns.ns(), [&] {

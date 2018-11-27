@@ -106,7 +106,7 @@ public:
 
     struct Params {
         StringData ns;
-        std::string uri;
+        std::string ident;
         std::string engineName;
         bool isCapped;
         bool isEphemeral;

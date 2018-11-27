@@ -37,7 +37,6 @@
 #include <vector>
 
 #include "mongo/base/init.h"
-#include "mongo/base/owned_pointer_map.h"
 #include "mongo/bson/simple_bsonelement_comparator.h"
 #include "mongo/bson/simple_bsonobj_comparator.h"
 #include "mongo/db/audit.h"
@@ -1281,7 +1280,7 @@ Status IndexCatalogImpl::updateRecord(OperationContext* const opCtx,
     *keysInsertedOut = 0;
     *keysDeletedOut = 0;
 
-    // Ready indexes inserted directly into the IndexAccessMethod.
+    // Ready indexes go directly through the IndexAccessMethod.
     for (IndexCatalogEntryContainer::const_iterator it = _readyIndexes.begin();
          it != _readyIndexes.end();
          ++it) {

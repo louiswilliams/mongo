@@ -1043,7 +1043,7 @@ std::unique_ptr<RecordStore> WiredTigerKVEngine::getGroupedRecordStore(
 
     WiredTigerRecordStore::Params params;
     params.ns = ns;
-    params.uri = _uri(ident);
+    params.ident = ident.toString();
     params.engineName = _canonicalName;
     params.isCapped = options.capped;
     params.isEphemeral = _ephemeral;
@@ -1148,7 +1148,7 @@ std::unique_ptr<RecordStore> WiredTigerKVEngine::makeTemporaryRecordStore(Operat
 
     WiredTigerRecordStore::Params params;
     params.ns = "";
-    params.uri = _uri(ident);
+    params.ident = ident.toString();
     params.engineName = _canonicalName;
     params.isCapped = false;
     params.isEphemeral = _ephemeral;
@@ -1192,7 +1192,7 @@ Status WiredTigerKVEngine::dropIdent(OperationContext* opCtx, StringData ident) 
 
     int ret = session.getSession()->drop(
         session.getSession(), uri.c_str(), "force,checkpoint_wait=false");
-    LOG(1) << "WT drop of  " << uri << " res " << ret;
+    LOG(1) << "WT drop of " << uri << " res " << ret;
 
     if (ret == 0) {
         // yay, it worked

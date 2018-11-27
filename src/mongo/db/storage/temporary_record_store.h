@@ -64,4 +64,8 @@ protected:
     std::unique_ptr<RecordStore> _rs;
 };
 
+class TemporaryRecordStoreDeleter {
+public:
+    void operator()(TemporaryRecordStore* service) const;
+};
 }  // namespace mongo

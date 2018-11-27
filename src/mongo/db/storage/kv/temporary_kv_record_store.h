@@ -40,8 +40,8 @@ namespace mongo {
 /**
  * This is an implementation of an RAII type that manages a temporary RecordStore on a KVEngine.
  *
- * This object may not exist any longer than the provided OperationContext, as the destructor uses
- * it to drop the record store on the KVEngine.
+ * This object should not exist any longer than the provided OperationContext, as the destructor
+ * uses it to drop the record store on the KVEngine.
  */
 class TemporaryKVRecordStore : public TemporaryRecordStore {
 public:

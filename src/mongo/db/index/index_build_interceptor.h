@@ -80,6 +80,7 @@ public:
      */
     Status drainWritesIntoIndex(OperationContext* opCtx,
                                 IndexAccessMethod* indexAccessMethod,
+                                const IndexDescriptor* indexDescriptor,
                                 const InsertDeleteOptions& options);
 
     /**

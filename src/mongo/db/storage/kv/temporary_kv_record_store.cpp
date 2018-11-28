@@ -36,10 +36,10 @@ namespace mongo {
 
 TemporaryKVRecordStore::~TemporaryKVRecordStore() {
     auto status = _kvEngine->dropIdent(_opCtx, _rs->getIdent());
-    if (!status.isOK()) {
-        warning() << "failed to drop temporary ident: " << _rs->getIdent()
-                  << " with status: " << status;
-    }
+    invariant(status.isOK(),
+              str::stream() << "failed to drop temporary ident: " << _rs->getIdent()
+                            << " with status: "
+                            << status);
 }
 
 }  // namespace mongo

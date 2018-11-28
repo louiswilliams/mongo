@@ -149,11 +149,11 @@ void IndexCatalogImpl::IndexBuildBlock::success() {
     // An index build should never be completed with writes remaining in the interceptor.
     invariant(!_indexBuildInterceptor || _indexBuildInterceptor->areAllWritesApplied(_opCtx));
 
+    LOG(2) << "marking index " << _indexName << " as ready in snapshot id "
+           << _opCtx->recoveryUnit()->getSnapshotId();
     _collection->indexBuildSuccess(_opCtx, _entry);
 
     OperationContext* opCtx = _opCtx;
-    LOG(2) << "marking index " << _indexName << " as ready in snapshot id "
-           << opCtx->recoveryUnit()->getSnapshotId();
     _opCtx->recoveryUnit()->onCommit(
         [ opCtx, entry = _entry, collection = _collection ](boost::optional<Timestamp> commitTime) {
             // Note: this runs after the WUOW commits but before we release our X lock on the

@@ -477,7 +477,8 @@ Status MultiIndexBlockImpl::insertAllDocumentsInCollection() {
     if (!ret.isOK())
         return ret;
 
-    log() << "build index done.  scanned " << n << " total records. " << t.seconds() << " secs";
+    log() << "build index collection scan done.  scanned " << n << " total records. " << t.seconds()
+          << " secs";
 
     return Status::OK();
 }
@@ -592,7 +593,8 @@ void MultiIndexBlockImpl::commit(stdx::function<void(const BSONObj& spec)> onCre
             onCreateFn(_indexes[i].block->getSpec());
         }
 
-        // This must be done before calling success(), which destroys the interceptor.
+        // Do this before calling success(), which unsets the interceptor pointer on the index
+        // catalog entry.
         auto interceptor = _indexes[i].block->getEntry()->indexBuildInterceptor();
         if (interceptor) {
             auto multikeyPaths = interceptor->getMultikeyPaths();

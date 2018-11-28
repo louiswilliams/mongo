@@ -265,10 +265,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
 
     std::vector<BSONObj> toInsert;
     for (const auto& key : keys) {
-        // Documents inserted into this table must be consumed in insert-order. Today, we can rely
-        // on storage engines to return documents in insert-order, but with clustered indexes,
-        // that may no longer be true.
-        //
+        // Documents inserted into this table must be consumed in insert-order.
         // Additionally, these writes should be timestamped with the same timestamps that the
         // other writes making up this operation are given. When index builds can cope with
         // replication rollbacks, side table writes associated with a CUD operation should
@@ -305,7 +302,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     }
 
     // By passing a vector of null timestamps, these inserts are not timestamped individually, but
-    // rather with the timestamp as the owning operation.
+    // rather with the timestamp of the owning operation.
     std::vector<Timestamp> timestamps(records.size());
     return _sideWritesTable->rs()->insertRecords(opCtx, &records, timestamps);
 }

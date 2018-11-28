@@ -146,6 +146,9 @@ void IndexCatalogImpl::IndexBuildBlock::success() {
     NamespaceString ns(_indexNamespace);
     invariant(_opCtx->lockState()->isDbLockedForMode(ns.db(), MODE_X));
 
+    // An index build should never be completed with writes remaining in the interceptor.
+    invariant(!_indexBuildInterceptor || _indexBuildInterceptor->areAllWritesApplied(_opCtx));
+
     _collection->indexBuildSuccess(_opCtx, _entry);
 
     OperationContext* opCtx = _opCtx;
@@ -169,12 +172,5 @@ void IndexCatalogImpl::IndexBuildBlock::success() {
             // able to remove this when the catalog is versioned.
             collection->setMinimumVisibleSnapshot(commitTime.get());
         });
-
-    _entry->setIsReady(true);
-    if (_indexBuildInterceptor) {
-        // An index build should never be completed with writes remaining in the interceptor.
-        invariant(_indexBuildInterceptor->areAllWritesApplied(_opCtx));
-        _entry->setIndexBuildInterceptor(nullptr);
-    }
 }
 }  // namespace mongo

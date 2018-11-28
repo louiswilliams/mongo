@@ -45,12 +45,12 @@ class TemporaryRecordStore {
     MONGO_DISALLOW_COPYING(TemporaryRecordStore);
 
 public:
-    TemporaryRecordStore(std::unique_ptr<RecordStore> rs) : _rs(std::move(rs)){};
+    TemporaryRecordStore(std::unique_ptr<RecordStore> rs) : _rs(std::move(rs)) {}
 
     // Move constructor.
     TemporaryRecordStore(TemporaryRecordStore&& other) noexcept : _rs(std::move(other._rs)) {}
 
-    virtual ~TemporaryRecordStore(){};
+    virtual ~TemporaryRecordStore() {}
 
     RecordStore* rs() {
         return _rs.get();
@@ -62,10 +62,5 @@ public:
 
 protected:
     std::unique_ptr<RecordStore> _rs;
-};
-
-class TemporaryRecordStoreDeleter {
-public:
-    void operator()(TemporaryRecordStore* service) const;
 };
 }  // namespace mongo

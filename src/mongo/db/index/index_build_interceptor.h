@@ -67,16 +67,12 @@ public:
                      int64_t* const numKeysOut);
 
     /**
-     * Performs a resumable collection scan on the side writes collection, and either inserts or
-     * removes each key from the underlying IndexAccessMethod. This will only insert as many records
-     * as are visible in the current snapshot.
+     * Performs a resumable scan on the side writes table, and either inserts or removes each key
+     * from the underlying IndexAccessMethod. This will only insert as many records as are visible
+     * in the current snapshot.
      *
-     * This is resumable, so subsequent calls will start the collection scan at the record
-     * immediately following the last inserted record from a previous call to drainWritesIntoIndex.
-     *
-     * If 'scanYield' is kYieldAuto, the collection scan will yield locks, and will not if it is set
-     * to kInterruptOnly.
-     *
+     * This is resumable, so subsequent calls will start the scan at the record immediately
+     * following the last inserted record from a previous call to drainWritesIntoIndex.
      */
     Status drainWritesIntoIndex(OperationContext* opCtx,
                                 IndexAccessMethod* indexAccessMethod,
@@ -85,7 +81,7 @@ public:
 
     /**
      * Returns 'true' if there are no visible records remaining to be applied from the side writes
-     * collection. Ensure that this returns 'true' when an index build is completed.
+     * table. Ensure that this returns 'true' when an index build is completed.
      */
     bool areAllWritesApplied(OperationContext* opCtx) const;
 
@@ -105,8 +101,7 @@ private:
                        int64_t* const keysInserted,
                        int64_t* const keysDeleted);
 
-    // This temporary record store is owned by the interceptor and must exist as long as the
-    // OperationContext used to construct it.
+    // This temporary record store is owned by the interceptor and dropped along with it.
     std::unique_ptr<TemporaryRecordStore> _sideWritesTable;
 
     int64_t _numApplied{0};

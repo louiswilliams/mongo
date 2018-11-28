@@ -1398,9 +1398,17 @@ void IndexCatalogImpl::prepareInsertDeleteOptions(OperationContext* opCtx,
 void IndexCatalogImpl::indexBuildSuccess(OperationContext* opCtx, IndexCatalogEntry* index) {
     invariant(_buildingIndexes.release(index->descriptor()));
     _readyIndexes.add(index);
-    opCtx->recoveryUnit()->onRollback([this, index]() {
+
+    auto interceptor = index->indexBuildInterceptor();
+    index->setIndexBuildInterceptor(nullptr);
+    index->setIsReady(true);
+
+    opCtx->recoveryUnit()->onRollback([this, index, interceptor]() {
         invariant(_readyIndexes.release(index->descriptor()));
         _buildingIndexes.add(index);
+
+        index->setIndexBuildInterceptor(interceptor);
+        index->setIsReady(false);
     });
 }
 

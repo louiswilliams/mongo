@@ -554,8 +554,8 @@ Status MultiIndexBlockImpl::drainBackgroundWritesIfNeeded() {
         if (!interceptor)
             continue;
 
-        LOG(1) << "draining background writes into index: "
-               << _indexes[i].block->getEntry()->descriptor()->indexName();
+        LOG(1) << "draining background writes on collection " << _collection->ns()
+               << " into index: " << _indexes[i].block->getEntry()->descriptor()->indexName();
 
         auto status = interceptor->drainWritesIntoIndex(_opCtx,
                                                         _indexes[i].real,

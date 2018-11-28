@@ -21,12 +21,39 @@
         assert.commandWorked(testDB.adminCommand({configureFailPoint: failPointName, mode: "off"}));
     };
 
-    let bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    let i = 0;
-    for (; i < 1001; i++) {
-        bulk.insert({i: i});
-    }
-    assert.commandWorked(bulk.execute());
+    let totalDocs = 0;
+    let crudOpsForPhase = function(coll, phase) {
+        let bulk = coll.initializeUnorderedBulkOp();
+
+        // Create 1000 documents in a specific range for this phase.
+        for (let i = 0; i < 1000; i++) {
+            bulk.insert({i: (phase * 1000) + i});
+        }
+        totalDocs += 1000;
+
+        if (phase <= 0) {
+            assert.commandWorked(bulk.execute());
+            return;
+        }
+
+        // Update 50 documents.
+        // For example, if phase is 2, documents [100, 150) will be updated to [-100, -150).
+        let start = (phase - 1) * 100;
+        for (let j = start; j < (100 * phase) - 50; j++) {
+            bulk.find({i: j}).update({$set: {i: -j}});
+        }
+        // Delete 25 documents.
+        // Similarly, if phase is 2, documents [150, 200) will be removed.
+        for (let j = start + 50; j < 100 * phase; j++) {
+            bulk.find({i: j}).remove();
+        }
+        totalDocs -= 50;
+
+        assert.commandWorked(bulk.execute());
+    };
+
+    crudOpsForPhase(testDB.hybrid, 0);
+    assert.eq(totalDocs, testDB.hybrid.count());
 
     // Hang the build after the first document.
     let stopKey = 1;
@@ -41,11 +68,8 @@
 
     // Phase 1: Collection scan and external sort
     // Insert documents while doing the bulk build.
-    bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (; i < 2002; i++) {
-        bulk.insert({i: i});
-    }
-    assert.commandWorked(bulk.execute());
+    crudOpsForPhase(testDB.hybrid, 1);
+    assert.eq(totalDocs, testDB.hybrid.count());
 
     // Enable pause after bulk dump into index.
     turnFailPointOn("hangAfterIndexBuildDumpsInsertsFromBulk");
@@ -60,17 +84,8 @@
     // Enable pause after first drain.
     turnFailPointOn("hangAfterIndexBuildFirstDrain");
 
-    bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (; i < 2102; i++) {
-        bulk.find({i: 1}).update({$set: {i: -i}});
-    }
-    for (; i < 2203; i++) {
-        bulk.find({i: i}).remove();
-    }
-    for (; i < 3004; i++) {
-        bulk.insert({i: i});
-    }
-    assert.commandWorked(bulk.execute());
+    crudOpsForPhase(testDB.hybrid, 2);
+    assert.eq(totalDocs, testDB.hybrid.count());
 
     // Allow first drain to start.
     turnFailPointOff("hangAfterIndexBuildDumpsInsertsFromBulk");
@@ -83,11 +98,8 @@
     turnFailPointOn("hangAfterIndexBuildSecondDrain");
 
     // Add inserts that must be consumed in the second drain.
-    bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (; i < 4004; i++) {
-        bulk.insert({i: i});
-    }
-    assert.commandWorked(bulk.execute());
+    crudOpsForPhase(testDB.hybrid, 3);
+    assert.eq(totalDocs, testDB.hybrid.count());
 
     // Allow second drain to start.
     turnFailPointOff("hangAfterIndexBuildFirstDrain");
@@ -97,11 +109,8 @@
 
     // Phase 4: Final drain and commit.
     // Add inserts that must be consumed in the final drain.
-    bulk = testDB.hybrid.initializeUnorderedBulkOp();
-    for (; i < 5005; i++) {
-        bulk.insert({i: i});
-    }
-    assert.commandWorked(bulk.execute());
+    crudOpsForPhase(testDB.hybrid, 4);
+    assert.eq(totalDocs, testDB.hybrid.count());
 
     // Allow final drain to start.
     turnFailPointOff("hangAfterIndexBuildSecondDrain");
@@ -109,7 +118,7 @@
     // Wait for build to complete.
     bgBuild();
 
-    assert.eq(4804, testDB.hybrid.count());
+    assert.eq(totalDocs, testDB.hybrid.count());
     assert.commandWorked(testDB.hybrid.validate({full: true}));
 
     MongoRunner.stopMongod(conn);

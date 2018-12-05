@@ -82,11 +82,18 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     // Set up the progress meter. This will never be completely accurate, because more writes can be
     // read from the side writes table than are observed before draining.
-    static const char* curopMessage = "Index build draining writes";
+    static const char* curopMessage = "Index Build: draining writes received during build";
     stdx::unique_lock<Client> lk(*opCtx->getClient());
-    ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
-        curopMessage, curopMessage, _sideWritesCounter.load() - appliedAtStart, 1));
+    ProgressMeterHolder progress(
+        CurOp::get(opCtx)->setMessage_inlock(curopMessage, curopMessage, 1, 0));
     lk.unlock();
+
+    // Force the progress meter to log at the end of every batch. By default, the progress meter
+    // only logs after a large number of calls to hit(), but since we batch inserts by up to
+    // 1000 records, progress would rarely be displayed.
+    progress->reset(_sideWritesCounter.load() - appliedAtStart /* total */,
+                    1 /* secondsBetween */,
+                    1 /* checkInterval */);
 
     // Buffer operations into batches to insert per WriteUnitOfWork. Impose an upper limit on the
     // number of documents and the total size of the batch.
@@ -143,9 +150,6 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
                 break;
         }
 
-        // Account for more writes coming in after the drain starts.
-        progress->setTotalWhileRunning(_sideWritesCounter.loadRelaxed() - appliedAtStart);
-
         invariant(!batch.empty());
 
         // If we are here, either we have reached the end of the table or the batch is full, so
@@ -169,6 +173,10 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         cursor->restore();
 
         progress->hit(batch.size());
+
+        // Account for more writes coming in during a batch.
+        progress->setTotalWhileRunning(_sideWritesCounter.loadRelaxed() - appliedAtStart);
+
         _numApplied += batch.size();
         batch.clear();
         batchSizeBytes = 0;
@@ -176,10 +184,11 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     progress->finished();
 
-    log() << "index build for " << _indexCatalogEntry->descriptor()->indexName()
-          << ": drain applied " << (_numApplied - appliedAtStart)
-          << " side writes. i: " << totalInserted << ", d: " << totalDeleted
-          << ", total: " << _numApplied;
+    int logLevel = (_numApplied - appliedAtStart > 0) ? 0 : 1;
+    LOG(logLevel) << "index build for " << _indexCatalogEntry->descriptor()->indexName()
+                  << ": drain applied " << (_numApplied - appliedAtStart)
+                  << " side writes. i: " << totalInserted << ", d: " << totalDeleted
+                  << ", total: " << _numApplied;
 
     return Status::OK();
 }

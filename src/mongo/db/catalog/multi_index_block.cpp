@@ -334,7 +334,8 @@ Status MultiIndexBlock::insertAllDocumentsInCollection() {
     }
     MultikeyPathTracker::get(_opCtx).startTrackingMultikeyPathInfo();
 
-    const char* curopMessage = _buildInBackground ? "Index Build (background)" : "Index Build";
+    const char* curopMessage = _buildInBackground ? "Index Build (background): scanning collection"
+                                                  : "Index Build: scanning collection";
     const auto numRecords = _collection->numRecords(_opCtx);
     stdx::unique_lock<Client> lk(*_opCtx->getClient());
     ProgressMeterHolder progress(
@@ -468,7 +469,7 @@ Status MultiIndexBlock::insertAllDocumentsInCollection() {
     if (!ret.isOK())
         return ret;
 
-    log() << "build index collection scan done.  scanned " << n << " total records. " << t.seconds()
+    log() << "index build collection scan done.  scanned " << n << " total records. " << t.seconds()
           << " secs";
 
     return Status::OK();

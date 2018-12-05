@@ -34,6 +34,7 @@
 #include "mongo/db/index/duplicate_key_tracker.h"
 
 #include "mongo/db/catalog/index_catalog_entry.h"
+#include "mongo/db/curop.h"
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/keypattern.h"
 #include "mongo/util/assert_util.h"
@@ -86,6 +87,8 @@ Status DuplicateKeyTracker::recordKeys(OperationContext* opCtx, const std::vecto
 
     wuow.commit();
 
+    _duplicateCounter.fetchAndAdd(records.size());
+
     return Status::OK();
 }
 
@@ -94,6 +97,12 @@ Status DuplicateKeyTracker::checkConstraints(OperationContext* opCtx) const {
     auto record = constraintsCursor->next();
 
     auto index = _indexCatalogEntry->accessMethod()->getSortedDataInterface();
+
+    static const char* curopMessage = "Index Build: checking for duplicate keys";
+    stdx::unique_lock<Client> lk(*opCtx->getClient());
+    ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
+        curopMessage, curopMessage, _duplicateCounter.load(), 1));
+    lk.unlock();
 
     int count = 0;
     while (record) {
@@ -105,8 +114,10 @@ Status DuplicateKeyTracker::checkConstraints(OperationContext* opCtx) const {
         if (!status.isOK())
             return status;
 
+        progress->hit();
         record = constraintsCursor->next();
     }
+    progress->finished();
 
     log() << "index build resolved " << count << " duplicate key conflicts for unique index: "
           << _indexCatalogEntry->descriptor()->indexName();

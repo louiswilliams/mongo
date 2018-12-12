@@ -104,9 +104,9 @@ Status DuplicateKeyTracker::checkConstraints(OperationContext* opCtx) const {
         curopMessage, curopMessage, _duplicateCounter.load(), 1));
     lk.unlock();
 
-    int count = 0;
+    int resolved = 0;
     while (record) {
-        count++;
+        resolved++;
         BSONObj conflict = record->data.toBson();
         BSONObj keyObj = conflict[kKeyField].Obj();
 
@@ -119,7 +119,9 @@ Status DuplicateKeyTracker::checkConstraints(OperationContext* opCtx) const {
     }
     progress->finished();
 
-    log() << "index build resolved " << count << " duplicate key conflicts for unique index: "
+    invariant(resolved == _duplicateCounter.load());
+
+    log() << "index build resolved " << resolved << " duplicate key conflicts for unique index: "
           << _indexCatalogEntry->descriptor()->indexName();
     return Status::OK();
 }

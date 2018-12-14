@@ -75,8 +75,7 @@ Status DuplicateKeyTracker::recordKeys(OperationContext* opCtx, const std::vecto
         records.emplace_back(Record{RecordId(), RecordData(obj.objdata(), obj.objsize())});
     }
 
-    LOG(1) << "index build recording " << records.size()
-           << " duplicate key conflicts for unique index: "
+    LOG(1) << "recording " << records.size() << " duplicate key conflicts on unique index: "
            << _indexCatalogEntry->descriptor()->indexName();
 
     WriteUnitOfWork wuow(opCtx);
@@ -100,8 +99,8 @@ Status DuplicateKeyTracker::checkConstraints(OperationContext* opCtx) const {
 
     static const char* curopMessage = "Index Build: checking for duplicate keys";
     stdx::unique_lock<Client> lk(*opCtx->getClient());
-    ProgressMeterHolder progress(CurOp::get(opCtx)->setMessage_inlock(
-        curopMessage, curopMessage, _duplicateCounter.load(), 1));
+    ProgressMeterHolder progress(
+        CurOp::get(opCtx)->setProgress_inlock(curopMessage, _duplicateCounter.load(), 1));
     lk.unlock();
 
     int resolved = 0;
@@ -121,8 +120,10 @@ Status DuplicateKeyTracker::checkConstraints(OperationContext* opCtx) const {
 
     invariant(resolved == _duplicateCounter.load());
 
-    log() << "index build resolved " << resolved << " duplicate key conflicts for unique index: "
-          << _indexCatalogEntry->descriptor()->indexName();
+    int logLevel = (resolved > 0) ? 0 : 1;
+    LOG(logLevel) << "index build: resolved " << resolved
+                  << " duplicate key conflicts for unique index: "
+                  << _indexCatalogEntry->descriptor()->indexName();
     return Status::OK();
 }
 

@@ -649,7 +649,8 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
 
     stdx::unique_lock<Client> lk(*opCtx->getClient());
     static const char* message = "Index Build: inserting keys from external sorter into index";
-    ProgressMeterHolder pm(CurOp::get(opCtx)->setMessage_inlock(message, message, 10));
+    ProgressMeterHolder pm(CurOp::get(opCtx)->setProgress_inlock(
+        message, bulk->getKeysInserted(), 3 /* secondsBetween */));
     lk.unlock();
 
     auto builder = std::unique_ptr<SortedDataBuilderInterface>(
@@ -720,7 +721,8 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
 
     pm.finished();
 
-    LOG(timer.seconds() > 10 ? 0 : 1) << "\t done inserting keys from external sorter into index";
+    log() << "index build: inserted keys from external sorter into index in " << timer.seconds()
+          << " seconds";
 
     WriteUnitOfWork wunit(opCtx);
     SpecialFormatInserted specialFormatInserted = builder->commit(mayInterrupt);

@@ -730,8 +730,7 @@ long long State::postProcessCollectionNonAtomic(OperationContext* opCtx,
         {
             const auto count = collectionCount(opCtx, _config.tempNamespace, callerHoldsGlobalLock);
             stdx::lock_guard<Client> lk(*opCtx->getClient());
-            curOp->setMessage_inlock(
-                "m/r: merge post processing", "M/R Merge Post Processing Progress", count);
+            curOp->setProgress_inlock("M/R Merge Post Processing", count);
         }
         unique_ptr<DBClientCursor> cursor = _db.query(_config.tempNamespace, BSONObj());
         while (cursor->more()) {
@@ -749,8 +748,7 @@ long long State::postProcessCollectionNonAtomic(OperationContext* opCtx,
         {
             const auto count = collectionCount(opCtx, _config.tempNamespace, callerHoldsGlobalLock);
             stdx::lock_guard<Client> lk(*opCtx->getClient());
-            curOp->setMessage_inlock(
-                "m/r: reduce post processing", "M/R Reduce Post Processing Progress", count);
+            curOp->setProgress_inlock("M/R Reduce Post Processing", count);
         }
         unique_ptr<DBClientCursor> cursor = _db.query(_config.tempNamespace, BSONObj());
         while (cursor->more()) {
@@ -1145,10 +1143,7 @@ void State::finalReduce(OperationContext* opCtx, CurOp* curOp, ProgressMeterHold
     {
         const auto count = _db.count(_config.incLong.ns(), BSONObj(), QueryOption_SlaveOk);
         stdx::lock_guard<Client> lk(*_opCtx->getClient());
-        verify(pm ==
-               curOp->setMessage_inlock("m/r: (3/3) final reduce to collection",
-                                        "M/R: (3/3) Final Reduce Progress",
-                                        count));
+        verify(pm == curOp->setProgress_inlock("M/R: (3/3) Final Reduce", count));
     }
 
     const ExtensionsCallbackReal extensionsCallback(_opCtx, &_config.incLong);
@@ -1449,8 +1444,8 @@ public:
             }
 
             stdx::unique_lock<Client> lk(*opCtx->getClient());
-            ProgressMeter& progress(curOp->setMessage_inlock(
-                "m/r: (1/3) emit phase", "M/R: (1/3) Emit Progress", progressTotal));
+            ProgressMeter& progress(
+                curOp->setProgress_inlock("M/R: (1/3) Emit Phase", progressTotal));
             lk.unlock();
             progress.showTotal(showTotal);
             ProgressMeterHolder pm(progress);
@@ -1601,8 +1596,7 @@ public:
 
             {
                 stdx::lock_guard<Client> lk(*opCtx->getClient());
-                curOp->setMessage_inlock("m/r: (2/3) final reduce in memory",
-                                         "M/R: (2/3) Final In-Memory Reduce Progress");
+                curOp->setMessage_inlock("M/R: (2/3) Final In-Memory Reduce");
             }
             Timer rt;
             // do reduce in memory
@@ -1743,8 +1737,7 @@ public:
         BSONObj counts = cmdObj["counts"].embeddedObjectUserCheck();
 
         stdx::unique_lock<Client> lk(*opCtx->getClient());
-        ProgressMeterHolder pm(curOp->setMessage_inlock("m/r: merge sort and reduce",
-                                                        "M/R Merge Sort and Reduce Progress"));
+        ProgressMeterHolder pm(curOp->setProgress_inlock("M/R Merge Sort and Reduce"));
         lk.unlock();
         set<string> servers;
 

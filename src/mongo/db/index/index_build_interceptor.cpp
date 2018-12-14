@@ -77,6 +77,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     // These are used for logging only.
     int64_t totalDeleted = 0;
     int64_t totalInserted = 0;
+    Timer timer;
 
     const int64_t appliedAtStart = _numApplied;
 
@@ -84,15 +85,14 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     // read from the side writes table than are observed before draining.
     static const char* curopMessage = "Index Build: draining writes received during build";
     stdx::unique_lock<Client> lk(*opCtx->getClient());
-    ProgressMeterHolder progress(
-        CurOp::get(opCtx)->setMessage_inlock(curopMessage, curopMessage, 1, 0));
+    ProgressMeterHolder progress(CurOp::get(opCtx)->setProgress_inlock(curopMessage));
     lk.unlock();
 
     // Force the progress meter to log at the end of every batch. By default, the progress meter
     // only logs after a large number of calls to hit(), but since we batch inserts by up to
     // 1000 records, progress would rarely be displayed.
     progress->reset(_sideWritesCounter.load() - appliedAtStart /* total */,
-                    1 /* secondsBetween */,
+                    3 /* secondsBetween */,
                     1 /* checkInterval */);
 
     // Buffer operations into batches to insert per WriteUnitOfWork. Impose an upper limit on the
@@ -185,10 +185,10 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     progress->finished();
 
     int logLevel = (_numApplied - appliedAtStart > 0) ? 0 : 1;
-    LOG(logLevel) << "index build for " << _indexCatalogEntry->descriptor()->indexName()
-                  << ": drain applied " << (_numApplied - appliedAtStart)
-                  << " side writes. i: " << totalInserted << ", d: " << totalDeleted
-                  << ", total: " << _numApplied;
+    LOG(logLevel) << "index build: drain applied " << (_numApplied - appliedAtStart)
+                  << " side writes (inserted: " << totalInserted << ", deleted: " << totalDeleted
+                  << ") for '" << _indexCatalogEntry->descriptor()->indexName() << "' in "
+                  << timer.millis() << " ms";
 
     return Status::OK();
 }
@@ -335,7 +335,8 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
                                     RecordData(doc.objdata(), doc.objsize())});
     }
 
-    LOG(1) << "index build recorded " << records.size() << " side writes";
+    LOG(1) << "recording " << records.size() << " side write keys on index '"
+           << _indexCatalogEntry->descriptor()->indexName() << "'";
 
     // By passing a vector of null timestamps, these inserts are not timestamped individually, but
     // rather with the timestamp of the owning operation.

@@ -93,8 +93,8 @@ public:
     virtual std::string name() const;
 
     /**
-     * Instead of build the index in a background thread, build on the current thread. This does not
-     * build a 'foreground' index.
+     * Instead of building the index in a background thread, build on the current thread. This does
+     * not build a 'foreground' index.
      */
     Status buildInForeground(OperationContext* opCtx, Database* db) const;
 

@@ -177,7 +177,7 @@ void IndexBuilder::run() {
 }
 
 Status IndexBuilder::buildInForeground(OperationContext* opCtx, Database* db) const {
-    return _build(opCtx, db, NULL);
+    return _build(opCtx, db, nullptr);
 }
 
 void IndexBuilder::waitForBgIndexStarting() {
@@ -195,6 +195,10 @@ Status _failIndexBuild(OperationContext* opCtx,
                        Lock::DBLock* dbLock,
                        Status status) {
     invariant(status.code() != ErrorCodes::WriteConflict);
+
+    if (!dbLock) {
+        return status;
+    }
 
     UninterruptibleLockGuard noInterrupt(opCtx->lockState());
     if (dbLock->mode() != MODE_X) {
@@ -266,11 +270,10 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
         indexer.ignoreUniqueConstraint();
     }
 
-    _setBgIndexStarting();
-    invariant(dbLock);
-    opCtx->recoveryUnit()->abandonSnapshot();
+    if (dbLock) {
+        _setBgIndexStarting();
+        opCtx->recoveryUnit()->abandonSnapshot();
 
-    {
         UninterruptibleLockGuard noInterrupt(opCtx->lockState());
         dbLock->relockWithMode(MODE_IX);
     }
@@ -304,8 +307,9 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
         return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
-    opCtx->recoveryUnit()->abandonSnapshot();
-    {
+    if (dbLock) {
+        opCtx->recoveryUnit()->abandonSnapshot();
+
         UninterruptibleLockGuard noInterrupt(opCtx->lockState());
         dbLock->relockWithMode(MODE_X);
     }

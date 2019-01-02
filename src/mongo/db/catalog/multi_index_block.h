@@ -72,22 +72,6 @@ public:
     ~MultiIndexBlock();
 
     /**
-     * By default we ignore the 'background' flag in specs when building an index. If this is
-     * called before init(), we will build the indexes in the background as long as *all* specs
-     * call for background indexing. If any spec calls for foreground indexing all indexes will
-     * be built in the foreground, as there is no concurrency benefit to building a subset of
-     * indexes in the background, but there is a performance benefit to building all in the
-     * foreground.
-     */
-    void allowBackgroundBuilding();
-
-    /**
-     * Call this before init() to allow the index build to be interrupted.
-     * This only affects builds using the insertAllDocumentsInCollection helper.
-     */
-    void allowInterruption();
-
-    /**
      * By default we enforce the 'unique' flag in specs when building an index by failing.
      * If this is called before init(), we will ignore unique violations. This has no effect if
      * no specs are unique.
@@ -225,8 +209,6 @@ public:
      */
     void abortWithoutCleanup();
 
-    bool getBuildInBackground() const;
-
     /**
      * State transitions:
      *
@@ -289,8 +271,6 @@ private:
     Collection* _collection;
     OperationContext* _opCtx;
 
-    bool _buildInBackground = false;
-    bool _allowInterruption = false;
     bool _ignoreUnique = false;
 
     bool _needToCleanup = true;

@@ -71,12 +71,16 @@ Status IndexCatalogImpl::IndexBuildBlock::init() {
     _indexName = descriptor->indexName();
     _indexNamespace = descriptor->indexNamespace();
 
-    bool isBackgroundIndex = _spec["background"].trueValue();
+    if (_spec["background"].isBoolean() && !_spec["background"].Bool()) {
+        log() << "ignoring obselete {background: false} index build option. All indexes are "
+                 "built in the background.";
+    }
+
     bool isBackgroundSecondaryBuild = false;
     if (auto replCoord = repl::ReplicationCoordinator::get(_opCtx)) {
         isBackgroundSecondaryBuild =
             replCoord->getReplicationMode() == repl::ReplicationCoordinator::Mode::modeReplSet &&
-            replCoord->getMemberState().secondary() && isBackgroundIndex;
+            replCoord->getMemberState().secondary();
     }
 
     // Setup on-disk structures.
@@ -91,10 +95,7 @@ Status IndexCatalogImpl::IndexBuildBlock::init() {
     _entry = _catalog->_setupInMemoryStructures(
         _opCtx, std::move(descriptor), initFromDisk, isReadyIndex);
 
-    // Hybrid indexes are only enabled for background indexes.
     bool useHybrid = true;
-    // TODO: Remove when SERVER-37270 is complete.
-    useHybrid = useHybrid && isBackgroundIndex;
     // TODO: Remove when SERVER-38550 is complete. The mobile storage engine does not suport
     // dupsAllowed mode on bulk builders.
     useHybrid = useHybrid && storageGlobalParams.engine != "mobile";

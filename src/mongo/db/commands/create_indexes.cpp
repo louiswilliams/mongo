@@ -354,8 +354,6 @@ bool runCreateIndexes(OperationContext* opCtx,
 
 
     MultiIndexBlock indexer(opCtx, collection);
-    indexer.allowBackgroundBuilding();
-    indexer.allowInterruption();
 
     const size_t origSpecsSize = specs.size();
     specs = resolveDefaultsAndRemoveExistingIndexes(opCtx, collection, std::move(specs));
@@ -385,23 +383,19 @@ bool runCreateIndexes(OperationContext* opCtx,
 
     // If we're a background index, replace exclusive db lock with an intent lock, so that
     // other readers and writers can proceed during this phase.
-    if (indexer.getBuildInBackground()) {
-        opCtx->recoveryUnit()->abandonSnapshot();
-        dbLock.relockWithMode(MODE_IX);
-    }
+    opCtx->recoveryUnit()->abandonSnapshot();
+    dbLock.relockWithMode(MODE_IX);
 
     auto relockOnErrorGuard = MakeGuard([&] {
         // Must have exclusive DB lock before we clean up the index build via the
         // destructor of 'indexer'.
-        if (indexer.getBuildInBackground()) {
-            try {
-                // This function cannot throw today, but we will preemptively prepare for
-                // that day, to avoid data corruption due to lack of index cleanup.
-                opCtx->recoveryUnit()->abandonSnapshot();
-                dbLock.relockWithMode(MODE_X);
-            } catch (...) {
-                std::terminate();
-            }
+        try {
+            // This function cannot throw today, but we will preemptively prepare for
+            // that day, to avoid data corruption due to lack of index cleanup.
+            opCtx->recoveryUnit()->abandonSnapshot();
+            dbLock.relockWithMode(MODE_X);
+        } catch (...) {
+            std::terminate();
         }
     });
 
@@ -446,18 +440,16 @@ bool runCreateIndexes(OperationContext* opCtx,
     relockOnErrorGuard.Dismiss();
 
     // Need to return db lock back to exclusive, to complete the index build.
-    if (indexer.getBuildInBackground()) {
-        opCtx->recoveryUnit()->abandonSnapshot();
-        dbLock.relockWithMode(MODE_X);
+    opCtx->recoveryUnit()->abandonSnapshot();
+    dbLock.relockWithMode(MODE_X);
 
-        auto db = databaseHolder->getDb(opCtx, ns.db());
-        if (db) {
-            DatabaseShardingState::get(db).checkDbVersion(opCtx);
-        }
-
-        invariant(db);
-        invariant(db->getCollection(opCtx, ns));
+    db = databaseHolder->getDb(opCtx, ns.db());
+    if (db) {
+        DatabaseShardingState::get(db).checkDbVersion(opCtx);
     }
+
+    invariant(db);
+    invariant(db->getCollection(opCtx, ns));
 
     // Perform the third and final drain after releasing a shared lock and reacquiring an
     // exclusive lock on the database.

@@ -270,7 +270,6 @@ public:
      * Call this when you are ready to finish your bulk work.
      * Pass in the BulkBuilder returned from initiateBulk.
      * @param bulk - Something created from initiateBulk
-     * @param mayInterrupt - Is this commit interruptible (will cancel)
      * @param dupsAllowed - If false and 'dupRecords' is not null, append with the RecordIds of
      *                      the uninserted duplicates.
      *                      If true and 'dupKeys' is not null, append with the keys of the inserted
@@ -286,7 +285,6 @@ public:
 
     virtual Status commitBulk(OperationContext* opCtx,
                               BulkBuilder* bulk,
-                              bool mayInterrupt,
                               bool dupsAllowed,
                               std::set<RecordId>* dupRecords,
                               std::vector<BSONObj>* dupKeys) = 0;
@@ -520,7 +518,6 @@ public:
 
     Status commitBulk(OperationContext* opCtx,
                       BulkBuilder* bulk,
-                      bool mayInterrupt,
                       bool dupsAllowed,
                       std::set<RecordId>* dupRecords,
                       std::vector<BSONObj>* dupKeys) final;

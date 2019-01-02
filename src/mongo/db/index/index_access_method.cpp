@@ -634,7 +634,6 @@ int64_t AbstractIndexAccessMethod::BulkBuilderImpl::getKeysInserted() const {
 
 Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
                                              BulkBuilder* bulk,
-                                             bool mayInterrupt,
                                              bool dupsAllowed,
                                              set<RecordId>* dupRecords,
                                              std::vector<BSONObj>* dupKeysInserted) {
@@ -663,9 +662,7 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
     const Ordering ordering = Ordering::make(_descriptor->keyPattern());
 
     while (it->more()) {
-        if (mayInterrupt) {
-            opCtx->checkForInterrupt();
-        }
+        opCtx->checkForInterrupt();
 
         WriteUnitOfWork wunit(opCtx);
 
@@ -726,7 +723,7 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
           << " seconds";
 
     WriteUnitOfWork wunit(opCtx);
-    SpecialFormatInserted specialFormatInserted = builder->commit(mayInterrupt);
+    SpecialFormatInserted specialFormatInserted = builder->commit(true /* mayInterrupt */);
     // It's ok to insert KeyStrings with long TypeBits but we need to mark the feature
     // tracker bit so that downgrade binary which cannot read the long TypeBits fails to
     // start up.

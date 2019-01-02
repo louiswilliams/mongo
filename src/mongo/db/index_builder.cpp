@@ -169,7 +169,7 @@ void IndexBuilder::run() {
     // (checkForInterrupt() will throw an exception while checkForInterruptNoAssert() returns
     // an error Status).
     Status status =
-        opCtx->runWithoutInterruption([&, this] { return _build(opCtx.get(), db, true, &dlk); });
+        opCtx->runWithoutInterruption([&, this] { return _build(opCtx.get(), db, &dlk); });
     if (!status.isOK()) {
         error() << "IndexBuilder could not build index: " << redact(status);
         fassert(28555, ErrorCodes::isInterruption(status.code()));
@@ -177,7 +177,7 @@ void IndexBuilder::run() {
 }
 
 Status IndexBuilder::buildInForeground(OperationContext* opCtx, Database* db) const {
-    return _build(opCtx, db, false, NULL);
+    return _build(opCtx, db, NULL);
 }
 
 void IndexBuilder::waitForBgIndexStarting() {
@@ -193,13 +193,8 @@ namespace {
 Status _failIndexBuild(OperationContext* opCtx,
                        MultiIndexBlock& indexer,
                        Lock::DBLock* dbLock,
-                       Status status,
-                       bool allowBackgroundBuilding) {
+                       Status status) {
     invariant(status.code() != ErrorCodes::WriteConflict);
-
-    if (!allowBackgroundBuilding) {
-        return status;
-    }
 
     UninterruptibleLockGuard noInterrupt(opCtx->lockState());
     if (dbLock->mode() != MODE_X) {
@@ -217,10 +212,7 @@ Status _failIndexBuild(OperationContext* opCtx,
 }
 }  // namespace
 
-Status IndexBuilder::_build(OperationContext* opCtx,
-                            Database* db,
-                            bool allowBackgroundBuilding,
-                            Lock::DBLock* dbLock) const try {
+Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock* dbLock) const try {
     const NamespaceString ns(_index["ns"].String());
 
     Collection* coll = db->getCollection(opCtx, ns);
@@ -246,9 +238,6 @@ Status IndexBuilder::_build(OperationContext* opCtx,
     }
 
     MultiIndexBlock indexer(opCtx, coll);
-    indexer.allowInterruption();
-    if (allowBackgroundBuilding)
-        indexer.allowBackgroundBuilding();
 
     Status status = Status::OK();
     {
@@ -261,14 +250,13 @@ Status IndexBuilder::_build(OperationContext* opCtx,
         (status == ErrorCodes::IndexOptionsConflict &&
          _indexConstraints == IndexConstraints::kRelax)) {
         LOG(1) << "Ignoring indexing error: " << redact(status);
-        if (allowBackgroundBuilding) {
-            // Must set this in case anyone is waiting for this build.
-            _setBgIndexStarting();
-        }
+
+        // Must set this in case anyone is waiting for this build.
+        _setBgIndexStarting();
         return Status::OK();
     }
     if (!status.isOK()) {
-        return _failIndexBuild(opCtx, indexer, dbLock, status, allowBackgroundBuilding);
+        return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
     // Ignore uniqueness constraint violations when relaxed (on secondaries). Secondaries can
@@ -278,10 +266,11 @@ Status IndexBuilder::_build(OperationContext* opCtx,
         indexer.ignoreUniqueConstraint();
     }
 
-    if (allowBackgroundBuilding) {
-        _setBgIndexStarting();
-        invariant(dbLock);
-        opCtx->recoveryUnit()->abandonSnapshot();
+    _setBgIndexStarting();
+    invariant(dbLock);
+    opCtx->recoveryUnit()->abandonSnapshot();
+
+    {
         UninterruptibleLockGuard noInterrupt(opCtx->lockState());
         dbLock->relockWithMode(MODE_IX);
     }
@@ -294,7 +283,7 @@ Status IndexBuilder::_build(OperationContext* opCtx,
     // _failIndexBuild upgrades our database lock, so we must take care to release our Collection IX
     // lock first.
     if (!status.isOK()) {
-        return _failIndexBuild(opCtx, indexer, dbLock, status, allowBackgroundBuilding);
+        return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
     {
@@ -303,7 +292,7 @@ Status IndexBuilder::_build(OperationContext* opCtx,
         status = indexer.drainBackgroundWritesIfNeeded();
     }
     if (!status.isOK()) {
-        return _failIndexBuild(opCtx, indexer, dbLock, status, allowBackgroundBuilding);
+        return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
     // Perform the second drain while stopping inserts into the collection.
@@ -312,11 +301,11 @@ Status IndexBuilder::_build(OperationContext* opCtx,
         status = indexer.drainBackgroundWritesIfNeeded();
     }
     if (!status.isOK()) {
-        return _failIndexBuild(opCtx, indexer, dbLock, status, allowBackgroundBuilding);
+        return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
-    if (allowBackgroundBuilding) {
-        opCtx->recoveryUnit()->abandonSnapshot();
+    opCtx->recoveryUnit()->abandonSnapshot();
+    {
         UninterruptibleLockGuard noInterrupt(opCtx->lockState());
         dbLock->relockWithMode(MODE_X);
     }
@@ -325,14 +314,14 @@ Status IndexBuilder::_build(OperationContext* opCtx,
     // exclusive lock on the database.
     status = indexer.drainBackgroundWritesIfNeeded();
     if (!status.isOK()) {
-        return _failIndexBuild(opCtx, indexer, dbLock, status, allowBackgroundBuilding);
+        return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
     // Only perform constraint checking when enforced (on primaries).
     if (_indexConstraints == IndexConstraints::kEnforce) {
         status = indexer.checkConstraints();
         if (!status.isOK()) {
-            return _failIndexBuild(opCtx, indexer, dbLock, status, allowBackgroundBuilding);
+            return _failIndexBuild(opCtx, indexer, dbLock, status);
         }
     }
 
@@ -370,21 +359,19 @@ Status IndexBuilder::_build(OperationContext* opCtx,
         return Status::OK();
     });
     if (!status.isOK()) {
-        return _failIndexBuild(opCtx, indexer, dbLock, status, allowBackgroundBuilding);
+        return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
-    if (allowBackgroundBuilding) {
-        invariant(opCtx->lockState()->isDbLockedForMode(ns.db(), MODE_X),
-                  str::stream() << "Database not locked in exclusive mode after committing "
-                                   "background index: "
-                                << ns.ns()
-                                << ": "
-                                << _index);
-        auto databaseHolder = DatabaseHolder::get(opCtx);
-        auto reloadDb = databaseHolder->getDb(opCtx, ns.db());
-        fassert(28553, reloadDb);
-        fassert(28554, reloadDb->getCollection(opCtx, ns));
-    }
+    invariant(opCtx->lockState()->isDbLockedForMode(ns.db(), MODE_X),
+              str::stream() << "Database not locked in exclusive mode after committing "
+                               "background index: "
+                            << ns.ns()
+                            << ": "
+                            << _index);
+    auto databaseHolder = DatabaseHolder::get(opCtx);
+    auto reloadDb = databaseHolder->getDb(opCtx, ns.db());
+    fassert(28553, reloadDb);
+    fassert(28554, reloadDb->getCollection(opCtx, ns));
 
     return Status::OK();
 } catch (const DBException& e) {

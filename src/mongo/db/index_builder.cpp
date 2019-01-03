@@ -264,7 +264,9 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
         LOG(0) << "Ignoring indexing error: " << redact(status);
 
         // Must set this in case anyone is waiting for this build.
-        _setBgIndexStarting();
+        if (dbLock) {
+            _setBgIndexStarting();
+        }
         return Status::OK();
     }
     if (!status.isOK()) {

@@ -211,10 +211,10 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(const std::vector<BSONObj
 
         _collection->getIndexCatalog()->prepareInsertDeleteOptions(
             _opCtx, descriptor, &index.options);
-        // Allow duplicates when explicitly allowed or an interceptor is installed, which will
-        // perform duplicate checking itself.
-        index.options.dupsAllowed = index.options.dupsAllowed || _ignoreUnique ||
-            index.block->getEntry()->indexBuildInterceptor();
+
+        // Allow duplicates because duplicate keys are tracked by the interceptor and resolved by
+        // calls to checkConstraints().
+        index.options.dupsAllowed = true;
         if (_ignoreUnique) {
             index.options.getKeysMode = IndexAccessMethod::GetKeysMode::kRelaxConstraints;
         }
@@ -420,11 +420,8 @@ Status MultiIndexBlock::dumpInsertsFromBulk(std::set<RecordId>* dupRecords) {
         IndexCatalogEntry* entry = _indexes[i].block->getEntry();
         LOG(1) << "index build: inserting from external sorter into index: "
                << entry->descriptor()->indexName();
-        Status status = _indexes[i].real->commitBulk(_opCtx,
-                                                     _indexes[i].bulk.get(),
-                                                     _indexes[i].options.dupsAllowed,
-                                                     dupRecords,
-                                                     (dupRecords) ? nullptr : &dupKeysInserted);
+        Status status = _indexes[i].real->commitBulk(
+            _opCtx, _indexes[i].bulk.get(), dupRecords, (dupRecords) ? nullptr : &dupKeysInserted);
         if (!status.isOK()) {
             return status;
         }
@@ -448,7 +445,7 @@ Status MultiIndexBlock::dumpInsertsFromBulk(std::set<RecordId>* dupRecords) {
     return Status::OK();
 }
 
-Status MultiIndexBlock::drainBackgroundWritesIfNeeded() {
+Status MultiIndexBlock::drainBackgroundWrites() {
     if (State::kAborted == _getState()) {
         return {ErrorCodes::IndexBuildAborted,
                 str::stream() << "Index build aborted: " << _abortReason

@@ -267,17 +267,14 @@ public:
     virtual std::unique_ptr<BulkBuilder> initiateBulk(size_t maxMemoryUsageBytes) = 0;
 
     /**
-     * Call this when you are ready to finish your bulk work.
+     * Call this when you are ready to finish your bulk work. Duplicates are allowed implicitly, and
+     * can be tracked with dupRecords (to record uninserted duplicate records) or dupKeys (to record
+     * inserted duplicate keys).
      * Pass in the BulkBuilder returned from initiateBulk.
      * @param bulk - Something created from initiateBulk
-     * @param dupsAllowed - If false and 'dupRecords' is not null, append with the RecordIds of
-     *                      the uninserted duplicates.
-     *                      If true and 'dupKeys' is not null, append with the keys of the inserted
-     *                      duplicates.
-     * @param dupRecords - If not null, is filled with the RecordIds of uninserted duplicate keys.
-     *                     If null, duplicate keys will return errors.
-     * @param dupKeys - If not null and 'dupsAllowed' is true, is filled with the keys of inserted
-     *                  duplicates.
+     * @param dupRecords - If not null, duplicates are not inserted and the RecordIds are
+     *                     added to this set.
+     * @param dupKeys - If not null, is filled with the keys of inserted duplicates.
      *                  If null, duplicates are inserted but not recorded.
      *
      * It is invalid and contradictory to pass both 'dupRecords' and 'dupKeys'.
@@ -285,7 +282,6 @@ public:
 
     virtual Status commitBulk(OperationContext* opCtx,
                               BulkBuilder* bulk,
-                              bool dupsAllowed,
                               std::set<RecordId>* dupRecords,
                               std::vector<BSONObj>* dupKeys) = 0;
 
@@ -518,7 +514,6 @@ public:
 
     Status commitBulk(OperationContext* opCtx,
                       BulkBuilder* bulk,
-                      bool dupsAllowed,
                       std::set<RecordId>* dupRecords,
                       std::vector<BSONObj>* dupKeys) final;
 

@@ -243,6 +243,14 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
 
     MultiIndexBlock indexer(opCtx, coll);
 
+    // Ignore uniqueness constraint violations when relaxed (on secondaries). Secondaries can
+    // complete index builds in the middle of batches, which creates the potential for finding
+    // duplicate key violations where there otherwise would be none at consistent states.
+    if (_indexConstraints == IndexConstraints::kRelax) {
+        log() << "relaxing constraints";
+        indexer.ignoreUniqueConstraint();
+    }
+
     Status status = Status::OK();
     {
         TimestampBlock tsBlock(opCtx, _initIndexTs);
@@ -253,7 +261,7 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
     if (status == ErrorCodes::IndexAlreadyExists ||
         (status == ErrorCodes::IndexOptionsConflict &&
          _indexConstraints == IndexConstraints::kRelax)) {
-        LOG(1) << "Ignoring indexing error: " << redact(status);
+        LOG(0) << "Ignoring indexing error: " << redact(status);
 
         // Must set this in case anyone is waiting for this build.
         _setBgIndexStarting();
@@ -261,13 +269,6 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
     }
     if (!status.isOK()) {
         return _failIndexBuild(opCtx, indexer, dbLock, status);
-    }
-
-    // Ignore uniqueness constraint violations when relaxed (on secondaries). Secondaries can
-    // complete index builds in the middle of batches, which creates the potential for finding
-    // duplicate key violations where there otherwise would be none at consistent states.
-    if (_indexConstraints == IndexConstraints::kRelax) {
-        indexer.ignoreUniqueConstraint();
     }
 
     if (dbLock) {
@@ -292,7 +293,7 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
     {
         // Perform the first drain while holding an intent lock.
         Lock::CollectionLock collLock(opCtx->lockState(), ns.ns(), MODE_IX);
-        status = indexer.drainBackgroundWritesIfNeeded();
+        status = indexer.drainBackgroundWrites();
     }
     if (!status.isOK()) {
         return _failIndexBuild(opCtx, indexer, dbLock, status);
@@ -301,7 +302,7 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
     // Perform the second drain while stopping inserts into the collection.
     {
         Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_S);
-        status = indexer.drainBackgroundWritesIfNeeded();
+        status = indexer.drainBackgroundWrites();
     }
     if (!status.isOK()) {
         return _failIndexBuild(opCtx, indexer, dbLock, status);
@@ -316,7 +317,7 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
 
     // Perform the third and final drain after releasing a shared lock and reacquiring an
     // exclusive lock on the database.
-    status = indexer.drainBackgroundWritesIfNeeded();
+    status = indexer.drainBackgroundWrites();
     if (!status.isOK()) {
         return _failIndexBuild(opCtx, indexer, dbLock, status);
     }

@@ -587,6 +587,7 @@ Status AbstractIndexAccessMethod::BulkBuilderImpl::insert(OperationContext* opCt
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     MultikeyPaths multikeyPaths;
 
+    log() << "relax? " << (options.getKeysMode == GetKeysMode::kRelaxConstraints);
     _real->getKeys(obj, options.getKeysMode, &keys, &_multikeyMetadataKeys, &multikeyPaths);
 
     if (!multikeyPaths.empty()) {
@@ -634,7 +635,6 @@ int64_t AbstractIndexAccessMethod::BulkBuilderImpl::getKeysInserted() const {
 
 Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
                                              BulkBuilder* bulk,
-                                             bool dupsAllowed,
                                              set<RecordId>* dupRecords,
                                              std::vector<BSONObj>* dupKeysInserted) {
     // Cannot simultaneously report uninserted duplicates 'dupRecords' and inserted duplicates
@@ -654,7 +654,7 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
     }
 
     auto builder = std::unique_ptr<SortedDataBuilderInterface>(
-        _newInterface->getBulkBuilder(opCtx, dupsAllowed));
+        _newInterface->getBulkBuilder(opCtx, true /* dupsAllowed*/));
 
     bool checkIndexKeySize = shouldCheckIndexKeySize(opCtx);
 
@@ -673,15 +673,9 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
         bool isDup = false;
         if (_descriptor->unique()) {
             isDup = data.first.woCompare(previousKey, ordering) == 0;
-            if (isDup && !dupsAllowed) {
-                if (dupRecords) {
-                    dupRecords->insert(data.second);
-                    continue;
-                }
-                return buildDupKeyErrorStatus(data.first,
-                                              _descriptor->parentNS(),
-                                              _descriptor->indexName(),
-                                              _descriptor->keyPattern());
+            if (isDup && dupRecords) {
+                dupRecords->insert(data.second);
+                continue;
             }
         }
 
@@ -708,7 +702,7 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
 
         previousKey = data.first.getOwned();
 
-        if (isDup && dupsAllowed && dupKeysInserted) {
+        if (isDup && dupKeysInserted) {
             dupKeysInserted->push_back(data.first.getOwned());
         }
 

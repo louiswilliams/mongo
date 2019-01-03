@@ -246,50 +246,44 @@ void createIndexForApplyOps(OperationContext* opCtx,
     OpCounters* opCounters = opCtx->writesAreReplicated() ? &globalOpCounters : &replOpCounters;
     opCounters->gotInsert();
 
-    const IndexBuilder::IndexConstraints constraints =
+    const auto constraints =
         ReplicationCoordinator::get(opCtx)->shouldRelaxIndexConstraints(opCtx, indexNss)
         ? IndexBuilder::IndexConstraints::kRelax
         : IndexBuilder::IndexConstraints::kEnforce;
 
-    const IndexBuilder::ReplicatedWrites replicatedWrites = opCtx->writesAreReplicated()
+    const auto replicatedWrites = opCtx->writesAreReplicated()
         ? IndexBuilder::ReplicatedWrites::kReplicated
         : IndexBuilder::ReplicatedWrites::kUnreplicated;
 
-    if (indexSpec["background"].trueValue()) {
-        if (mode == OplogApplication::Mode::kRecovering) {
+    if (mode == OplogApplication::Mode::kRecovering) {
+        LOG(3) << "apply op: building background index " << indexSpec
+               << " in the foreground because the node is in recovery";
+        IndexBuilder builder(indexSpec, constraints, replicatedWrites);
+        Status status = builder.buildInForeground(opCtx, db);
+        uassertStatusOK(status);
+    } else {
+        Lock::TempRelease release(opCtx->lockState());
+        if (opCtx->lockState()->isLocked()) {
+            // If TempRelease fails, background index build will deadlock.
             LOG(3) << "apply op: building background index " << indexSpec
-                   << " in the foreground because the node is in recovery";
+                   << " in the foreground because temp release failed";
             IndexBuilder builder(indexSpec, constraints, replicatedWrites);
             Status status = builder.buildInForeground(opCtx, db);
             uassertStatusOK(status);
         } else {
-            Lock::TempRelease release(opCtx->lockState());
-            if (opCtx->lockState()->isLocked()) {
-                // If TempRelease fails, background index build will deadlock.
-                LOG(3) << "apply op: building background index " << indexSpec
-                       << " in the foreground because temp release failed";
-                IndexBuilder builder(indexSpec, constraints, replicatedWrites);
-                Status status = builder.buildInForeground(opCtx, db);
-                uassertStatusOK(status);
-            } else {
-                IndexBuilder* builder =
-                    new IndexBuilder(indexSpec,
-                                     constraints,
-                                     replicatedWrites,
-                                     opCtx->recoveryUnit()->getCommitTimestamp());
-                // This spawns a new thread and returns immediately.
-                builder->go();
-                // Wait for thread to start and register itself
-                IndexBuilder::waitForBgIndexStarting();
-            }
+            IndexBuilder* builder = new IndexBuilder(indexSpec,
+                                                     constraints,
+                                                     replicatedWrites,
+                                                     opCtx->recoveryUnit()->getCommitTimestamp());
+            // This spawns a new thread and returns immediately.
+            builder->go();
+            // Wait for thread to start and register itself
+            IndexBuilder::waitForBgIndexStarting();
         }
-
-        opCtx->recoveryUnit()->abandonSnapshot();
-    } else {
-        IndexBuilder builder(indexSpec, constraints, replicatedWrites);
-        Status status = builder.buildInForeground(opCtx, db);
-        uassertStatusOK(status);
     }
+
+    opCtx->recoveryUnit()->abandonSnapshot();
+
     if (incrementOpsAppliedStats) {
         incrementOpsAppliedStats();
     }

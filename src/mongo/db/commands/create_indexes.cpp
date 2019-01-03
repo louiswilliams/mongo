@@ -416,7 +416,7 @@ bool runCreateIndexes(OperationContext* opCtx,
         opCtx->recoveryUnit()->abandonSnapshot();
         Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_IS);
 
-        uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
+        uassertStatusOK(indexer.drainBackgroundWrites());
     }
 
     if (MONGO_FAIL_POINT(hangAfterIndexBuildFirstDrain)) {
@@ -429,7 +429,7 @@ bool runCreateIndexes(OperationContext* opCtx,
         opCtx->recoveryUnit()->abandonSnapshot();
         Lock::CollectionLock colLock(opCtx->lockState(), ns.ns(), MODE_S);
 
-        uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
+        uassertStatusOK(indexer.drainBackgroundWrites());
     }
 
     if (MONGO_FAIL_POINT(hangAfterIndexBuildSecondDrain)) {
@@ -453,7 +453,7 @@ bool runCreateIndexes(OperationContext* opCtx,
 
     // Perform the third and final drain after releasing a shared lock and reacquiring an
     // exclusive lock on the database.
-    uassertStatusOK(indexer.drainBackgroundWritesIfNeeded());
+    uassertStatusOK(indexer.drainBackgroundWrites());
 
     // This is required before completion.
     uassertStatusOK(indexer.checkConstraints());

@@ -141,7 +141,7 @@ public:
      *
      * Must not be in a WriteUnitOfWork.
      */
-    Status drainBackgroundWritesIfNeeded();
+    Status drainBackgroundWrites();
 
     /**
      * Check any constraits that may have been temporarily violated during the index build for

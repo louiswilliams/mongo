@@ -211,6 +211,16 @@ Status CollectionBulkLoaderImpl::commit() {
                     });
             }
 
+            // Deleted keys need to be drained and then duplicate key constraints checked.
+            status = _idIndexBlock->drainBackgroundWrites();
+            if (!status.isOK()) {
+                return status;
+            }
+            status = _idIndexBlock->checkConstraints();
+            if (!status.isOK()) {
+                return status;
+            }
+
             // Commit _id index, without dups.
             status = writeConflictRetry(
                 _opCtx.get(), "CollectionBulkLoaderImpl::commit", _nss.ns(), [this] {

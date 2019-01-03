@@ -156,6 +156,9 @@ var workerThread = (function() {
                 load('jstests/libs/override_methods/set_read_and_write_concerns.js');
             }
 
+            // Retry operations that fail due to in-progress background operations.
+            load('jstests/libs/override_methods/implicitly_retry_on_background_op_in_progress.js');
+
             workloads.forEach(function(workload) {
                 load(workload);                     // for $config
                 var config = parseConfig($config);  // to normalize

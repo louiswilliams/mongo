@@ -41,9 +41,9 @@
         return false;
     }, "Node did not terminate due to invalid index spec", 60 * 1000);
 
-    replTest.stop(secondary, undefined, {allowedExitCode: MongoRunner.EXIT_ABRUPT});
+    replTest.stop(secondary, undefined, {allowedExitCode: MongoRunner.EXIT_ABORT});
 
-    const msg1 = "Fatal assertion 34437";
+    const msg1 = "Fatal Assertion 50769";
     const msg2 = "InvalidIndexSpecificationOption: The field 'invalidOption2'";
 
     assert(rawMongoProgramOutput().match(msg1) && rawMongoProgramOutput().match(msg2),

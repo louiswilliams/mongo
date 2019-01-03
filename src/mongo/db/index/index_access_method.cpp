@@ -587,7 +587,6 @@ Status AbstractIndexAccessMethod::BulkBuilderImpl::insert(OperationContext* opCt
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     MultikeyPaths multikeyPaths;
 
-    log() << "relax? " << (options.getKeysMode == GetKeysMode::kRelaxConstraints);
     _real->getKeys(obj, options.getKeysMode, &keys, &_multikeyMetadataKeys, &multikeyPaths);
 
     if (!multikeyPaths.empty()) {

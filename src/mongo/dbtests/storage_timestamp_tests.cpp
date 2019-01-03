@@ -2255,10 +2255,9 @@ public:
  * indexes. Specifically, when a primary builds an index from an oplog entry which can happen on
  * primary catch-up, drain, a secondary step-up or `applyOps`.
  *
- * This test will exercise IndexBuilder code on primaries by performing a background index build
- * via an `applyOps` command.
+ * This test will exercise IndexBuilder code on primaries by performing an index build via an
+ * `applyOps` command.
  */
-template <bool Foreground>
 class TimestampIndexBuilderOnPrimary : public StorageTimestampTest {
 public:
     void run() {
@@ -2295,12 +2294,10 @@ public:
         }
 
         {
-            // Create a background index via `applyOps`. We will timestamp the beginning at
-            // `startBuildTs` and the end, due to manipulation of the logical clock, should be
-            // timestamped at `endBuildTs`.
-            const auto beforeBuildTime = _clock->reserveTicks(3);
+            // Create an index via `applyOps`. Because this is a primary, the index build is
+            // timestamped with `startBuildTs`.
+            const auto beforeBuildTime = _clock->reserveTicks(2);
             const auto startBuildTs = beforeBuildTime.addTicks(1).asTimestamp();
-            const auto endBuildTs = beforeBuildTime.addTicks(3).asTimestamp();
 
             // Grab the existing idents to identify the ident created by the index build.
             auto kvStorageEngine =
@@ -2317,9 +2314,7 @@ public:
                                                   << "key"
                                                   << BSON("field" << 1)
                                                   << "name"
-                                                  << "field_1"
-                                                  << "background"
-                                                  << (Foreground ? false : true));
+                                                  << "field_1");
 
             auto createIndexOp =
                 BSON("ts" << startBuildTs << "t" << 1LL << "h" << 0xBEEFBEEFLL << "v" << 2 << "op"
@@ -2339,22 +2334,11 @@ public:
             assertIdentsMissingAtTimestamp(
                 kvCatalog, "", indexIdent, beforeBuildTime.asTimestamp());
             assertIdentsExistAtTimestamp(kvCatalog, "", indexIdent, startBuildTs);
-            if (Foreground) {
-                // In the Foreground case, the index build should start and finish at
-                // `startBuildTs`.
-                ASSERT_TRUE(
-                    getIndexMetaData(getMetaDataAtTime(kvCatalog, nss, startBuildTs), "field_1")
-                        .ready);
-            } else {
-                // In the Background case, the index build should not be "ready" at `startBuildTs`.
-                ASSERT_FALSE(
-                    getIndexMetaData(getMetaDataAtTime(kvCatalog, nss, startBuildTs), "field_1")
-                        .ready);
-                assertIdentsExistAtTimestamp(kvCatalog, "", indexIdent, endBuildTs);
-                ASSERT_TRUE(
-                    getIndexMetaData(getMetaDataAtTime(kvCatalog, nss, endBuildTs), "field_1")
-                        .ready);
-            }
+
+            // On a primary, the index build should start and finish at `startBuildTs` because it is
+            // built in the foreground.
+            ASSERT_TRUE(
+                getIndexMetaData(getMetaDataAtTime(kvCatalog, nss, startBuildTs), "field_1").ready);
         }
     }
 };
@@ -2718,9 +2702,7 @@ public:
         add<TimestampMultiIndexBuilds>();
         add<TimestampMultiIndexBuildsDuringRename>();
         add<TimestampIndexDrops>();
-        // TimestampIndexBuilderOnPrimary<Background>
-        add<TimestampIndexBuilderOnPrimary<false>>();
-        add<TimestampIndexBuilderOnPrimary<true>>();
+        add<TimestampIndexBuilderOnPrimary>();
         add<SecondaryReadsDuringBatchApplicationAreAllowed>();
         add<ViewCreationSeparateTransaction>();
         add<CreateCollectionWithSystemIndex>();

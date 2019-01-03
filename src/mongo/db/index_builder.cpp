@@ -247,7 +247,6 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
     // complete index builds in the middle of batches, which creates the potential for finding
     // duplicate key violations where there otherwise would be none at consistent states.
     if (_indexConstraints == IndexConstraints::kRelax) {
-        log() << "relaxing constraints";
         indexer.ignoreUniqueConstraint();
     }
 

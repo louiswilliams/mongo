@@ -255,31 +255,33 @@ void createIndexForApplyOps(OperationContext* opCtx,
         ? IndexBuilder::ReplicatedWrites::kReplicated
         : IndexBuilder::ReplicatedWrites::kUnreplicated;
 
+    const bool isPrimary = ReplicationCoordinator::get(opCtx)->canAcceptWritesFor(opCtx, indexNss);
+
     if (mode == OplogApplication::Mode::kRecovering) {
         LOG(3) << "apply op: building background index " << indexSpec
                << " in the foreground because the node is in recovery";
         IndexBuilder builder(indexSpec, constraints, replicatedWrites);
         Status status = builder.buildInForeground(opCtx, db);
         uassertStatusOK(status);
+    } else if (isPrimary) {
+        // Primaries should build indexes in the foreground because failures cannot be handled
+        // by the background thread.
+        LOG(0) << "apply op: building background index " << indexSpec
+               << " in the foreground because this is a primary";
+        IndexBuilder builder(indexSpec, constraints, replicatedWrites);
+        Status status = builder.buildInForeground(opCtx, db);
+        uassertStatusOK(status);
     } else {
         Lock::TempRelease release(opCtx->lockState());
-        if (opCtx->lockState()->isLocked()) {
-            // If TempRelease fails, background index build will deadlock.
-            LOG(3) << "apply op: building background index " << indexSpec
-                   << " in the foreground because temp release failed";
-            IndexBuilder builder(indexSpec, constraints, replicatedWrites);
-            Status status = builder.buildInForeground(opCtx, db);
-            uassertStatusOK(status);
-        } else {
-            IndexBuilder* builder = new IndexBuilder(indexSpec,
-                                                     constraints,
-                                                     replicatedWrites,
-                                                     opCtx->recoveryUnit()->getCommitTimestamp());
-            // This spawns a new thread and returns immediately.
-            builder->go();
-            // Wait for thread to start and register itself
-            IndexBuilder::waitForBgIndexStarting();
-        }
+        // TempRelease cannot fail because no recursive locks should be taken.
+        invariant(!opCtx->lockState()->isLocked());
+
+        IndexBuilder* builder = new IndexBuilder(
+            indexSpec, constraints, replicatedWrites, opCtx->recoveryUnit()->getCommitTimestamp());
+        // This spawns a new thread and returns immediately.
+        builder->go();
+        // Wait for thread to start and register itself
+        IndexBuilder::waitForBgIndexStarting();
     }
 
     opCtx->recoveryUnit()->abandonSnapshot();

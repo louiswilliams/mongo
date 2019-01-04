@@ -381,12 +381,23 @@ bool runCreateIndexes(OperationContext* opCtx,
             return uassertStatusOK(indexer.init(specs));
         });
 
+
+    // If the storage engine doesn't support document-level locking, do not attempt to build in the
+    // background.
+    const bool buildInBackground =
+        opCtx->getServiceContext()->getStorageEngine()->supportsDocLocking();
+
     // If we're a background index, replace exclusive db lock with an intent lock, so that
     // other readers and writers can proceed during this phase.
-    opCtx->recoveryUnit()->abandonSnapshot();
-    dbLock.relockWithMode(MODE_IX);
+    if (buildInBackground) {
+        opCtx->recoveryUnit()->abandonSnapshot();
+        dbLock.relockWithMode(MODE_IX);
+    }
 
     auto relockOnErrorGuard = MakeGuard([&] {
+        if (!buildInBackground)
+            return;
+
         // Must have exclusive DB lock before we clean up the index build via the
         // destructor of 'indexer'.
         try {
@@ -440,16 +451,19 @@ bool runCreateIndexes(OperationContext* opCtx,
     relockOnErrorGuard.Dismiss();
 
     // Need to return db lock back to exclusive, to complete the index build.
-    opCtx->recoveryUnit()->abandonSnapshot();
-    dbLock.relockWithMode(MODE_X);
+    if (buildInBackground) {
+        opCtx->recoveryUnit()->abandonSnapshot();
+        dbLock.relockWithMode(MODE_X);
 
-    db = databaseHolder->getDb(opCtx, ns.db());
-    if (db) {
-        DatabaseShardingState::get(db).checkDbVersion(opCtx);
+        db = databaseHolder->getDb(opCtx, ns.db());
+        if (db) {
+            DatabaseShardingState::get(db).checkDbVersion(opCtx);
+        }
+
+        invariant(db);
+        invariant(db->getCollection(opCtx, ns));
     }
 
-    invariant(db);
-    invariant(db->getCollection(opCtx, ns));
 
     // Perform the third and final drain after releasing a shared lock and reacquiring an
     // exclusive lock on the database.

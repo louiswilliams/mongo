@@ -212,9 +212,11 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(const std::vector<BSONObj
         _collection->getIndexCatalog()->prepareInsertDeleteOptions(
             _opCtx, descriptor, &index.options);
 
-        // Allow duplicates because duplicate keys are tracked by the interceptor and resolved by
-        // calls to checkConstraints().
-        index.options.dupsAllowed = true;
+        // Allow duplicates on storage engines that support document locking. For storage engines
+        // that do not, there is no need to temporarily enable document-level locking.
+        const bool docLocking =
+            _opCtx->getServiceContext()->getStorageEngine()->supportsDocLocking();
+        index.options.dupsAllowed = docLocking;
         if (_ignoreUnique) {
             index.options.getKeysMode = IndexAccessMethod::GetKeysMode::kRelaxConstraints;
         }
@@ -420,8 +422,11 @@ Status MultiIndexBlock::dumpInsertsFromBulk(std::set<RecordId>* dupRecords) {
         IndexCatalogEntry* entry = _indexes[i].block->getEntry();
         LOG(1) << "index build: inserting from external sorter into index: "
                << entry->descriptor()->indexName();
-        Status status = _indexes[i].real->commitBulk(
-            _opCtx, _indexes[i].bulk.get(), dupRecords, (dupRecords) ? nullptr : &dupKeysInserted);
+        Status status = _indexes[i].real->commitBulk(_opCtx,
+                                                     _indexes[i].bulk.get(),
+                                                     _indexes[i].options.dupsAllowed,
+                                                     dupRecords,
+                                                     (dupRecords) ? nullptr : &dupKeysInserted);
         if (!status.isOK()) {
             return status;
         }

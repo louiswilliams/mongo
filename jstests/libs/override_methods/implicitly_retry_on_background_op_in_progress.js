@@ -34,11 +34,8 @@
 
     function hasBackgroundOpInProgress(res) {
         // Only these are retryable.
-        if (res.code === ErrorCodes.BackgroundOperationInProgressForNamespace ||
-            res.code === ErrorCodes.BackgroundOperationInProgressForDatabase) {
-            return true;
-        }
-        return false;
+        return res.code === ErrorCodes.BackgroundOperationInProgressForNamespace ||
+            res.code === ErrorCodes.BackgroundOperationInProgressForDatabase;
     }
 
     function runCommandWithRetries(conn, dbName, commandObj, func, makeFuncArgs) {

@@ -168,8 +168,8 @@ void IndexBuilder::run() {
     // OperationContext::checkForInterrupt() will see the kill status and respond accordingly
     // (checkForInterrupt() will throw an exception while checkForInterruptNoAssert() returns
     // an error Status).
-    Status status =
-        opCtx->runWithoutInterruption([&, this] { return _build(opCtx.get(), db, &dlk); });
+    Status status = opCtx->runWithoutInterruption(
+        [&, this] { return _build(opCtx.get(), db, &dlk, true /* buildInBackground */); });
     if (!status.isOK()) {
         error() << "IndexBuilder could not build index: " << redact(status);
         fassert(28555, ErrorCodes::isInterruption(status.code()));
@@ -177,7 +177,7 @@ void IndexBuilder::run() {
 }
 
 Status IndexBuilder::buildInForeground(OperationContext* opCtx, Database* db) const {
-    return _build(opCtx, db, nullptr);
+    return _build(opCtx, db, nullptr, false /*buildInBackground */);
 }
 
 void IndexBuilder::waitForBgIndexStarting() {
@@ -196,6 +196,7 @@ Status _failIndexBuild(OperationContext* opCtx,
                        Status status) {
     invariant(status.code() != ErrorCodes::WriteConflict);
 
+    // Only background build pass a dbLock.
     if (!dbLock) {
         return status;
     }
@@ -216,7 +217,10 @@ Status _failIndexBuild(OperationContext* opCtx,
 }
 }  // namespace
 
-Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock* dbLock) const try {
+Status IndexBuilder::_build(OperationContext* opCtx,
+                            Database* db,
+                            Lock::DBLock* dbLock,
+                            bool buildInBackground) const try {
     const NamespaceString ns(_index["ns"].String());
 
     Collection* coll = db->getCollection(opCtx, ns);
@@ -272,7 +276,9 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
         return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
-    if (dbLock) {
+    if (buildInBackground) {
+        invariant(dbLock);
+
         _setBgIndexStarting();
         opCtx->recoveryUnit()->abandonSnapshot();
 
@@ -309,7 +315,7 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
         return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
-    if (dbLock) {
+    if (buildInBackground) {
         opCtx->recoveryUnit()->abandonSnapshot();
 
         UninterruptibleLockGuard noInterrupt(opCtx->lockState());
@@ -368,16 +374,18 @@ Status IndexBuilder::_build(OperationContext* opCtx, Database* db, Lock::DBLock*
         return _failIndexBuild(opCtx, indexer, dbLock, status);
     }
 
-    invariant(opCtx->lockState()->isDbLockedForMode(ns.db(), MODE_X),
-              str::stream() << "Database not locked in exclusive mode after committing "
-                               "background index: "
-                            << ns.ns()
-                            << ": "
-                            << _index);
-    auto databaseHolder = DatabaseHolder::get(opCtx);
-    auto reloadDb = databaseHolder->getDb(opCtx, ns.db());
-    fassert(28553, reloadDb);
-    fassert(28554, reloadDb->getCollection(opCtx, ns));
+    if (buildInBackground) {
+        invariant(opCtx->lockState()->isDbLockedForMode(ns.db(), MODE_X),
+                  str::stream() << "Database not locked in exclusive mode after committing "
+                                   "background index: "
+                                << ns.ns()
+                                << ": "
+                                << _index);
+        auto databaseHolder = DatabaseHolder::get(opCtx);
+        auto reloadDb = databaseHolder->getDb(opCtx, ns.db());
+        fassert(28553, reloadDb);
+        fassert(28554, reloadDb->getCollection(opCtx, ns));
+    }
 
     return Status::OK();
 } catch (const DBException& e) {

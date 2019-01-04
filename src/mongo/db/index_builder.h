@@ -106,7 +106,10 @@ public:
     static void waitForBgIndexStarting();
 
 private:
-    Status _build(OperationContext* opCtx, Database* db, Lock::DBLock* dbLock) const;
+    Status _build(OperationContext* opCtx,
+                  Database* db,
+                  Lock::DBLock* dbLock,
+                  bool buildInBackground) const;
 
     const BSONObj _index;
     const IndexConstraints _indexConstraints;

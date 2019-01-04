@@ -95,25 +95,17 @@ Status IndexCatalogImpl::IndexBuildBlock::init() {
     _entry = _catalog->_setupInMemoryStructures(
         _opCtx, std::move(descriptor), initFromDisk, isReadyIndex);
 
-    bool useHybrid = true;
-    // TODO: Remove when SERVER-38550 is complete. The mobile storage engine does not suport
-    // dupsAllowed mode on bulk builders.
-    useHybrid = useHybrid && storageGlobalParams.engine != "mobile";
+    _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>(_opCtx, _entry);
+    _entry->setIndexBuildInterceptor(_indexBuildInterceptor.get());
 
-    if (useHybrid) {
-        _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>(_opCtx, _entry);
-        _entry->setIndexBuildInterceptor(_indexBuildInterceptor.get());
-
-        _opCtx->recoveryUnit()->onCommit(
-            [ opCtx = _opCtx, entry = _entry, collection = _collection ](
-                boost::optional<Timestamp> commitTime) {
-                // This will prevent the unfinished index from being visible on index iterators.
-                if (commitTime) {
-                    entry->setMinimumVisibleSnapshot(commitTime.get());
-                    collection->setMinimumVisibleSnapshot(commitTime.get());
-                }
-            });
-    }
+    _opCtx->recoveryUnit()->onCommit([ opCtx = _opCtx, entry = _entry, collection = _collection ](
+        boost::optional<Timestamp> commitTime) {
+        // This will prevent the unfinished index from being visible on index iterators.
+        if (commitTime) {
+            entry->setMinimumVisibleSnapshot(commitTime.get());
+            collection->setMinimumVisibleSnapshot(commitTime.get());
+        }
+    });
 
     // Register this index with the CollectionInfoCache to regenerate the cache. This way, updates
     // occurring while an index is being build in the background will be aware of whether or not

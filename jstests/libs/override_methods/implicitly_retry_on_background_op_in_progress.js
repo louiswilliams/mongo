@@ -94,7 +94,7 @@
                     let shardRes = res.raw[shard];
 
                     if (hasBackgroundOpInProgress(shardRes)) {
-                        shardsWithBackgroundOps.push(field);
+                        shardsWithBackgroundOps.push(shard);
                     }
 
                     // If any of the shards return an error that is not whitelisted or even if a

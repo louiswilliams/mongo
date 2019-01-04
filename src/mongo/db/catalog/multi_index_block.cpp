@@ -216,7 +216,7 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(const std::vector<BSONObj
         // that do not, there is no need to temporarily enable document-level locking.
         const bool docLocking =
             _opCtx->getServiceContext()->getStorageEngine()->supportsDocLocking();
-        index.options.dupsAllowed = docLocking;
+        index.options.dupsAllowed = index.options.dupsAllowed || docLocking;
         if (_ignoreUnique) {
             index.options.getKeysMode = IndexAccessMethod::GetKeysMode::kRelaxConstraints;
         }

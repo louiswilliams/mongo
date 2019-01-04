@@ -32,6 +32,8 @@
     const timeout = 5 * 60 * 1000;
     const interval = 1000;
 
+    // This will return true for a replica set, standalone, or mongos where all shards returned the
+    // same error.
     function hasBackgroundOpInProgress(res) {
         // Only these are retryable.
         return res.code === ErrorCodes.BackgroundOperationInProgressForNamespace ||
@@ -48,33 +50,42 @@
         let res;
         let attempt = 0;
 
-        assert.soon(() => {
-            attempt++;
+        assert.soon(
+            () => {
+                attempt++;
 
-            res = func.apply(conn, makeFuncArgs(commandObj));
-            if (res.ok === 1) {
-                return true;
-            }
+                if (commandName == "dropIndexes") {
+                    print("trying to drop index (attempt " + attempt + "): " + tojson(res));
+                }
 
-            // Commands that are not in the whitelist should never fail with this error code.
-            if (!commandWhitelist.has(commandName)) {
-                return true;
-            }
+                res = func.apply(conn, makeFuncArgs(commandObj));
+                if (res.ok === 1) {
+                    return true;
+                }
 
-            let message = "Retrying the '" + commandName +
-                "' command because a background operation is in progress (attempt " + attempt + ")";
+                // Commands that are not in the whitelist should never fail with this error code.
+                if (!commandWhitelist.has(commandName)) {
+                    return true;
+                }
 
-            // This is the code path for a replica set, standalone, or mongos where all shards
-            // returned the same error.
-            if (hasBackgroundOpInProgress(res)) {
-                print(message);
-                return false;
-            }
+                let message = "Retrying the '" + commandName +
+                    "' command because a background operation is in progress (attempt " + attempt +
+                    ")";
 
-            // In certain cases, retrying a command on a sharded cluster may result in a scenario
-            // where one shard has executed the command and another still has a background operation
-            // in progress. Retry, ignoring whitelisted errors on a command-by-command basis.
-            if (conn.isMongos()) {
+                if (!hasBackgroundOpInProgress(res)) {
+                    return true;
+                }
+
+                // Retry if this is not running against a mongos.
+                if (!conn.isMongos()) {
+                    print(message);
+                    return false;
+                }
+
+                // In certain cases, retrying a command on a sharded cluster may result in a
+                // scenario where one shard has executed the command and another still has a
+                // background operation in progress. Retry, ignoring whitelisted errors on a
+                // command-by-command basis.
                 let shardsWithBackgroundOps = [];
 
                 // If any shard has a background operation in progress and the other shards sent
@@ -100,9 +111,11 @@
 
                 print(message + " on shards: " + tojson(shardsWithBackgroundOps));
                 return false;
-            }
-
-        }, "Timed out while retrying command: " + tojson(res), timeout, interval);
+            },
+            "Timed out while retrying command '" + tojson(commandObj) + "', response: " +
+                tojson(res),
+            timeout,
+            interval);
         return res;
     }
 

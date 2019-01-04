@@ -20,7 +20,7 @@
         const commandName = Object.keys(commandObj)[0];
 
         let res = func.apply(conn, makeFuncArgs(commandObj));
-        if (commandName != "createIndex") {
+        if (commandName != "createIndexes") {
             return res;
         }
         if (!res.ok) {

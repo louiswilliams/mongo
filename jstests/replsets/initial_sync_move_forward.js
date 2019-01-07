@@ -24,7 +24,7 @@
 
     // Insert 500000 documents. Make the last two documents larger, so that {_id: 0, x: 0} and {_id:
     // 1, x: 1} will fit into their positions when we grow them.
-    var count = 500000;
+    var count = 50000;
     var bulk = masterColl.initializeUnorderedBulkOp();
     for (var i = 0; i < count - 2; ++i) {
         bulk.insert({_id: i, x: i});

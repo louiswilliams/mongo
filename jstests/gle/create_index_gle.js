@@ -41,6 +41,9 @@ load('jstests/replsets/rslib.js');
     testDB.user.ensureIndex({x: 1});
     assert.gleOK(testDB.runCommand({getLastError: 1, w: 2}));
 
+    replTest.awaitSecondaryNodes();
+    replTest.awaitReplication();
+
     var priIdx = testDB.user.getIndexes();
     var secIdx = testDB2.user.getIndexes();
 

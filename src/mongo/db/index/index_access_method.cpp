@@ -719,8 +719,8 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
 
     pm.finished();
 
-    log() << "index build: inserted keys from external sorter into index in " << timer.seconds()
-          << " seconds";
+    log() << "index build: inserted " << bulk->getKeysInserted()
+          << " keys from external sorter into index in " << timer.seconds() << " seconds";
 
     WriteUnitOfWork wunit(opCtx);
     SpecialFormatInserted specialFormatInserted = builder->commit(true /* mayInterrupt */);

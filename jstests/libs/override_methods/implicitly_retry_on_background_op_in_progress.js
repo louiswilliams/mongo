@@ -29,11 +29,13 @@
         "renameCollection": [ErrorCodes.NamespaceNotFound],
     };
 
-    const timeout = 5 * 60 * 1000;
-    const interval = 1000;
+    const kTimeout = 5 * 60 * 1000;
+    const kInterval = 1000;
 
-    // This will return true for a replica set, standalone, or mongos where all shards returned the
-    // same error.
+    // Make it easier to understand whether or not returns from the assert.soon are being retried.
+    const kNoRetry = true;
+    const kRetry = false;
+
     function hasBackgroundOpInProgress(res) {
         // Only these are retryable.
         return res.code === ErrorCodes.BackgroundOperationInProgressForNamespace ||
@@ -54,32 +56,30 @@
             () => {
                 attempt++;
 
-                if (commandName == "dropIndexes") {
-                    print("trying to drop index (attempt " + attempt + "): " + tojson(res));
-                }
-
                 res = func.apply(conn, makeFuncArgs(commandObj));
                 if (res.ok === 1) {
-                    return true;
+                    return kNoRetry;
                 }
 
                 // Commands that are not in the whitelist should never fail with this error code.
                 if (!commandWhitelist.has(commandName)) {
-                    return true;
+                    return kNoRetry;
                 }
 
                 let message = "Retrying the '" + commandName +
                     "' command because a background operation is in progress (attempt " + attempt +
                     ")";
 
-                if (!hasBackgroundOpInProgress(res)) {
-                    return true;
+                // This handles the retry case when run against a standalone, replica set, or mongos
+                // where both shards returned the same response.
+                if (hasBackgroundOpInProgress(res)) {
+                    print(message);
+                    return kRetry;
                 }
 
-                // Retry if this is not running against a mongos.
+                // The following logic only applies to sharded clusters.
                 if (!conn.isMongos()) {
-                    print(message);
-                    return false;
+                    return kNoRetry;
                 }
 
                 // In certain cases, retrying a command on a sharded cluster may result in a
@@ -92,6 +92,9 @@
                 // whitelisted errors after a first attempt, retry the entire command.
                 for (let shard in res.raw) {
                     let shardRes = res.raw[shard];
+                    if (shardRes.ok) {
+                        continue;
+                    }
 
                     if (hasBackgroundOpInProgress(shardRes)) {
                         shardsWithBackgroundOps.push(shard);
@@ -101,21 +104,21 @@
                     // whitelisted error is received on the first attempt, do not retry.
                     let acceptableErrors = acceptableCommandErrors[commandName] || [];
                     if (!acceptableErrors.includes(shardRes.code) || attempt == 1) {
-                        return true;
+                        return kNoRetry;
                     }
                 }
 
                 if (shardsWithBackgroundOps.length === 0) {
-                    return true;
+                    return kNoRetry;
                 }
 
                 print(message + " on shards: " + tojson(shardsWithBackgroundOps));
-                return false;
+                return kRetry;
             },
             "Timed out while retrying command '" + tojson(commandObj) + "', response: " +
                 tojson(res),
-            timeout,
-            interval);
+            kTimeout,
+            kInterval);
         return res;
     }
 

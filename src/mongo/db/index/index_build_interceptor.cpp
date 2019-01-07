@@ -281,11 +281,13 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     BSONObjSet multikeyMetadataKeys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     MultikeyPaths multikeyPaths;
 
-    indexAccessMethod->getKeys(*obj,
-                               IndexAccessMethod::GetKeysMode::kEnforceConstraints,
-                               &keys,
-                               &multikeyMetadataKeys,
-                               &multikeyPaths);
+    // Relax key constraints when generating keys for removal, but only for those that don't apply
+    // to a partial index filter. This is the same behavior as IndexAccessMethod::remove.
+    const auto getKeysMode = op == Op::kInsert
+        ? IndexAccessMethod::GetKeysMode::kEnforceConstraints
+        : IndexAccessMethod::GetKeysMode::kRelaxConstraintsUnfiltered;
+    indexAccessMethod->getKeys(*obj, getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths);
+
     // Maintain parity with IndexAccessMethods handling of key counting. Only include
     // `multikeyMetadataKeys` when inserting.
     *numKeysOut = keys.size() + (op == Op::kInsert ? multikeyMetadataKeys.size() : 0);

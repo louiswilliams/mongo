@@ -442,6 +442,12 @@ Status WiredTigerRecoveryUnit::obtainMajorityCommittedSnapshot() {
 }
 
 boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp() const {
+    if (_timestampReadSource == ReadSource::kUnset ||
+        _timestampReadSource == ReadSource::kNoTimestamp) {
+        return boost::none;
+    }
+    invariant(_isActive());
+
     if (_timestampReadSource == ReadSource::kProvided ||
         _timestampReadSource == ReadSource::kLastAppliedSnapshot ||
         _timestampReadSource == ReadSource::kAllCommittedSnapshot) {
@@ -449,8 +455,7 @@ boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp()
         return _readAtTimestamp;
     }
 
-    if (_timestampReadSource == ReadSource::kLastApplied) {
-        invariant(!_readAtTimestamp.isNull());
+    if (_timestampReadSource == ReadSource::kLastApplied && !_readAtTimestamp.isNull()) {
         return _readAtTimestamp;
     }
 

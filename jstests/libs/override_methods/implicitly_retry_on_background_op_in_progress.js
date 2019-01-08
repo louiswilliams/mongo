@@ -107,7 +107,7 @@
                         return kNoRetry;
                     }
                     if (attempt == 1) {
-                        print("warning: error received on first attempt");
+                        print("note: error received on first attempt. not retrying");
                         return kNoRetry;
                     }
                 }

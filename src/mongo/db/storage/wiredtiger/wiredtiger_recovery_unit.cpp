@@ -446,14 +446,6 @@ boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp()
         _timestampReadSource == ReadSource::kNoTimestamp) {
         return boost::none;
     }
-    if (_timestampReadSource == ReadSource::kMajorityCommitted) {
-        invariant(!_majorityCommittedSnapshot.isNull());
-        return _majorityCommittedSnapshot;
-    }
-
-    invariant(_isActive(),
-              str::stream() << "timestamp not established for readSource: "
-                            << _timestampReadSource);
 
     if (_timestampReadSource == ReadSource::kProvided ||
         _timestampReadSource == ReadSource::kLastAppliedSnapshot ||
@@ -462,8 +454,19 @@ boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp()
         return _readAtTimestamp;
     }
 
-    if (_timestampReadSource == ReadSource::kLastApplied && !_readAtTimestamp.isNull()) {
-        return _readAtTimestamp;
+    if (_timestampReadSource == ReadSource::kLastApplied) {
+        if (!_readAtTimestamp.isNull()) {
+            return _readAtTimestamp;
+        }
+        // Beacause lastApplied may be null, we should at least invariant that a transaction is open
+        // before returning boost:none. There would otherwise be no way to distingush been whether
+        // the lastApplied has not been set, or a transaction has just not been opened yet.
+        invariant(_isActive());
+    }
+
+    if (_timestampReadSource == ReadSource::kMajorityCommitted) {
+        invariant(!_majorityCommittedSnapshot.isNull());
+        return _majorityCommittedSnapshot;
     }
 
     return boost::none;

@@ -130,9 +130,12 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
 
         bool readAtLastAppliedTimestamp =
             _shouldReadAtLastAppliedTimestamp(opCtx, nss, readConcernLevel);
-
         if (readAtLastAppliedTimestamp) {
             opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kLastApplied);
+        }
+
+        auto readSource = opCtx->recoveryUnit()->getTimestampReadSource();
+        if (readSource == RecoveryUnit::ReadSource::kLastApplied) {
             // In order to establish a point-in-time to compare against for collection and index
             // visibility, ensure a transaction is open.
             opCtx->recoveryUnit()->preallocateSnapshot();
@@ -146,7 +149,6 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             return;
         }
 
-        auto readSource = opCtx->recoveryUnit()->getTimestampReadSource();
         invariant(readSource == RecoveryUnit::ReadSource::kLastApplied ||
                   readSource == RecoveryUnit::ReadSource::kMajorityCommitted);
         invariant(readConcernLevel != repl::ReadConcernLevel::kSnapshotReadConcern);

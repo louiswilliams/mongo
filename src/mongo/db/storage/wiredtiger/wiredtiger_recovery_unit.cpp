@@ -446,7 +446,14 @@ boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp()
         _timestampReadSource == ReadSource::kNoTimestamp) {
         return boost::none;
     }
-    invariant(_isActive());
+    if (_timestampReadSource == ReadSource::kMajorityCommitted) {
+        invariant(!_majorityCommittedSnapshot.isNull());
+        return _majorityCommittedSnapshot;
+    }
+
+    invariant(_isActive(),
+              str::stream() << "timestamp not established for readSource: "
+                            << _timestampReadSource);
 
     if (_timestampReadSource == ReadSource::kProvided ||
         _timestampReadSource == ReadSource::kLastAppliedSnapshot ||
@@ -457,11 +464,6 @@ boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp()
 
     if (_timestampReadSource == ReadSource::kLastApplied && !_readAtTimestamp.isNull()) {
         return _readAtTimestamp;
-    }
-
-    if (_timestampReadSource == ReadSource::kMajorityCommitted) {
-        invariant(!_majorityCommittedSnapshot.isNull());
-        return _majorityCommittedSnapshot;
     }
 
     return boost::none;

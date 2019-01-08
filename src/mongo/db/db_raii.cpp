@@ -228,12 +228,7 @@ bool AutoGetCollectionForRead::_conflictingCatalogChanges(
     boost::optional<Timestamp> mySnapshot) const {
     // This is the timestamp of the most recent catalog changes to this collection. If this is
     // greater than any point in time read timestamps, we should either wait or return an error.
-    if (!minSnapshot) {
-        return false;
-    }
-
-    // If we do not have a point in time to conflict with minSnapshot, return.
-    if (!mySnapshot) {
+    if (!minSnapshot || !mySnapshot) {
         return false;
     }
 

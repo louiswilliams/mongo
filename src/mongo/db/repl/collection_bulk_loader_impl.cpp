@@ -94,6 +94,7 @@ Status CollectionBulkLoaderImpl::init(const std::vector<BSONObj>& secondaryIndex
                 _secondaryIndexesBlock.reset();
             }
             if (!_idIndexSpec.isEmpty()) {
+                _idIndexBlock->ignoreUniqueConstraint();
                 auto status = _idIndexBlock->init(_idIndexSpec).getStatus();
                 if (!status.isOK()) {
                     return status;
@@ -196,29 +197,11 @@ Status CollectionBulkLoaderImpl::commit() {
             if (!status.isOK()) {
                 return status;
             }
-
-            for (auto&& it : dups) {
-                writeConflictRetry(
-                    _opCtx.get(), "CollectionBulkLoaderImpl::commit", _nss.ns(), [this, &it] {
-                        WriteUnitOfWork wunit(_opCtx.get());
-                        _autoColl->getCollection()->deleteDocument(_opCtx.get(),
-                                                                   kUninitializedStmtId,
-                                                                   it,
-                                                                   nullptr /** OpDebug **/,
-                                                                   false /* fromMigrate */,
-                                                                   true /* noWarn */);
-                        wunit.commit();
-                    });
-            }
-
-            // Deleted keys need to be drained and then duplicate key constraints checked.
-            status = _idIndexBlock->drainBackgroundWrites();
-            if (!status.isOK()) {
-                return status;
-            }
-            status = _idIndexBlock->checkConstraints();
-            if (!status.isOK()) {
-                return status;
+            if (dups.size()) {
+                return Status{ErrorCodes::UserDataInconsistent,
+                              str::stream() << "Found " << dups.size()
+                                            << " duplicates on _id index even though "
+                                               "MultiIndexBlock::ignoreUniqueConstraint set."};
             }
 
             // Commit _id index, without dups.

@@ -103,7 +103,11 @@
                     // If any of the shards return an error that is not whitelisted or even if a
                     // whitelisted error is received on the first attempt, do not retry.
                     let acceptableErrors = acceptableCommandErrors[commandName] || [];
-                    if (!acceptableErrors.includes(shardRes.code) || attempt == 1) {
+                    if (!acceptableErrors.includes(shardRes.code)) {
+                        return kNoRetry;
+                    }
+                    if (attempt == 1) {
+                        print("warning: error received on first attempt");
                         return kNoRetry;
                     }
                 }

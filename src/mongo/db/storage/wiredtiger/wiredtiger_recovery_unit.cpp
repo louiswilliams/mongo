@@ -449,7 +449,8 @@ boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp()
         return _readAtTimestamp;
     }
 
-    if (_timestampReadSource == ReadSource::kLastApplied && !_readAtTimestamp.isNull()) {
+    if (_timestampReadSource == ReadSource::kLastApplied) {
+        invariant(!_readAtTimestamp.isNull());
         return _readAtTimestamp;
     }
 

@@ -133,6 +133,9 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
 
         if (readAtLastAppliedTimestamp) {
             opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kLastApplied);
+            // In order to establish a point-in-time to compare against for collection and index
+            // visibility, ensure a transaction is open.
+            opCtx->recoveryUnit()->preallocateSnapshot();
         }
 
         // This timestamp could be earlier than the timestamp seen when the transaction is opened

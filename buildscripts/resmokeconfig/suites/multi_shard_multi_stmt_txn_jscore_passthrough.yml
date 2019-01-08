@@ -380,6 +380,7 @@ executor:
     shell_options:
       eval: >-
         var testingReplication = true;
+        load('jstests/libs/override_methods/auto_retry_on_network_error.js');
         load('jstests/libs/override_methods/implicitly_shard_accessed_collections.js');
         load('jstests/libs/override_methods/enable_sessions.js');
         load('jstests/libs/override_methods/txn_passthrough_cmd_massage.js');

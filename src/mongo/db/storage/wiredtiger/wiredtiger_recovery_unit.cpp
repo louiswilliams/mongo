@@ -442,14 +442,21 @@ Status WiredTigerRecoveryUnit::obtainMajorityCommittedSnapshot() {
 }
 
 boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp() {
-    // Ensure a transaction is open so that any read timestamps are established before making
-    // decisions with regard to visibility.
-    getSession();
-
+    // Do not require a transaction to be open.
     if (_timestampReadSource == ReadSource::kUnset ||
         _timestampReadSource == ReadSource::kNoTimestamp) {
         return boost::none;
     }
+
+    // Does not require a transaction to be open.
+    if (_timestampReadSource == ReadSource::kMajorityCommitted) {
+        invariant(!_majorityCommittedSnapshot.isNull());
+        return _majorityCommittedSnapshot;
+    }
+
+    // Ensure a transaction is open so that any ReadSources that use point-in-time read timestamps
+    // are established before making decisions with regard to visibility.
+    getSession();
 
     if (_timestampReadSource == ReadSource::kProvided ||
         _timestampReadSource == ReadSource::kLastAppliedSnapshot ||
@@ -460,11 +467,6 @@ boost::optional<Timestamp> WiredTigerRecoveryUnit::getPointInTimeReadTimestamp()
 
     if (_timestampReadSource == ReadSource::kLastApplied && !_readAtTimestamp.isNull()) {
         return _readAtTimestamp;
-    }
-
-    if (_timestampReadSource == ReadSource::kMajorityCommitted) {
-        invariant(!_majorityCommittedSnapshot.isNull());
-        return _majorityCommittedSnapshot;
     }
 
     return boost::none;

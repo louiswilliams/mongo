@@ -27,8 +27,8 @@
             return res;
         }
 
-        let collModRes = conn.getDB(dbName).runCommand(
-            {collMod: commandObj[commandName], usePowerOf2Sizes: true});
+        let collModCmd = {collMod: commandObj[commandName], usePowerOf2Sizes: true};
+        let collModRes = func.apply(conn, makeFuncArgs(collModCmd));
 
         try {
             assert.commandWorked(collModRes);

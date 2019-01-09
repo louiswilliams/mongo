@@ -72,6 +72,13 @@ public:
     ~MultiIndexBlock();
 
     /**
+     * The default index build behavior uses the hybrid method, which ignores the 'background' flag
+     * in specs. If this is called before init(), build the indexes based on the index spec, and do
+     * not install in interceptor for background writes.
+     */
+    void disableHybrid();
+
+    /**
      * By default we enforce the 'unique' flag in specs when building an index by failing.
      * If this is called before init(), we will ignore unique violations. This has no effect if
      * no specs are unique.
@@ -210,6 +217,12 @@ public:
     void abortWithoutCleanup();
 
     /**
+     * Returns true of this build block supports background writes while building an index. This is
+     * true for the kHybrid and kBackground methods.
+     */
+    bool getBuildInBackground() const;
+
+    /**
      * State transitions:
      *
      * Uninitialized --> Running --> Committed
@@ -270,6 +283,12 @@ private:
     // Pointers not owned here and must outlive 'this'
     Collection* _collection;
     OperationContext* _opCtx;
+
+    IndexBuildMethod _method = IndexBuildMethod::kHybrid;
+
+    // Disabling hybrid may be required by builders who want to build indexes in the old way and
+    // based on the index spec.
+    bool _disableHybrid = false;
 
     bool _ignoreUnique = false;
 

@@ -183,7 +183,7 @@ Status AbstractIndexAccessMethod::insert(OperationContext* opCtx,
                                          const RecordId& loc,
                                          const InsertDeleteOptions& options,
                                          InsertResult* result) {
-    invariant(options.fromIndexBuilder || !_btreeState->isBuilding());
+    invariant(options.fromIndexBuilder || !_btreeState->isHybridBuilding());
 
     BSONObjSet multikeyMetadataKeys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
@@ -283,7 +283,7 @@ Status AbstractIndexAccessMethod::remove(OperationContext* opCtx,
                                          const RecordId& loc,
                                          const InsertDeleteOptions& options,
                                          int64_t* numDeleted) {
-    invariant(!_btreeState->isBuilding());
+    invariant(!_btreeState->isHybridBuilding());
     invariant(numDeleted);
 
     *numDeleted = 0;
@@ -468,7 +468,7 @@ Status AbstractIndexAccessMethod::update(OperationContext* opCtx,
                                          const UpdateTicket& ticket,
                                          int64_t* numInserted,
                                          int64_t* numDeleted) {
-    invariant(!_btreeState->isBuilding());
+    invariant(!_btreeState->isHybridBuilding());
     invariant(ticket.newKeys.size() ==
               ticket.oldKeys.size() + ticket.added.size() - ticket.removed.size());
     invariant(numInserted);

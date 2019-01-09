@@ -94,7 +94,10 @@ Status CollectionBulkLoaderImpl::init(const std::vector<BSONObj>& secondaryIndex
                 _secondaryIndexesBlock.reset();
             }
             if (!_idIndexSpec.isEmpty()) {
-                _idIndexBlock->ignoreUniqueConstraint();
+                // Force a traditional forground build. The collection bulk loader depends on the
+                // behavior of deleting the uninserted duplicate records from the result of
+                // dumpInsertsFromBulk.
+                _idIndexBlock->disableHybrid();
                 auto status = _idIndexBlock->init(_idIndexSpec).getStatus();
                 if (!status.isOK()) {
                     return status;
@@ -197,11 +200,18 @@ Status CollectionBulkLoaderImpl::commit() {
             if (!status.isOK()) {
                 return status;
             }
-            if (dups.size()) {
-                return Status{ErrorCodes::UserDataInconsistent,
-                              str::stream() << "Found " << dups.size()
-                                            << " duplicates on _id index even though "
-                                               "MultiIndexBlock::ignoreUniqueConstraint set."};
+            for (auto&& it : dups) {
+                writeConflictRetry(
+                    _opCtx.get(), "CollectionBulkLoaderImpl::commit", _nss.ns(), [this, &it] {
+                        WriteUnitOfWork wunit(_opCtx.get());
+                        _autoColl->getCollection()->deleteDocument(_opCtx.get(),
+                                                                   kUninitializedStmtId,
+                                                                   it,
+                                                                   nullptr /** OpDebug **/,
+                                                                   false /* fromMigrate */,
+                                                                   true /* noWarn */);
+                        wunit.commit();
+                    });
             }
 
             // Commit _id index, without dups.

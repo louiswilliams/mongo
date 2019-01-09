@@ -306,7 +306,7 @@ StatusWith<BSONObj> IndexCatalogImpl::createIndexOnEmptyCollection(OperationCont
     spec = statusWithSpec.getValue();
 
     // now going to touch disk
-    IndexBuildBlock indexBuildBlock(opCtx, _collection, this, spec);
+    IndexBuildBlock indexBuildBlock(opCtx, _collection, this, spec, IndexBuildMethod::kForeground);
     status = indexBuildBlock.init();
     if (!status.isOK())
         return status;
@@ -1183,7 +1183,7 @@ Status IndexCatalogImpl::_indexFilteredRecords(OperationContext* opCtx,
         }
 
         Status status = Status::OK();
-        if (index->isBuilding()) {
+        if (index->isHybridBuilding()) {
             int64_t inserted;
             status = index->indexBuildInterceptor()->sideWrite(opCtx,
                                                                index->accessMethod(),
@@ -1233,7 +1233,7 @@ Status IndexCatalogImpl::_unindexRecord(OperationContext* opCtx,
                                         const RecordId& loc,
                                         bool logIfError,
                                         int64_t* keysDeletedOut) {
-    if (index->isBuilding()) {
+    if (index->isHybridBuilding()) {
         int64_t removed;
         auto status = index->indexBuildInterceptor()->sideWrite(
             opCtx, index->accessMethod(), &obj, loc, IndexBuildInterceptor::Op::kDelete, &removed);
@@ -1395,8 +1395,8 @@ Status IndexCatalogImpl::compactIndexes(OperationContext* opCtx) {
 }
 
 std::unique_ptr<IndexCatalog::IndexBuildBlockInterface> IndexCatalogImpl::createIndexBuildBlock(
-    OperationContext* opCtx, const BSONObj& spec) {
-    return std::make_unique<IndexBuildBlock>(opCtx, _collection, this, spec);
+    OperationContext* opCtx, const BSONObj& spec, IndexBuildMethod method) {
+    return std::make_unique<IndexBuildBlock>(opCtx, _collection, this, spec, method);
 }
 
 std::string::size_type IndexCatalogImpl::getLongestIndexNameLength(OperationContext* opCtx) const {

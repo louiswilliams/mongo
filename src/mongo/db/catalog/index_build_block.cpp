@@ -49,11 +49,13 @@ namespace mongo {
 IndexCatalogImpl::IndexBuildBlock::IndexBuildBlock(OperationContext* opCtx,
                                                    Collection* collection,
                                                    IndexCatalogImpl* catalog,
-                                                   const BSONObj& spec)
+                                                   const BSONObj& spec,
+                                                   IndexBuildMethod method)
     : _collection(collection),
       _catalog(catalog),
       _ns(_collection->ns().ns()),
       _spec(spec.getOwned()),
+      _method(method),
       _entry(nullptr),
       _opCtx(opCtx) {
     invariant(collection);
@@ -71,16 +73,12 @@ Status IndexCatalogImpl::IndexBuildBlock::init() {
     _indexName = descriptor->indexName();
     _indexNamespace = descriptor->indexNamespace();
 
-    if (_spec["background"].isBoolean() && !_spec["background"].Bool()) {
-        log() << "ignoring obselete {background: false} index build option. All indexes are "
-                 "built in the background.";
-    }
-
+    bool isBackgroundIndex = _spec["background"].trueValue();
     bool isBackgroundSecondaryBuild = false;
     if (auto replCoord = repl::ReplicationCoordinator::get(_opCtx)) {
         isBackgroundSecondaryBuild =
             replCoord->getReplicationMode() == repl::ReplicationCoordinator::Mode::modeReplSet &&
-            replCoord->getMemberState().secondary();
+            replCoord->getMemberState().secondary() && isBackgroundIndex;
     }
 
     // Setup on-disk structures.
@@ -95,17 +93,20 @@ Status IndexCatalogImpl::IndexBuildBlock::init() {
     _entry = _catalog->_setupInMemoryStructures(
         _opCtx, std::move(descriptor), initFromDisk, isReadyIndex);
 
-    _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>(_opCtx, _entry);
-    _entry->setIndexBuildInterceptor(_indexBuildInterceptor.get());
+    if (_method == IndexBuildMethod::kHybrid) {
+        _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>(_opCtx, _entry);
+        _entry->setIndexBuildInterceptor(_indexBuildInterceptor.get());
 
-    _opCtx->recoveryUnit()->onCommit([ opCtx = _opCtx, entry = _entry, collection = _collection ](
-        boost::optional<Timestamp> commitTime) {
-        // This will prevent the unfinished index from being visible on index iterators.
-        if (commitTime) {
-            entry->setMinimumVisibleSnapshot(commitTime.get());
-            collection->setMinimumVisibleSnapshot(commitTime.get());
-        }
-    });
+        _opCtx->recoveryUnit()->onCommit(
+            [ opCtx = _opCtx, entry = _entry, collection = _collection ](
+                boost::optional<Timestamp> commitTime) {
+                // This will prevent the unfinished index from being visible on index iterators.
+                if (commitTime) {
+                    entry->setMinimumVisibleSnapshot(commitTime.get());
+                    collection->setMinimumVisibleSnapshot(commitTime.get());
+                }
+            });
+    }
 
     // Register this index with the CollectionInfoCache to regenerate the cache. This way, updates
     // occurring while an index is being build in the background will be aware of whether or not

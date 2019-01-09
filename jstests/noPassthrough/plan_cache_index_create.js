@@ -36,7 +36,7 @@
         return cmdRes.plans[0].reason.stats.inputStage.indexName;
     }
 
-    function runTest({readDB, writeDB}) {
+    function runTest({rst, readDB, writeDB}) {
         const readColl = readDB.getCollection(collName);
         const writeColl = writeDB.getCollection(collName);
 
@@ -130,6 +130,12 @@
             writeConcern: {w: "majority"}
         }));
 
+        // Run a no-op command and wait for it to be applied on secondaries. Due to the asynchronous
+        // completion nature of indexes, we can guarantee an index build is complete on
+        // all secondaries once all secondaries have applied this collMod command.
+        assert.commandWorked(writeDB.runCommand({collMod: collName, usePowerOf2Sizes: true}));
+        rst.awaitReplication();
+
         // Confirm that there are no cached plans post index build.
         assertDoesNotHaveCachedPlan(readColl, filter);
 
@@ -149,8 +155,8 @@
     const primaryDB = rst.getPrimary().getDB(dbName);
     const secondaryDB = rst.getSecondary().getDB(dbName);
 
-    runTest({readDB: primaryDB, writeDB: primaryDB});
-    runTest({readDB: secondaryDB, writeDB: primaryDB});
+    runTest({rst: rst, readDB: primaryDB, writeDB: primaryDB});
+    runTest({rst: rst, readDB: secondaryDB, writeDB: primaryDB});
 
     rst.stopSet();
 })();

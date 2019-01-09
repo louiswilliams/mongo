@@ -130,19 +130,25 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
 
         bool readAtLastAppliedTimestamp =
             _shouldReadAtLastAppliedTimestamp(opCtx, nss, readConcernLevel);
+
         if (readAtLastAppliedTimestamp) {
             opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kLastApplied);
         }
 
-        // This can be set when readConcern is "snapshot" or "majority", or "lastApplied".
-        auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+        // This timestamp could be earlier than the timestamp seen when the transaction is opened
+        // because it is set asynchonously. This is not problematic because holding the collection
+        // lock guarantees no metadata changes will occur in that time.
+        auto lastAppliedTimestamp = readAtLastAppliedTimestamp
+            ? boost::optional<Timestamp>(replCoord->getMyLastAppliedOpTime().getTimestamp())
+            : boost::none;
+
         auto minSnapshot = coll->getMinimumVisibleSnapshot();
-        if (!_conflictingCatalogChanges(opCtx, minSnapshot, mySnapshot)) {
+        if (!_conflictingCatalogChanges(opCtx, minSnapshot, lastAppliedTimestamp)) {
             return;
         }
 
         auto readSource = opCtx->recoveryUnit()->getTimestampReadSource();
-        invariant(readSource == RecoveryUnit::ReadSource::kLastApplied ||
+        invariant(lastAppliedTimestamp ||
                   readSource == RecoveryUnit::ReadSource::kMajorityCommitted);
         invariant(readConcernLevel != repl::ReadConcernLevel::kSnapshotReadConcern);
 
@@ -156,8 +162,8 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
         // initial sync finishes, if we waited instead of retrying, readers would block indefinitely
         // waiting for the lastAppliedTimestamp to move forward. Instead we force the reader take
         // the PBWM lock and retry.
-        if (readSource == RecoveryUnit::ReadSource::kLastApplied) {
-            LOG(2) << "Tried reading at last-applied time: " << *mySnapshot
+        if (lastAppliedTimestamp) {
+            LOG(2) << "Tried reading at last-applied time: " << *lastAppliedTimestamp
                    << " on nss: " << nss.ns() << ", but future catalog changes are pending at time "
                    << *minSnapshot << ". Trying again without reading at last-applied time.";
             // Destructing the block sets _shouldConflictWithSecondaryBatchApplication back to the
@@ -220,15 +226,30 @@ bool AutoGetCollectionForRead::_shouldReadAtLastAppliedTimestamp(
 bool AutoGetCollectionForRead::_conflictingCatalogChanges(
     OperationContext* opCtx,
     boost::optional<Timestamp> minSnapshot,
-    boost::optional<Timestamp> mySnapshot) const {
+    boost::optional<Timestamp> lastAppliedTimestamp) const {
     // This is the timestamp of the most recent catalog changes to this collection. If this is
     // greater than any point in time read timestamps, we should either wait or return an error.
-    if (!minSnapshot || !mySnapshot) {
+    if (!minSnapshot) {
+        return false;
+    }
+
+    // If we are reading from the lastAppliedTimestamp and it is up-to-date with any catalog
+    // changes, we can return.
+    if (lastAppliedTimestamp &&
+        (lastAppliedTimestamp->isNull() || *lastAppliedTimestamp >= *minSnapshot)) {
+        return false;
+    }
+
+    // This can be set when readConcern is "snapshot" or "majority".
+    auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+
+    // If we do not have a point in time to conflict with minSnapshot, return.
+    if (!mySnapshot && !lastAppliedTimestamp) {
         return false;
     }
 
     // Return if there are no conflicting catalog changes with mySnapshot.
-    if (*mySnapshot >= *minSnapshot) {
+    if (mySnapshot && *mySnapshot >= *minSnapshot) {
         return false;
     }
 

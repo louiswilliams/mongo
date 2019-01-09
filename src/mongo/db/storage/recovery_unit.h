@@ -200,7 +200,7 @@ public:
      * storage engine after a transaction has been opened or after a call to
      * obtainMajorityCommittedSnapshot().
      */
-    virtual boost::optional<Timestamp> getPointInTimeReadTimestamp() const {
+    virtual boost::optional<Timestamp> getPointInTimeReadTimestamp() {
         return boost::none;
     }
 

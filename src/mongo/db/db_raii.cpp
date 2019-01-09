@@ -134,21 +134,14 @@ AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* opCtx,
             opCtx->recoveryUnit()->setTimestampReadSource(RecoveryUnit::ReadSource::kLastApplied);
         }
 
-        auto readSource = opCtx->recoveryUnit()->getTimestampReadSource();
-        if (readSource == RecoveryUnit::ReadSource::kLastApplied) {
-            // In order to establish a point-in-time to compare against for collection and index
-            // visibility, ensure a transaction is open.
-            opCtx->recoveryUnit()->preallocateSnapshot();
-        }
-
-        auto minSnapshot = coll->getMinimumVisibleSnapshot();
-
         // This can be set when readConcern is "snapshot" or "majority", or "lastApplied".
         auto mySnapshot = opCtx->recoveryUnit()->getPointInTimeReadTimestamp();
+        auto minSnapshot = coll->getMinimumVisibleSnapshot();
         if (!_conflictingCatalogChanges(opCtx, minSnapshot, mySnapshot)) {
             return;
         }
 
+        auto readSource = opCtx->recoveryUnit()->getTimestampReadSource();
         invariant(readSource == RecoveryUnit::ReadSource::kLastApplied ||
                   readSource == RecoveryUnit::ReadSource::kMajorityCommitted);
         invariant(readConcernLevel != repl::ReadConcernLevel::kSnapshotReadConcern);

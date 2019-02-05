@@ -289,7 +289,6 @@ bool runCreateIndexes(OperationContext* opCtx,
                          AutoStatsTracker::LogMode::kUpdateTopAndCurop,
                          dbProfilingLevel);
 
-
     MultiIndexBlock indexer(opCtx, collection);
 
     const size_t origSpecsSize = specs.size();
@@ -314,8 +313,8 @@ bool runCreateIndexes(OperationContext* opCtx,
     }
 
     std::vector<BSONObj> indexInfoObjs =
-        writeConflictRetry(opCtx, kCommandName, ns.ns(), [&indexer, &specs] {
-            return uassertStatusOK(indexer.init(specs));
+        writeConflictRetry(opCtx, kCommandName, ns.ns(), [opCtx, &indexer, &specs] {
+            return uassertStatusOK(indexer.init(specs, indexer.getDefaultOnInitFn(opCtx)));
         });
 
     // If we're a background index, replace exclusive db lock with an intent lock, so that

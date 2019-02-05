@@ -91,9 +91,17 @@ public:
      *
      * Requires holding an exclusive database lock.
      */
-    StatusWith<std::vector<BSONObj>> init(const std::vector<BSONObj>& specs);
+    using OnInitFn = stdx::function<void()>;
+    StatusWith<std::vector<BSONObj>> init(const std::vector<BSONObj>& specs,
+                                          OnInitFn onInit = [] {});
 
-    StatusWith<std::vector<BSONObj>> init(const BSONObj& spec);
+    StatusWith<std::vector<BSONObj>> init(const BSONObj& spec, OnInitFn onInit = [] {});
+
+    /**
+     * Returns the default OnInit function for initialization. This generates a new optime and
+     * timestamp the first catalog write when called on primaries.
+     */
+    OnInitFn getDefaultOnInitFn(OperationContext* opCtx) const;
 
     /**
      * Inserts all documents in the Collection into the indexes and logs with timing info.

@@ -119,9 +119,14 @@ IndexBuildsCoordinatorMongod::startIndexBuild(OperationContext* opCtx,
         return replIndexBuildState->sharedPromise.getFuture();
     }
 
+    // Copy over all necessary OperationContext state.
+
     // Task in thread pool should retain the caller's deadline.
-    auto deadline = opCtx->getDeadline();
-    auto timeoutError = opCtx->getTimeoutError();
+    const auto deadline = opCtx->getDeadline();
+    const auto timeoutError = opCtx->getTimeoutError();
+    const bool writesAreReplicated = opCtx->writesAreReplicated();
+    const bool shouldNotConflictWithSecondaryBatchApplication =
+        !opCtx->lockState()->shouldConflictWithSecondaryBatchApplication();
 
     // Task in thread pool should have similar CurOp representation to the caller so that it can be
     // identified as a createIndexes operation.
@@ -132,10 +137,30 @@ IndexBuildsCoordinatorMongod::startIndexBuild(OperationContext* opCtx,
         opDesc = curOp->opDescription().getOwned();
     }
 
-    status = _threadPool.schedule([ this, buildUUID, deadline, timeoutError, opDesc ]() noexcept {
+    status = _threadPool.schedule([
+        this,
+        buildUUID,
+        deadline,
+        timeoutError,
+        writesAreReplicated,
+        shouldNotConflictWithSecondaryBatchApplication,
+        opDesc
+    ]() noexcept {
         auto opCtx = Client::getCurrent()->makeOperationContext();
 
         opCtx->setDeadlineByDate(deadline, timeoutError);
+
+        // If the calling thread is not replicating writes, neither should this thread.
+        boost::optional<repl::UnreplicatedWritesBlock> unreplicatedWrites;
+        if (!writesAreReplicated) {
+            unreplicatedWrites.emplace(opCtx.get());
+        }
+
+        // If the calling thread should not take the PBWM lock, neither should this thread.
+        boost::optional<ShouldNotConflictWithSecondaryBatchApplicationBlock> shouldNotConflictBlock;
+        if (shouldNotConflictWithSecondaryBatchApplication) {
+            shouldNotConflictBlock.emplace(opCtx->lockState());
+        }
 
         {
             stdx::unique_lock<Client> lk(*opCtx->getClient());

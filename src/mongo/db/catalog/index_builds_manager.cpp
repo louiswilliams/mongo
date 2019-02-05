@@ -74,7 +74,8 @@ IndexBuildsManager::~IndexBuildsManager() {
 Status IndexBuildsManager::setUpIndexBuild(OperationContext* opCtx,
                                            Collection* collection,
                                            const std::vector<BSONObj>& specs,
-                                           const UUID& buildUUID) {
+                                           const UUID& buildUUID,
+                                           OnInitFn onInit) {
     _registerIndexBuild(opCtx, collection, buildUUID);
 
     const auto& nss = collection->ns();
@@ -85,10 +86,24 @@ Status IndexBuildsManager::setUpIndexBuild(OperationContext* opCtx,
 
     auto builder = _getBuilder(buildUUID);
 
-    auto initResult = writeConflictRetry(opCtx,
-                                         "IndexBuildsManager::setUpIndexBuild",
-                                         nss.ns(),
-                                         [builder, &specs] { return builder->init(specs); });
+    const bool relaxConstraints =
+        repl::ReplicationCoordinator::get(opCtx)->shouldRelaxIndexConstraints(opCtx, nss);
+    if (relaxConstraints) {
+        builder->ignoreUniqueConstraint();
+    }
+
+    auto initResult = writeConflictRetry(
+        opCtx, "IndexBuildsManager::setUpIndexBuild", nss.ns(), [opCtx, builder, &onInit, &specs] {
+            WriteUnitOfWork wunit(opCtx);
+            auto status = builder->init(specs);
+
+            if (!status.isOK()) {
+                return status;
+            }
+            onInit();
+            wunit.commit();
+            return status;
+        });
 
     if (!initResult.isOK()) {
         return initResult.getStatus();
@@ -145,10 +160,12 @@ Status IndexBuildsManager::commitIndexBuild(OperationContext* opCtx,
         opCtx, "IndexBuildsManager::commitIndexBuild", nss.ns(), [builder, opCtx, &onCommitFn] {
             WriteUnitOfWork wunit(opCtx);
 
-            auto status = builder->commit(onCommitFn);
+            auto status = builder->commit();
             if (!status.isOK()) {
                 return status;
             }
+
+            onCommitFn();
 
             wunit.commit();
 
@@ -180,7 +197,8 @@ bool IndexBuildsManager::interruptIndexBuild(const UUID& buildUUID, const std::s
 }
 
 void IndexBuildsManager::tearDownIndexBuild(const UUID& buildUUID) {
-    // TODO verify that the index builder is in a finished state before allowing its destruction.
+    // TODO verify that the index builder is in a finished state before allowing its
+    // destruction.
     _unregisterIndexBuild(buildUUID);
 }
 

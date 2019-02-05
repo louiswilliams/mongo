@@ -65,10 +65,12 @@ public:
      * TODO: Not yet implemented. Only instantiates and registers a builder in the manager. Does not
      * set up index build state.
      */
+    using OnInitFn = stdx::function<void()>;
     Status setUpIndexBuild(OperationContext* opCtx,
                            Collection* collection,
                            const std::vector<BSONObj>& specs,
-                           const UUID& buildUUID);
+                           const UUID& buildUUID,
+                           OnInitFn onInit);
 
     /**
      * Recovers the index build from its persisted state and sets it up to run again.
@@ -116,7 +118,7 @@ public:
      *
      * TODO: Not yet implemented.
      */
-    using OnCommitFn = stdx::function<void(const BSONObj& spec)>;
+    using OnCommitFn = stdx::function<void()>;
     Status commitIndexBuild(OperationContext* opCtx,
                             const NamespaceString& nss,
                             const UUID& buildUUID,

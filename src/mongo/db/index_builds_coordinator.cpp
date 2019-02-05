@@ -436,13 +436,6 @@ void IndexBuildsCoordinator::_runIndexBuild(OperationContext* opCtx,
         // not allow locks or re-locks to be interrupted.
         UninterruptibleLockGuard noInterrupt(opCtx->lockState());
 
-        if (!repl::ReplicationCoordinator::get(opCtx)->canAcceptWritesFor(opCtx, nss)) {
-            uasserted(ErrorCodes::NotMaster,
-                      str::stream() << "Not primary while creating indexes in " << nss.ns() << " ("
-                                    << collectionUUID
-                                    << ")");
-        }
-
         auto collection = uuidCatalog.lookupCollectionByUUID(collectionUUID);
         uassert(ErrorCodes::NamespaceNotFound,
                 str::stream() << "Collection not found for index build: " << buildUUID << ": "
@@ -480,8 +473,13 @@ void IndexBuildsCoordinator::_runIndexBuild(OperationContext* opCtx,
         }
 
         mustTearDown = true;
-        uassertStatusOK(
-            _indexBuildsManager.setUpIndexBuild(opCtx, collection, specsToBuild, buildUUID));
+
+        auto onInitFn = [&]() {
+            opCtx->getServiceContext()->getOpObserver()->onStartIndexBuild(
+                opCtx, nss, collectionUUID, buildUUID, specsToBuild, false /* fromMigrate */);
+        };
+        uassertStatusOK(_indexBuildsManager.setUpIndexBuild(
+            opCtx, collection, specsToBuild, buildUUID, onInitFn));
 
         // If we're a background index, replace exclusive db lock with an intent lock, so that
         // other readers and writers can proceed during this phase.
@@ -565,9 +563,9 @@ void IndexBuildsCoordinator::_runIndexBuild(OperationContext* opCtx,
         uassertStatusOK(_indexBuildsManager.checkIndexConstraintViolations(buildUUID));
 
         // Commit index build.
-        auto onCommitFn = [opCtx, &nss, &collectionUUID](const BSONObj& spec) {
-            opCtx->getServiceContext()->getOpObserver()->onCreateIndex(
-                opCtx, nss, collectionUUID, spec, false);
+        auto onCommitFn = [&] {
+            opCtx->getServiceContext()->getOpObserver()->onCommitIndexBuild(
+                opCtx, nss, collectionUUID, buildUUID, specsToBuild, false /* fromMigrate */);
         };
         uassertStatusOK(_indexBuildsManager.commitIndexBuild(opCtx, nss, buildUUID, onCommitFn));
 
@@ -628,6 +626,8 @@ void IndexBuildsCoordinator::_runIndexBuild(OperationContext* opCtx,
     } else {
         replState->sharedPromise.setError(status);
     }
+
+    // TODO: Fail fatally on secondaries.
 
     return;
 }

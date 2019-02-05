@@ -265,10 +265,12 @@ Status IndexBuilder::_build(OperationContext* opCtx,
     }
 
     Status status = Status::OK();
+
     {
         TimestampBlock tsBlock(opCtx, _initIndexTs);
-        status = writeConflictRetry(
-            opCtx, "Init index build", ns.ns(), [&] { return indexer.init(_index).getStatus(); });
+        status = writeConflictRetry(opCtx, "Init index build", ns.ns(), [&] {
+            return indexer.init(_index, indexer.getDefaultOnInitFn(opCtx)).getStatus();
+        });
     }
 
     if (status == ErrorCodes::IndexAlreadyExists ||

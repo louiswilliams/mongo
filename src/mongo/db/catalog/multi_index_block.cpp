@@ -160,12 +160,28 @@ void MultiIndexBlock::ignoreUniqueConstraint() {
     _ignoreUnique = true;
 }
 
-StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(const BSONObj& spec) {
-    const auto indexes = std::vector<BSONObj>(1, spec);
-    return init(indexes);
+MultiIndexBlock::OnInitFn MultiIndexBlock::getDefaultOnInitFn(OperationContext* opCtx) const {
+    return [ opCtx, ns = _collection->ns() ]() {
+        auto replCoord = repl::ReplicationCoordinator::get(opCtx);
+        if (opCtx->recoveryUnit()->getCommitTimestamp().isNull() &&
+            replCoord->canAcceptWritesForDatabase(opCtx, "admin")) {
+            // Only primaries must timestamp this write. Secondaries run this from within a
+            // `TimestampBlock`. Primaries performing an index build via `applyOps` may have a
+            // wrapping commit timestamp that will be used instead.
+            opCtx->getServiceContext()->getOpObserver()->onOpMessage(
+                opCtx,
+                BSON("msg" << std::string(str::stream() << "Creating indexes. Coll: " << ns)));
+        }
+    };
 }
 
-StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(const std::vector<BSONObj>& indexSpecs) {
+StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(const BSONObj& spec, OnInitFn onInit) {
+    const auto indexes = std::vector<BSONObj>(1, spec);
+    return init(indexes, onInit);
+}
+
+StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(const std::vector<BSONObj>& indexSpecs,
+                                                       OnInitFn onInit) {
     if (State::kAborted == _getState()) {
         return {ErrorCodes::IndexBuildAborted,
                 str::stream() << "Index build aborted: " << _abortReason
@@ -290,15 +306,7 @@ StatusWith<std::vector<BSONObj>> MultiIndexBlock::init(const std::vector<BSONObj
     if (isBackgroundBuilding())
         _backgroundOperation.reset(new BackgroundOperation(ns));
 
-    auto replCoord = repl::ReplicationCoordinator::get(_opCtx);
-    if (_opCtx->recoveryUnit()->getCommitTimestamp().isNull() &&
-        replCoord->canAcceptWritesForDatabase(_opCtx, "admin")) {
-        // Only primaries must timestamp this write. Secondaries run this from within a
-        // `TimestampBlock`. Primaries performing an index build via `applyOps` may have a
-        // wrapping commit timestamp that will be used instead.
-        _opCtx->getServiceContext()->getOpObserver()->onOpMessage(
-            _opCtx, BSON("msg" << std::string(str::stream() << "Creating indexes. Coll: " << ns)));
-    }
+    onInit();
 
     wunit.commit();
 

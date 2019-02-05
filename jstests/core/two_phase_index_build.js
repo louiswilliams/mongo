@@ -21,11 +21,24 @@
     }
     assert.commandWorked(bulk.execute());
 
+    const collName = coll.getName();
+
     // Create a non-unique index.
     assert.commandWorked(db.runCommand(
         {twoPhaseCreateIndexes: coll.getName(), indexes: [{key: {a: 1}, name: 'a_1'}]}));
     assert.eq(numDocs, coll.find({a: {$gte: 0}}).hint({a: 1}).itcount());
     assert.commandWorked(coll.dropIndexes("a_1"));
+
+    // Ensure both oplog entries were written to the oplog.
+    if (FixtureHelpers.isReplSet(db)) {
+        const cmdNs = db.getName() + ".$cmd";
+        const localDB = db.getSiblingDB("local");
+        const oplogColl = localDB.oplog.rs;
+
+        assert.eq(1, oplogColl.find({op: "c", ns: cmdNs, "o.startIndexBuild": collName}).itcount());
+        assert.eq(1,
+                  oplogColl.find({op: "c", ns: cmdNs, "o.commitIndexBuild": collName}).itcount());
+    }
 
     /*
     // TODO: SERVER-39079 Uncomment when secondaries handle conflicting in-progress index builds.

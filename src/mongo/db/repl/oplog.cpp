@@ -260,7 +260,7 @@ void setOplogCollectionName(ServiceContext* service) {
 /**
  * Parse the given BSON array of BSON into a vector of BSON.
  */
-StatusWith<std::vector<BSONObj>> parseBSONArrayIntoVector(const BSONElement& bsonArrayElem,
+StatusWith<std::vector<BSONObj>> parseBSONSpecsIntoVector(const BSONElement& bsonArrayElem,
                                                           const NamespaceString& nss) {
     invariant(bsonArrayElem.type() == Array);
     std::vector<BSONObj> vec;
@@ -284,7 +284,7 @@ Status startIndexBuild(OperationContext* opCtx,
                        const UUID& indexBuildUUID,
                        const BSONElement& indexesElem,
                        OplogApplication::Mode mode) {
-    auto statusWithIndexes = parseBSONArrayIntoVector(indexesElem, nss);
+    auto statusWithIndexes = parseBSONSpecsIntoVector(indexesElem, nss);
     if (!statusWithIndexes.isOK()) {
         return statusWithIndexes.getStatus();
     }
@@ -298,7 +298,7 @@ Status commitIndexBuild(OperationContext* opCtx,
                         const UUID& indexBuildUUID,
                         const BSONElement& indexesElem,
                         OplogApplication::Mode mode) {
-    auto statusWithIndexes = parseBSONArrayIntoVector(indexesElem, nss);
+    auto statusWithIndexes = parseBSONSpecsIntoVector(indexesElem, nss);
     if (!statusWithIndexes.isOK()) {
         return statusWithIndexes.getStatus();
     }

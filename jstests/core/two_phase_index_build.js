@@ -13,8 +13,10 @@
 
     const numDocs = 1000;
 
-    let coll = db.twoPhaseIndexBuild;
-    let bulk = coll.initializeUnorderedBulkOp();
+    const coll = db.twoPhaseIndexBuild;
+    coll.drop();
+
+    const bulk = coll.initializeUnorderedBulkOp();
     for (let i = 0; i < numDocs; i++) {
         bulk.insert({a: i});
     }

@@ -196,7 +196,7 @@ bool IndexBuildsManager::interruptIndexBuild(const UUID& buildUUID, const std::s
     return true;
 }
 
-void IndexBuildsManager::tearDownIndexBuild(const UUID& buildUUID)
+void IndexBuildsManager::tearDownIndexBuild(const UUID& buildUUID) {
     // TODO verify that the index builder is in a finished state before allowing its destruction.
     _unregisterIndexBuild(buildUUID);
 }

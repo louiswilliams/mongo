@@ -7,16 +7,15 @@
     load("jstests/libs/fixture_helpers.js");  // for FixtureHelpers
 
     if (FixtureHelpers.isMongos(db)) {
-        print("not running test against mongos");
+        print("two-phase index build commands not accepted on mongos");
         return;
     }
-
-    const numDocs = 1000;
 
     const coll = db.twoPhaseIndexBuild;
     coll.drop();
 
     const bulk = coll.initializeUnorderedBulkOp();
+    const numDocs = 1000;
     for (let i = 0; i < numDocs; i++) {
         bulk.insert({a: i});
     }

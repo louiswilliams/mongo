@@ -2,10 +2,16 @@
  * Ensures that oplog entries specific to two-phase index builds are not allow when run through
  * applyOps.
  *
- * @tags: [requires_replication]
+ * @tags: [requires_non_retryable_commands, requires_replication]
  */
 
 (function() {
+
+    load("jstests/libs/fixture_helpers.js");  // for FixtureHelpers
+    if (FixtureHelpers.isMongos(db)) {
+        print("skipping because applyOps commands not accepted on mongos");
+        return;
+    }
 
     const coll = db.twoPhaseIndexOps;
     coll.drop();

@@ -239,8 +239,10 @@ public:
         MultiIndexBlock indexer(_opCtx, coll);
         BSONObj indexInfoObj;
         {
-            auto swIndexInfoObj = indexer.init({BSON(
-                "v" << 2 << "name" << indexName << "ns" << coll->ns().ns() << "key" << indexKey)});
+            auto swIndexInfoObj = indexer.init(
+                {BSON("v" << 2 << "name" << indexName << "ns" << coll->ns().ns() << "key"
+                          << indexKey)},
+                indexer.getDefaultOnInitFn(_opCtx));
             ASSERT_OK(swIndexInfoObj.getStatus());
             indexInfoObj = std::move(swIndexInfoObj.getValue()[0]);
         }
@@ -1815,7 +1817,8 @@ public:
                                                          << "ns"
                                                          << nss.ns()
                                                          << "key"
-                                                         << BSON("a" << 1))});
+                                                         << BSON("a" << 1))},
+                                               indexer.getDefaultOnInitFn(_opCtx));
             ASSERT_OK(swIndexInfoObj.getStatus());
             indexInfoObj = std::move(swIndexInfoObj.getValue()[0]);
         }

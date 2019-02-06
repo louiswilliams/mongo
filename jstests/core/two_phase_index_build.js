@@ -35,9 +35,11 @@
         const localDB = db.getSiblingDB("local");
         const oplogColl = localDB.oplog.rs;
 
-        assert.eq(1, oplogColl.find({op: "c", ns: cmdNs, "o.startIndexBuild": collName}).itcount());
-        assert.eq(1,
-                  oplogColl.find({op: "c", ns: cmdNs, "o.commitIndexBuild": collName}).itcount());
+        // If this test runs more than once there may be more than one oplog entry.
+        assert.gte(oplogColl.find({op: "c", ns: cmdNs, "o.startIndexBuild": collName}).itcount(),
+                   1);
+        assert.gte(oplogColl.find({op: "c", ns: cmdNs, "o.commitIndexBuild": collName}).itcount(),
+                   1);
     }
 
     /*

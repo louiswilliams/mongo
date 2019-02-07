@@ -47,7 +47,8 @@ StatusWith<SharedSemiFuture<ReplIndexBuildState::IndexCatalogStats>>
 IndexBuildsCoordinatorEmbedded::startIndexBuild(OperationContext* opCtx,
                                                 CollectionUUID collectionUUID,
                                                 const std::vector<BSONObj>& specs,
-                                                const UUID& buildUUID) {
+                                                const UUID& buildUUID,
+                                                IndexBuildProtocol protocol) {
     std::vector<std::string> indexNames;
     for (auto& spec : specs) {
         std::string name = spec.getStringField(IndexDescriptor::kIndexNameFieldName);

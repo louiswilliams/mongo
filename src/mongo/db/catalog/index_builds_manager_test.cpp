@@ -86,8 +86,11 @@ TEST_F(IndexBuildsManagerTest, IndexBuildsManagerSetUpAndTearDown) {
     AutoGetCollection autoColl(operationContext(), _nss, MODE_X);
 
     auto specs = makeSpecs(_nss, {"a", "b"});
-    ASSERT_OK(_indexBuildsManager.setUpIndexBuild(
-        operationContext(), autoColl.getCollection(), specs, _buildUUID, [] {}));
+    ASSERT_OK(_indexBuildsManager.setUpIndexBuild(operationContext(),
+                                                  autoColl.getCollection(),
+                                                  specs,
+                                                  _buildUUID,
+                                                  MultiIndexBlock::kNoopOnInitFn));
 
     _indexBuildsManager.tearDownIndexBuild(_buildUUID);
 }

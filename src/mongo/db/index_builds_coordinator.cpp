@@ -474,10 +474,17 @@ void IndexBuildsCoordinator::_runIndexBuild(OperationContext* opCtx,
 
         mustTearDown = true;
 
-        auto onInitFn = [&]() {
-            opCtx->getServiceContext()->getOpObserver()->onStartIndexBuild(
-                opCtx, nss, collectionUUID, buildUUID, specsToBuild, false /* fromMigrate */);
-        };
+        MultiIndexBlock::OnInitFn onInitFn;
+        // Two-phase index builds write a different oplog entry than the default behavior which
+        // writes a no-op just to generate an optime.
+        if (IndexBuildProtocol::kTwoPhase == replState->protocol) {
+            onInitFn = [&] {
+                opCtx->getServiceContext()->getOpObserver()->onStartIndexBuild(
+                    opCtx, nss, collectionUUID, buildUUID, specsToBuild, false /* fromMigrate */);
+            };
+        } else {
+            onInitFn = MultiIndexBlock::makeTimestampedIndexOnInitFn(opCtx, collection);
+        }
         uassertStatusOK(_indexBuildsManager.setUpIndexBuild(
             opCtx, collection, specsToBuild, buildUUID, onInitFn));
 
@@ -562,12 +569,25 @@ void IndexBuildsCoordinator::_runIndexBuild(OperationContext* opCtx,
         // Index constraint checking phase.
         uassertStatusOK(_indexBuildsManager.checkIndexConstraintViolations(buildUUID));
 
+        auto onCommitFn = MultiIndexBlock::kNoopOnCommitFn;
+        auto onCreateEachFn = MultiIndexBlock::kNoopOnCreateEachFn;
+        if (IndexBuildProtocol::kTwoPhase == replState->protocol) {
+            // Two-phase index builds write one oplog entry for all indexes that are completed.
+            onCommitFn = [&] {
+                opCtx->getServiceContext()->getOpObserver()->onCommitIndexBuild(
+                    opCtx, nss, collectionUUID, buildUUID, specsToBuild, false /* fromMigrate */);
+            };
+        } else {
+            // Single-phase index builds write an oplog entry per index being built.
+            onCreateEachFn = [opCtx, &nss, &collectionUUID](const BSONObj& spec) {
+                opCtx->getServiceContext()->getOpObserver()->onCreateIndex(
+                    opCtx, nss, collectionUUID, spec, false);
+            };
+        }
+
         // Commit index build.
-        auto onCommitFn = [&] {
-            opCtx->getServiceContext()->getOpObserver()->onCommitIndexBuild(
-                opCtx, nss, collectionUUID, buildUUID, specsToBuild, false /* fromMigrate */);
-        };
-        uassertStatusOK(_indexBuildsManager.commitIndexBuild(opCtx, nss, buildUUID, onCommitFn));
+        uassertStatusOK(_indexBuildsManager.commitIndexBuild(
+            opCtx, nss, buildUUID, onCreateEachFn, onCommitFn));
 
         indexCatalogStats.numIndexesAfter = getNumIndexesTotal(opCtx, collection);
         log() << "Index builds manager completed successfully: " << buildUUID << ": " << nss
@@ -626,9 +646,6 @@ void IndexBuildsCoordinator::_runIndexBuild(OperationContext* opCtx,
     } else {
         replState->sharedPromise.setError(status);
     }
-
-    // TODO: Fail fatally on secondaries.
-
     return;
 }
 

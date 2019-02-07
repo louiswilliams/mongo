@@ -86,23 +86,9 @@ Status IndexBuildsManager::setUpIndexBuild(OperationContext* opCtx,
 
     auto builder = _getBuilder(buildUUID);
 
-    const bool relaxConstraints =
-        repl::ReplicationCoordinator::get(opCtx)->shouldRelaxIndexConstraints(opCtx, nss);
-    if (relaxConstraints) {
-        builder->ignoreUniqueConstraint();
-    }
-
     auto initResult = writeConflictRetry(
         opCtx, "IndexBuildsManager::setUpIndexBuild", nss.ns(), [opCtx, builder, &onInit, &specs] {
-            WriteUnitOfWork wunit(opCtx);
-            auto status = builder->init(specs);
-
-            if (!status.isOK()) {
-                return status;
-            }
-            onInit();
-            wunit.commit();
-            return status;
+            return builder->init(specs, onInit);
         });
 
     if (!initResult.isOK()) {
@@ -153,24 +139,28 @@ Status IndexBuildsManager::checkIndexConstraintViolations(const UUID& buildUUID)
 Status IndexBuildsManager::commitIndexBuild(OperationContext* opCtx,
                                             const NamespaceString& nss,
                                             const UUID& buildUUID,
-                                            OnCommitFn onCommitFn) {
+                                            MultiIndexBlock::OnCreateEachFn onCreateEachFn,
+                                            MultiIndexBlock::OnCommitFn onCommitFn) {
     auto builder = _getBuilder(buildUUID);
 
-    return writeConflictRetry(
-        opCtx, "IndexBuildsManager::commitIndexBuild", nss.ns(), [builder, opCtx, &onCommitFn] {
-            WriteUnitOfWork wunit(opCtx);
+    return writeConflictRetry(opCtx,
+                              "IndexBuildsManager::commitIndexBuild",
+                              nss.ns(),
+                              [builder, opCtx, &onCreateEachFn, &onCommitFn] {
+                                  WriteUnitOfWork wunit(opCtx);
 
-            auto status = builder->commit();
-            if (!status.isOK()) {
-                return status;
-            }
+                                  // The OnCreateFn is called on each index being built, but because
+                                  // the caller expects to timestamp all indexes at once in the same
+                                  // oplog entry, call the onCommitFn after all indexes have been
+                                  // created.
+                                  auto status = builder->commit(onCreateEachFn, onCommitFn);
+                                  if (!status.isOK()) {
+                                      return status;
+                                  }
 
-            onCommitFn();
-
-            wunit.commit();
-
-            return Status::OK();
-        });
+                                  wunit.commit();
+                                  return Status::OK();
+                              });
 }
 
 bool IndexBuildsManager::abortIndexBuild(const UUID& buildUUID, const std::string& reason) {

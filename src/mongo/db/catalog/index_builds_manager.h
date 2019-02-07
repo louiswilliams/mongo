@@ -61,11 +61,8 @@ public:
 
     /**
      * Sets up the index build state and registers it in the manager.
-     *
-     * TODO: Not yet implemented. Only instantiates and registers a builder in the manager. Does not
-     * set up index build state.
      */
-    using OnInitFn = stdx::function<void()>;
+    using OnInitFn = MultiIndexBlock::OnInitFn;
     Status setUpIndexBuild(OperationContext* opCtx,
                            Collection* collection,
                            const std::vector<BSONObj>& specs,
@@ -115,13 +112,13 @@ public:
     /**
      * Persists information in the index catalog entry that the index is ready for use, as well as
      * updating the in-memory index catalog entry for this index to ready.
-     *
-     * TODO: Not yet implemented.
      */
-    using OnCommitFn = stdx::function<void()>;
+    using OnCreateEachFn = MultiIndexBlock::OnCreateEachFn;
+    using OnCommitFn = MultiIndexBlock::OnCommitFn;
     Status commitIndexBuild(OperationContext* opCtx,
                             const NamespaceString& nss,
                             const UUID& buildUUID,
+                            OnCreateEachFn onCreateEachFn,
                             OnCommitFn onCommitFn);
 
     /**

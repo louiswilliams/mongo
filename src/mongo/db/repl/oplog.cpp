@@ -289,7 +289,12 @@ Status startIndexBuild(OperationContext* opCtx,
         return statusWithIndexes.getStatus();
     }
     return IndexBuildsCoordinator::get(opCtx)
-        ->startIndexBuild(opCtx, collUUID, statusWithIndexes.getValue(), indexBuildUUID)
+        ->startIndexBuild(opCtx,
+                          collUUID,
+                          statusWithIndexes.getValue(),
+                          indexBuildUUID,
+                          /* This oplog entry is only replicated for two-phase index builds */
+                          IndexBuildProtocol::kTwoPhase)
         .getStatus();
 }
 

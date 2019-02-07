@@ -127,7 +127,9 @@ void generateSystemIndexForExistingCollection(OperationContext* opCtx,
         MultiIndexBlock indexer(opCtx, collection);
 
         writeConflictRetry(opCtx, "authorization index regeneration", ns.ns(), [&] {
-            fassert(40453, indexer.init(indexSpec));
+            fassert(40453,
+                    indexer.init(indexSpec,
+                                 MultiIndexBlock::makeTimestampedIndexOnInitFn(opCtx, collection)));
         });
 
         fassert(40454, indexer.insertAllDocumentsInCollection());
@@ -135,10 +137,13 @@ void generateSystemIndexForExistingCollection(OperationContext* opCtx,
         writeConflictRetry(opCtx, "authorization index regeneration", ns.ns(), [&] {
             WriteUnitOfWork wunit(opCtx);
 
-            fassert(51015, indexer.commit([opCtx, &ns, collection](const BSONObj& spec) {
-                opCtx->getServiceContext()->getOpObserver()->onCreateIndex(
-                    opCtx, ns, *(collection->uuid()), spec, false /* fromMigrate */);
-            }));
+            fassert(51015,
+                    indexer.commit(
+                        [opCtx, &ns, collection](const BSONObj& spec) {
+                            opCtx->getServiceContext()->getOpObserver()->onCreateIndex(
+                                opCtx, ns, *(collection->uuid()), spec, false /* fromMigrate */);
+                        },
+                        MultiIndexBlock::kNoopOnCommitFn));
 
             wunit.commit();
         });

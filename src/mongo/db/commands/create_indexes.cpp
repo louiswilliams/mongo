@@ -313,8 +313,9 @@ bool runCreateIndexes(OperationContext* opCtx,
     }
 
     std::vector<BSONObj> indexInfoObjs =
-        writeConflictRetry(opCtx, kCommandName, ns.ns(), [opCtx, &indexer, &specs] {
-            return uassertStatusOK(indexer.init(specs, indexer.getDefaultOnInitFn(opCtx)));
+        writeConflictRetry(opCtx, kCommandName, ns.ns(), [opCtx, collection, &indexer, &specs] {
+            return uassertStatusOK(indexer.init(
+                specs, MultiIndexBlock::makeTimestampedIndexOnInitFn(opCtx, collection)));
         });
 
     // If we're a background index, replace exclusive db lock with an intent lock, so that
@@ -405,10 +406,12 @@ bool runCreateIndexes(OperationContext* opCtx,
     writeConflictRetry(opCtx, kCommandName, ns.ns(), [&] {
         WriteUnitOfWork wunit(opCtx);
 
-        uassertStatusOK(indexer.commit([opCtx, &ns, collection](const BSONObj& spec) {
-            opCtx->getServiceContext()->getOpObserver()->onCreateIndex(
-                opCtx, ns, *(collection->uuid()), spec, false);
-        }));
+        uassertStatusOK(indexer.commit(
+            [opCtx, &ns, collection](const BSONObj& spec) {
+                opCtx->getServiceContext()->getOpObserver()->onCreateIndex(
+                    opCtx, ns, *(collection->uuid()), spec, false);
+            },
+            MultiIndexBlock::kNoopOnCommitFn));
 
         wunit.commit();
     });
@@ -529,11 +532,13 @@ bool runCreateIndexesWithCoordinator(OperationContext* opCtx,
 
     auto indexBuildsCoord = IndexBuildsCoordinator::get(opCtx);
     auto buildUUID = UUID::gen();
+    auto protocol =
+        (runTwoPhaseBuild) ? IndexBuildProtocol::kTwoPhase : IndexBuildProtocol::kSinglePhase;
     log() << "Registering index build: " << buildUUID;
     ReplIndexBuildState::IndexCatalogStats stats;
     try {
         auto buildIndexFuture = uassertStatusOK(
-            indexBuildsCoord->startIndexBuild(opCtx, *collectionUUID, specs, buildUUID));
+            indexBuildsCoord->startIndexBuild(opCtx, *collectionUUID, specs, buildUUID, protocol));
 
         auto deadline = opCtx->getDeadline();
         // Date_t::max() means no deadline.

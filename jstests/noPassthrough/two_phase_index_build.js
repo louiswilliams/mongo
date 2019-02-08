@@ -1,5 +1,7 @@
 /**
  * Tests basic functionality of two-phase index builds.
+ *
+ * @tags: [requires_replication]
  */
 
 (function() {

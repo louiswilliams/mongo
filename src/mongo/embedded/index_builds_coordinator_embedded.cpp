@@ -63,8 +63,8 @@ IndexBuildsCoordinatorEmbedded::startIndexBuild(OperationContext* opCtx,
 
     auto nss = UUIDCatalog::get(opCtx).lookupNSSByUUID(collectionUUID);
     auto dbName = nss.db().toString();
-    auto replIndexBuildState =
-        std::make_shared<ReplIndexBuildState>(buildUUID, collectionUUID, dbName, indexNames, specs);
+    auto replIndexBuildState = std::make_shared<ReplIndexBuildState>(
+        buildUUID, collectionUUID, dbName, indexNames, specs, protocol);
 
     Status status = _registerIndexBuild(opCtx, replIndexBuildState);
     if (!status.isOK()) {

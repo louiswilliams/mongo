@@ -40,8 +40,9 @@ namespace mongo {
 WildcardAccessMethod::WildcardAccessMethod(IndexCatalogEntry* wildcardState,
                                            SortedDataInterface* btree)
     : AbstractIndexAccessMethod(wildcardState, btree),
-      _keyGen(
-          _descriptor->keyPattern(), _descriptor->pathProjection(), _btreeState->getCollator()) {}
+      _keyGen(_descriptor->keyPattern(),
+              _descriptor->pathProjection(),
+              _indexCatalogEntry->getCollator()) {}
 
 bool WildcardAccessMethod::shouldMarkIndexAsMultikey(const BSONObjSet& keys,
                                                      const BSONObjSet& multikeyMetadataKeys,

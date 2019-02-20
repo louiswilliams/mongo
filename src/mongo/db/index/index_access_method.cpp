@@ -136,7 +136,7 @@ private:
 
 AbstractIndexAccessMethod::AbstractIndexAccessMethod(IndexCatalogEntry* btreeState,
                                                      SortedDataInterface* btree)
-    : _btreeState(btreeState), _descriptor(btreeState->descriptor()), _newInterface(btree) {
+    : _indexCatalogEntry(btreeState), _descriptor(btreeState->descriptor()), _newInterface(btree) {
     verify(IndexDescriptor::isIndexVersionSupported(_descriptor->version()));
 }
 
@@ -149,7 +149,7 @@ bool AbstractIndexAccessMethod::ignoreKeyTooLong() {
 bool AbstractIndexAccessMethod::shouldCheckIndexKeySize(OperationContext* opCtx) {
     // Don't check index key size if we cannot write to the collection. That indicates we are a
     // secondary node and we should accept any index key.
-    const NamespaceString collName(_btreeState->ns());
+    const NamespaceString collName(_indexCatalogEntry->ns());
     const auto shouldRelaxConstraints =
         repl::ReplicationCoordinator::get(opCtx)->shouldRelaxIndexConstraints(opCtx, collName);
 
@@ -170,7 +170,7 @@ bool AbstractIndexAccessMethod::isFatalError(OperationContext* opCtx, Status sta
 
     // A document might be indexed multiple times during a background index build if it moves ahead
     // of the cursor (e.g. via an update). We test this scenario and swallow the error accordingly.
-    if (status == ErrorCodes::DuplicateKeyValue && !_btreeState->isReady(opCtx)) {
+    if (status == ErrorCodes::DuplicateKeyValue && !_indexCatalogEntry->isReady(opCtx)) {
         LOG(3) << "key " << key << " already in index during background indexing (ok)";
         return false;
     }
@@ -183,14 +183,22 @@ Status AbstractIndexAccessMethod::insert(OperationContext* opCtx,
                                          const RecordId& loc,
                                          const InsertDeleteOptions& options,
                                          InsertResult* result) {
-    invariant(options.fromIndexBuilder || !_btreeState->isHybridBuilding());
+    invariant(options.fromIndexBuilder || !_indexCatalogEntry->isHybridBuilding());
 
     BSONObjSet multikeyMetadataKeys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     MultikeyPaths multikeyPaths;
 
-    // Delegate to the subclass.
-    getKeys(obj, options.getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths);
+    // If the keys can't be generated and no exceptions where thrown, a build is in progress. Record
+    // the document as "skipped" so the index builder will retry at a point where data is
+    // consistent.
+    if (!getKeys(obj, options.getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths) &&
+        _indexCatalogEntry->isHybridBuilding()) {
+        auto status = _indexCatalogEntry->indexBuildInterceptor()->recordSkippedRecord(opCtx, loc);
+        if (!status.isOK()) {
+            return status;
+        }
+    }
 
     return insertKeys(opCtx, keys, multikeyMetadataKeys, multikeyPaths, loc, options, result);
 }
@@ -234,7 +242,7 @@ Status AbstractIndexAccessMethod::insertKeys(OperationContext* opCtx,
                 }
 
                 if (status.isOK() && ret.getValue() == SpecialFormatInserted::LongTypeBitsInserted)
-                    _btreeState->setIndexKeyStringWithLongTypeBitsExistsOnDisk(opCtx);
+                    _indexCatalogEntry->setIndexKeyStringWithLongTypeBitsExistsOnDisk(opCtx);
             }
             if (isFatalError(opCtx, status, key)) {
                 return status;
@@ -247,7 +255,7 @@ Status AbstractIndexAccessMethod::insertKeys(OperationContext* opCtx,
     }
 
     if (shouldMarkIndexAsMultikey(keys, multikeyMetadataKeys, multikeyPaths)) {
-        _btreeState->setMultikey(opCtx, multikeyPaths);
+        _indexCatalogEntry->setMultikey(opCtx, multikeyPaths);
     }
     return Status::OK();
 }
@@ -283,7 +291,7 @@ Status AbstractIndexAccessMethod::remove(OperationContext* opCtx,
                                          const RecordId& loc,
                                          const InsertDeleteOptions& options,
                                          int64_t* numDeleted) {
-    invariant(!_btreeState->isHybridBuilding());
+    invariant(!_indexCatalogEntry->isHybridBuilding());
     invariant(numDeleted);
 
     *numDeleted = 0;
@@ -345,7 +353,7 @@ RecordId AbstractIndexAccessMethod::findSingle(OperationContext* opCtx,
                                                const BSONObj& requestedKey) const {
     // Generate the key for this index.
     BSONObj actualKey;
-    if (_btreeState->getCollator()) {
+    if (_indexCatalogEntry->getCollator()) {
         // For performance, call get keys only if there is a non-simple collation.
         BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
         BSONObjSet* multikeyMetadataKeys = nullptr;
@@ -447,11 +455,21 @@ Status AbstractIndexAccessMethod::validateUpdate(OperationContext* opCtx,
     }
 
     if (!indexFilter || indexFilter->matchesBSON(to)) {
-        getKeys(to,
-                options.getKeysMode,
-                &ticket->newKeys,
-                &ticket->newMultikeyMetadataKeys,
-                &ticket->newMultikeyPaths);
+        // If the keys can't be generated and no exceptions where thrown, a build is in progress.
+        // Record the document as "skipped" so the index builder will retry at a point where data is
+        // consistent.
+        if (!getKeys(to,
+                     options.getKeysMode,
+                     &ticket->newKeys,
+                     &ticket->newMultikeyMetadataKeys,
+                     &ticket->newMultikeyPaths) &&
+            _indexCatalogEntry->isHybridBuilding()) {
+            auto status =
+                _indexCatalogEntry->indexBuildInterceptor()->recordSkippedRecord(opCtx, record);
+            if (!status.isOK()) {
+                return status;
+            }
+        }
     }
 
     ticket->loc = record;
@@ -468,7 +486,7 @@ Status AbstractIndexAccessMethod::update(OperationContext* opCtx,
                                          const UpdateTicket& ticket,
                                          int64_t* numInserted,
                                          int64_t* numDeleted) {
-    invariant(!_btreeState->isHybridBuilding());
+    invariant(!_indexCatalogEntry->isHybridBuilding());
     invariant(ticket.newKeys.size() ==
               ticket.oldKeys.size() + ticket.added.size() - ticket.removed.size());
     invariant(numInserted);
@@ -500,7 +518,7 @@ Status AbstractIndexAccessMethod::update(OperationContext* opCtx,
                     _newInterface->insert(opCtx, key, recordId, ticket.dupsAllowed);
                 status = ret.getStatus();
                 if (status.isOK() && ret.getValue() == SpecialFormatInserted::LongTypeBitsInserted)
-                    _btreeState->setIndexKeyStringWithLongTypeBitsExistsOnDisk(opCtx);
+                    _indexCatalogEntry->setIndexKeyStringWithLongTypeBitsExistsOnDisk(opCtx);
             }
             if (isFatalError(opCtx, status, key)) {
                 return status;
@@ -510,7 +528,7 @@ Status AbstractIndexAccessMethod::update(OperationContext* opCtx,
 
     if (shouldMarkIndexAsMultikey(
             ticket.newKeys, ticket.newMultikeyMetadataKeys, ticket.newMultikeyPaths)) {
-        _btreeState->setMultikey(opCtx, ticket.newMultikeyPaths);
+        _indexCatalogEntry->setMultikey(opCtx, ticket.newMultikeyPaths);
     }
 
     *numDeleted = ticket.removed.size();
@@ -527,6 +545,7 @@ class AbstractIndexAccessMethod::BulkBuilderImpl : public IndexAccessMethod::Bul
 public:
     BulkBuilderImpl(const IndexAccessMethod* index,
                     const IndexDescriptor* descriptor,
+                    IndexBuildInterceptor* interceptor,
                     size_t maxMemoryUsageBytes);
 
     Status insert(OperationContext* opCtx,
@@ -549,6 +568,7 @@ public:
 private:
     std::unique_ptr<Sorter> _sorter;
     const IndexAccessMethod* _real;
+    IndexBuildInterceptor* _interceptor;
     int64_t _keysInserted = 0;
 
     // Set to true if any document added to the BulkBuilder causes the index to become multikey.
@@ -566,11 +586,13 @@ private:
 
 std::unique_ptr<IndexAccessMethod::BulkBuilder> AbstractIndexAccessMethod::initiateBulk(
     size_t maxMemoryUsageBytes) {
-    return std::make_unique<BulkBuilderImpl>(this, _descriptor, maxMemoryUsageBytes);
+    return std::make_unique<BulkBuilderImpl>(
+        this, _descriptor, _indexCatalogEntry->indexBuildInterceptor(), maxMemoryUsageBytes);
 }
 
 AbstractIndexAccessMethod::BulkBuilderImpl::BulkBuilderImpl(const IndexAccessMethod* index,
                                                             const IndexDescriptor* descriptor,
+                                                            IndexBuildInterceptor* interceptor,
                                                             size_t maxMemoryUsageBytes)
     : _sorter(Sorter::make(
           SortOptions()
@@ -578,7 +600,8 @@ AbstractIndexAccessMethod::BulkBuilderImpl::BulkBuilderImpl(const IndexAccessMet
               .ExtSortAllowed()
               .MaxMemoryUsageBytes(maxMemoryUsageBytes),
           BtreeExternalSortComparison(descriptor->keyPattern(), descriptor->version()))),
-      _real(index) {}
+      _real(index),
+      _interceptor(interceptor) {}
 
 Status AbstractIndexAccessMethod::BulkBuilderImpl::insert(OperationContext* opCtx,
                                                           const BSONObj& obj,
@@ -587,7 +610,16 @@ Status AbstractIndexAccessMethod::BulkBuilderImpl::insert(OperationContext* opCt
     BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
     MultikeyPaths multikeyPaths;
 
-    _real->getKeys(obj, options.getKeysMode, &keys, &_multikeyMetadataKeys, &multikeyPaths);
+    // If the keys can't be generated and no exceptions where thrown, a build is in progress. Record
+    // the document as "skipped" so the index builder will retry at a point where data is
+    // consistent.
+    if (!_real->getKeys(obj, options.getKeysMode, &keys, &_multikeyMetadataKeys, &multikeyPaths) &&
+        _interceptor) {
+        auto status = _interceptor->recordSkippedRecord(opCtx, loc);
+        if (!status.isOK()) {
+            return status;
+        }
+    }
 
     if (!multikeyPaths.empty()) {
         if (_indexMultikeyPaths.empty()) {
@@ -690,7 +722,7 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
             StatusWith<SpecialFormatInserted> ret = builder->addKey(data.first, data.second);
             status = ret.getStatus();
             if (status.isOK() && ret.getValue() == SpecialFormatInserted::LongTypeBitsInserted)
-                _btreeState->setIndexKeyStringWithLongTypeBitsExistsOnDisk(opCtx);
+                _indexCatalogEntry->setIndexKeyStringWithLongTypeBitsExistsOnDisk(opCtx);
         }
 
         if (!status.isOK()) {
@@ -728,13 +760,13 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
     // tracker bit so that downgrade binary which cannot read the long TypeBits fails to
     // start up.
     if (specialFormatInserted == SpecialFormatInserted::LongTypeBitsInserted)
-        _btreeState->setIndexKeyStringWithLongTypeBitsExistsOnDisk(opCtx);
+        _indexCatalogEntry->setIndexKeyStringWithLongTypeBitsExistsOnDisk(opCtx);
     wunit.commit();
     return Status::OK();
 }
 
 void AbstractIndexAccessMethod::setIndexIsMultikey(OperationContext* opCtx, MultikeyPaths paths) {
-    _btreeState->setMultikey(opCtx, paths);
+    _indexCatalogEntry->setMultikey(opCtx, paths);
 }
 
 bool AbstractIndexAccessMethod::getKeys(const BSONObj& obj,
@@ -786,7 +818,7 @@ bool AbstractIndexAccessMethod::getKeys(const BSONObj& obj,
 
         // If the document applies to the filter (which means that it should have never been
         // indexed), do not supress the error.
-        const MatchExpression* filter = _btreeState->getFilterExpression();
+        const MatchExpression* filter = _indexCatalogEntry->getFilterExpression();
         if (mode == GetKeysMode::kRelaxConstraintsUnfiltered && filter &&
             filter->matchesBSON(obj)) {
             throw;

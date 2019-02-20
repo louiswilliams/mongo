@@ -107,7 +107,11 @@ public:
      */
     Status recordSkippedRecord(OperationContext* opCtx, const RecordId& recordId);
 
-    Status applySkippedRecords(OperationContext* opCtx, Collection* collection);
+    Status retrySkippedRecords(OperationContext* opCtx, const Collection* collection);
+
+    void setIgnoreSkippedRecords(OperationContext* opCtx) {
+        _ignoreSkippedRecords = true;
+    }
 
     bool areAllSkippedRecordsApplied(OperationContext* opCtx) const;
 
@@ -163,6 +167,8 @@ private:
     int64_t _numApplied{0};
 
     AtomicWord<long long> _sideWritesCounter{0};
+
+    bool _ignoreSkippedRecords = false;
 
     mutable stdx::mutex _multikeyPathMutex;
     boost::optional<MultikeyPaths> _multikeyPaths;

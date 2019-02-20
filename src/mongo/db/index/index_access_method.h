@@ -557,7 +557,7 @@ protected:
                            BSONObjSet* multikeyMetadataKeys,
                            MultikeyPaths* multikeyPaths) const = 0;
 
-    IndexCatalogEntry* const _btreeState;  // owned by IndexCatalog
+    IndexCatalogEntry* const _indexCatalogEntry;  // owned by IndexCatalog
     const IndexDescriptor* const _descriptor;
 
 private:

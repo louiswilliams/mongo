@@ -2298,6 +2298,113 @@ public:
     }
 };
 
+class IndexBuildsCheckErrorsDuringStepUp : public StorageTimestampTest {
+public:
+    void run() {
+
+        NamespaceString nss("unittests.timestampIndexBuilds");
+        reset(nss);
+
+        AutoGetCollection autoColl(_opCtx, nss, LockMode::MODE_X, LockMode::MODE_X);
+        auto collection = autoColl.getCollection();
+
+        // Indexing of parallel arrays is not allowed, so these are deemed "bad".
+        const auto badDoc1 =
+            BSON("_id" << 0 << "a" << BSON_ARRAY(0 << 1) << "b" << BSON_ARRAY(0 << 1));
+        const auto badDoc2 =
+            BSON("_id" << 1 << "a" << BSON_ARRAY(2 << 3) << "b" << BSON_ARRAY(2 << 3));
+        const auto badDoc3 =
+            BSON("_id" << 2 << "a" << BSON_ARRAY(4 << 5) << "b" << BSON_ARRAY(4 << 5));
+
+        const LogicalTime insert1 = _clock->reserveTicks(1);
+        {
+            WriteUnitOfWork wuow(_opCtx);
+            insertDocument(autoColl.getCollection(),
+                           InsertStatement(badDoc1, insert1.asTimestamp(), presentTerm));
+            wuow.commit();
+        }
+
+
+        IndexCatalogEntry* buildingIndex = nullptr;
+        MultiIndexBlock indexer(_opCtx, collection);
+
+        const LogicalTime indexInit = _clock->reserveTicks(3);
+        {
+            // First, simulate being a secondary. Indexing errors are ignored.
+            ASSERT_OK(_coordinatorMock->setFollowerMode({repl::MemberState::MS::RS_SECONDARY}));
+            repl::UnreplicatedWritesBlock unreplicatedWrites(_opCtx);
+
+            {
+                TimestampBlock tsBlock(_opCtx, indexInit.asTimestamp());
+
+                auto swSpecs =
+                    indexer.init({BSON("v" << 2 << "name"
+                                           << "a_1_b_1"
+                                           << "ns"
+                                           << collection->ns().ns()
+                                           << "key"
+                                           << BSON("a" << 1 << "b" << 1))},
+                                 MultiIndexBlock::makeTimestampedIndexOnInitFn(_opCtx, collection));
+                ASSERT_OK(swSpecs.getStatus());
+            }
+
+            auto indexCatalog = collection->getIndexCatalog();
+            buildingIndex = const_cast<IndexCatalogEntry*>(indexCatalog->getEntry(
+                indexCatalog->findIndexByName(_opCtx, "a_1_b_1", /* includeUnfinished */ true)));
+            ASSERT(buildingIndex);
+
+            ASSERT_OK(indexer.insertAllDocumentsInCollection());
+
+            ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
+
+            // There should be one skipped record from the collection scan.
+            ASSERT_FALSE(
+                buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+
+            {
+                // This write will generate a side write that must be drained.
+                WriteUnitOfWork wuow(_opCtx);
+                insertDocument(
+                    autoColl.getCollection(),
+                    InsertStatement(badDoc2, indexInit.addTicks(1).asTimestamp(), presentTerm));
+                wuow.commit();
+            }
+
+            ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
+
+            // As a secondary, this drain will fail to apply all side writes and leave more skipped
+            // records.
+            ASSERT_OK(indexer.drainBackgroundWrites());
+            ASSERT_FALSE(
+                buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+        }
+
+        // As a primary, do not ignore indexing errors.
+        ASSERT_OK(_coordinatorMock->setFollowerMode({repl::MemberState::MS::RS_PRIMARY}));
+
+        {
+            // This write will not succeed because the node is a primary.
+            WriteUnitOfWork wuow(_opCtx);
+            ASSERT_NOT_OK(collection->insertDocument(
+                _opCtx,
+                InsertStatement(badDoc3, indexInit.addTicks(1).asTimestamp(), presentTerm),
+                /* opDebug */ nullptr,
+                /* noWarn */ false));
+            wuow.commit();
+        }
+
+        // There should skipped records from failed collection scans and drains.
+        ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+        ASSERT_THROWS_CODE(
+            buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection),
+            DBException,
+            ErrorCodes::CannotIndexParallelArrays);
+
+        ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
+        ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+    }
+};
+
 class SecondaryReadsDuringBatchApplicationAreAllowed : public StorageTimestampTest {
 public:
     void run() {
@@ -2851,6 +2958,7 @@ public:
         add<CreateCollectionWithSystemIndex>();
         add<MultiDocumentTransaction>();
         add<PreparedMultiDocumentTransaction>();
+        add<IndexBuildsCheckErrorsDuringStepUp>();
     }
 };
 

@@ -354,16 +354,21 @@ bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
 
 Status IndexBuildInterceptor::recordSkippedRecord(OperationContext* opCtx,
                                                   const RecordId& recordId) {
+    log() << "skipping indexing error for record " << recordId;
     auto toInsert = BSON("recordId" << recordId.repr());
     return _skippedRecordsTable->rs()
         ->insertRecord(opCtx, toInsert.objdata(), toInsert.objsize(), Timestamp::min())
         .getStatus();
 }
 
-Status IndexBuildInterceptor::applySkippedRecords(OperationContext* opCtx,
-                                                  Collection* collection) try {
-    // The logic to call this without an exclusive lock is complicated.
-    invariant(opCtx->lockState()->isCollectionLockedForMode(_indexCatalogEntry->ns(), MODE_X));
+Status IndexBuildInterceptor::retrySkippedRecords(OperationContext* opCtx,
+                                                  const Collection* collection) try {
+    InsertDeleteOptions options;
+    collection->getIndexCatalog()->prepareInsertDeleteOptions(
+        opCtx, _indexCatalogEntry->descriptor(), &options);
+
+    // This should only be called when constraints are being enforced, on a primary.
+    invariant(options.getKeysMode == IndexAccessMethod::GetKeysMode::kEnforceConstraints);
 
     auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
 
@@ -381,13 +386,17 @@ Status IndexBuildInterceptor::applySkippedRecords(OperationContext* opCtx,
         // If the record still exists, attempt to index it.
         if (skippedRecord) {
             auto docBson = skippedRecord->data.toBson();
-            BsonRecord bsonRecord{skippedRecord->id, Timestamp(), &docBson};
 
             // The assumption here is that this function is only called when GetKeysMode is set to
             // kEnforceConstraints. This means this will throw if there are any indexing errors.
             int64_t keysInserted;
-            auto status =
-                collection->getIndexCatalog()->indexRecords(opCtx, {bsonRecord}, &keysInserted);
+            auto status = sideWrite(opCtx,
+                                    _indexCatalogEntry->accessMethod(),
+                                    &docBson,
+                                    options,
+                                    recordId,
+                                    Op::kInsert,
+                                    &keysInserted);
             if (!status.isOK()) {
                 return status;
             }
@@ -405,6 +414,10 @@ Status IndexBuildInterceptor::applySkippedRecords(OperationContext* opCtx,
 }
 
 bool IndexBuildInterceptor::areAllSkippedRecordsApplied(OperationContext* opCtx) const {
+    if (_ignoreSkippedRecords) {
+        return true;
+    }
+
     auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
     auto record = cursor->next();
 
@@ -440,7 +453,11 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     const auto getKeysMode = op == Op::kInsert
         ? options.getKeysMode
         : IndexAccessMethod::GetKeysMode::kRelaxConstraintsUnfiltered;
-    indexAccessMethod->getKeys(*obj, getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths);
+    if (!indexAccessMethod->getKeys(
+            *obj, getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths) &&
+        op == Op::kInsert) {
+        return recordSkippedRecord(opCtx, loc);
+    }
 
     // Maintain parity with IndexAccessMethods handling of key counting. Only include
     // `multikeyMetadataKeys` when inserting.

@@ -100,6 +100,18 @@ public:
                                 RecoveryUnit::ReadSource readSource);
 
     /**
+     * Records a RecordId which was unable to be indexed due to an indexing error, but due to the
+     * relaxation of key constraint violations, allows the index build to proceed. This record is
+     * written to a temporary table. At the conclusion of the build, the key generation and
+     * insertion is attempted again.
+     */
+    Status recordSkippedRecord(OperationContext* opCtx, const RecordId& recordId);
+
+    Status applySkippedRecords(OperationContext* opCtx, Collection* collection);
+
+    bool areAllSkippedRecordsApplied(OperationContext* opCtx) const;
+
+    /**
      * Returns 'true' if there are no visible records remaining to be applied from the side writes
      * table. Ensure that this returns 'true' when an index build is completed.
      */
@@ -109,6 +121,7 @@ public:
      * Returns true if all recorded duplicate key constraint violations have been checked.
      */
     bool areAllConstraintsChecked(OperationContext* opCtx) const;
+
 
     /**
       * When an index builder wants to commit, use this to retrieve any recorded multikey paths
@@ -138,8 +151,12 @@ private:
     // The entry for the index that is being built.
     IndexCatalogEntry* _indexCatalogEntry;
 
-    // This temporary record store is owned by the interceptor and dropped along with it.
+    // This temporary record store records intercepted keys that will be written into the index by
+    // calling drainWritesIntoIndex(). It is owned by the interceptor and dropped along with it.
     std::unique_ptr<TemporaryRecordStore> _sideWritesTable;
+
+    // Records RecordIds that have been skipped due to indexing errors.
+    std::unique_ptr<TemporaryRecordStore> _skippedRecordsTable;
 
     std::unique_ptr<DuplicateKeyTracker> _duplicateKeyTracker;
 

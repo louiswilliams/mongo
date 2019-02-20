@@ -43,6 +43,7 @@
 #include "mongo/db/client.h"
 #include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/curop.h"
+#include "mongo/db/index/index_build_interceptor.h"
 #include "mongo/db/index/index_descriptor.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/keypattern.h"
@@ -736,7 +737,7 @@ void AbstractIndexAccessMethod::setIndexIsMultikey(OperationContext* opCtx, Mult
     _btreeState->setMultikey(opCtx, paths);
 }
 
-void AbstractIndexAccessMethod::getKeys(const BSONObj& obj,
+bool AbstractIndexAccessMethod::getKeys(const BSONObj& obj,
                                         GetKeysMode mode,
                                         BSONObjSet* keys,
                                         BSONObjSet* multikeyMetadataKeys,
@@ -793,7 +794,10 @@ void AbstractIndexAccessMethod::getKeys(const BSONObj& obj,
 
         LOG(1) << "Ignoring indexing error for idempotency reasons: " << redact(ex)
                << " when getting index keys of " << redact(obj);
+
+        return false;
     }
+    return true;
 }
 
 bool AbstractIndexAccessMethod::shouldMarkIndexAsMultikey(

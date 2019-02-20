@@ -318,8 +318,11 @@ public:
      * BSONObjSet with any multikey metadata keys generated while processing the document. These
      * keys are not associated with the document itself, but instead represent multi-key path
      * information that must be stored in a reserved keyspace within the index.
+     *
+     * Returns 'true' if keys were successfully generated or no keys apply to the document, and
+     * 'false' if key generation failed and errors were supressed.
      */
-    virtual void getKeys(const BSONObj& obj,
+    virtual bool getKeys(const BSONObj& obj,
                          GetKeysMode mode,
                          BSONObjSet* keys,
                          BSONObjSet* multikeyMetadataKeys,
@@ -522,7 +525,7 @@ public:
                       std::set<RecordId>* dupRecords,
                       std::vector<BSONObj>* dupKeys) final;
 
-    void getKeys(const BSONObj& obj,
+    bool getKeys(const BSONObj& obj,
                  GetKeysMode mode,
                  BSONObjSet* keys,
                  BSONObjSet* multikeyMetadataKeys,
@@ -554,7 +557,7 @@ protected:
                            BSONObjSet* multikeyMetadataKeys,
                            MultikeyPaths* multikeyPaths) const = 0;
 
-    IndexCatalogEntry* const _btreeState;  // owned by IndexCatalogEntry
+    IndexCatalogEntry* const _btreeState;  // owned by IndexCatalog
     const IndexDescriptor* const _descriptor;
 
 private:

@@ -55,6 +55,8 @@ MONGO_FAIL_POINT_DEFINE(hangDuringIndexBuildDrainYield);
 IndexBuildInterceptor::IndexBuildInterceptor(OperationContext* opCtx, IndexCatalogEntry* entry)
     : _indexCatalogEntry(entry),
       _sideWritesTable(
+          opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx)),
+      _skippedRecordsTable(
           opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx)) {
 
     if (entry->descriptor()->unique()) {
@@ -341,6 +343,69 @@ void IndexBuildInterceptor::_tryYield(OperationContext* opCtx) {
 bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
     invariant(_sideWritesTable);
     auto cursor = _sideWritesTable->rs()->getCursor(opCtx, false /* forward */);
+    auto record = cursor->next();
+
+    // The table is empty only when all writes are applied.
+    if (!record)
+        return true;
+
+    return false;
+}
+
+Status IndexBuildInterceptor::recordSkippedRecord(OperationContext* opCtx,
+                                                  const RecordId& recordId) {
+    auto toInsert = BSON("recordId" << recordId.repr());
+    return _skippedRecordsTable->rs()
+        ->insertRecord(opCtx, toInsert.objdata(), toInsert.objsize(), Timestamp::min())
+        .getStatus();
+}
+
+Status IndexBuildInterceptor::applySkippedRecords(OperationContext* opCtx,
+                                                  Collection* collection) try {
+    // The logic to call this without an exclusive lock is complicated.
+    invariant(opCtx->lockState()->isCollectionLockedForMode(_indexCatalogEntry->ns(), MODE_X));
+
+    auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
+
+    auto collCursor = collection->getCursor(opCtx);
+    while (auto record = cursor->next()) {
+        const BSONObj doc = record->data.toBson();
+
+        // This is the RecordId of the skipped record. We don't care about the RecordId of the item
+        // in the temp table.
+        const RecordId recordId(doc["recordId"].Long());
+        auto skippedRecord = collCursor->seekExact(recordId);
+
+        WriteUnitOfWork wuow(opCtx);
+
+        // If the record still exists, attempt to index it.
+        if (skippedRecord) {
+            auto docBson = skippedRecord->data.toBson();
+            BsonRecord bsonRecord{skippedRecord->id, Timestamp(), &docBson};
+
+            // The assumption here is that this function is only called when GetKeysMode is set to
+            // kEnforceConstraints. This means this will throw if there are any indexing errors.
+            int64_t keysInserted;
+            auto status =
+                collection->getIndexCatalog()->indexRecords(opCtx, {bsonRecord}, &keysInserted);
+            if (!status.isOK()) {
+                return status;
+            }
+        }
+
+        // Delete the record so it is not applied more than once.
+        _skippedRecordsTable->rs()->deleteRecord(opCtx, record->id);
+
+        wuow.commit();
+    }
+
+    return Status::OK();
+} catch (const AssertionException& ex) {
+    return ex.toStatus();
+}
+
+bool IndexBuildInterceptor::areAllSkippedRecordsApplied(OperationContext* opCtx) const {
+    auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
     auto record = cursor->next();
 
     // The table is empty only when all writes are applied.

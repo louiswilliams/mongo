@@ -2298,7 +2298,7 @@ public:
     }
 };
 
-class IndexBuildsCheckErrorsDuringStepUp : public StorageTimestampTest {
+class IndexBuildsResolveErrorsDuringStateChangeToPrimary : public StorageTimestampTest {
 public:
     void run() {
 
@@ -2318,6 +2318,7 @@ public:
 
         const LogicalTime insert1 = _clock->reserveTicks(1);
         {
+            log() << "inserting " << badDoc1;
             WriteUnitOfWork wuow(_opCtx);
             insertDocument(autoColl.getCollection(),
                            InsertStatement(badDoc1, insert1.asTimestamp(), presentTerm));
@@ -2327,11 +2328,13 @@ public:
 
         IndexCatalogEntry* buildingIndex = nullptr;
         MultiIndexBlock indexer(_opCtx, collection);
+        indexer.ignoreUniqueConstraint();
 
         const LogicalTime indexInit = _clock->reserveTicks(3);
         {
             // First, simulate being a secondary. Indexing errors are ignored.
             ASSERT_OK(_coordinatorMock->setFollowerMode({repl::MemberState::MS::RS_SECONDARY}));
+            _coordinatorMock->alwaysAllowWrites(false);
             repl::UnreplicatedWritesBlock unreplicatedWrites(_opCtx);
 
             {
@@ -2362,7 +2365,8 @@ public:
                 buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
 
             {
-                // This write will generate a side write that must be drained.
+                // This write will get recorded as 'skipped' because it is not indexable.
+                log() << "inserting " << badDoc2;
                 WriteUnitOfWork wuow(_opCtx);
                 insertDocument(
                     autoColl.getCollection(),
@@ -2370,38 +2374,49 @@ public:
                 wuow.commit();
             }
 
-            ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
+            ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
 
-            // As a secondary, this drain will fail to apply all side writes and leave more skipped
-            // records.
-            ASSERT_OK(indexer.drainBackgroundWrites());
             ASSERT_FALSE(
                 buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
         }
 
-        // As a primary, do not ignore indexing errors.
+        // As a primary, stop ignoring indexing errors.
         ASSERT_OK(_coordinatorMock->setFollowerMode({repl::MemberState::MS::RS_PRIMARY}));
 
         {
-            // This write will not succeed because the node is a primary.
+            // This write will not succeed because the node is a primary and the document is not
+            // indexable.
+            log() << "inserting " << badDoc3;
             WriteUnitOfWork wuow(_opCtx);
-            ASSERT_NOT_OK(collection->insertDocument(
-                _opCtx,
-                InsertStatement(badDoc3, indexInit.addTicks(1).asTimestamp(), presentTerm),
-                /* opDebug */ nullptr,
-                /* noWarn */ false));
+            ASSERT_THROWS_CODE(
+                collection->insertDocument(
+                    _opCtx,
+                    InsertStatement(badDoc3, indexInit.addTicks(1).asTimestamp(), presentTerm),
+                    /* opDebug */ nullptr,
+                    /* noWarn */ false),
+                DBException,
+                ErrorCodes::CannotIndexParallelArrays);
             wuow.commit();
         }
 
-        // There should skipped records from failed collection scans and drains.
+        // There should skipped records from failed collection scans and writes.
         ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
-        ASSERT_THROWS_CODE(
-            buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection),
-            DBException,
-            ErrorCodes::CannotIndexParallelArrays);
+        auto status =
+            buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection);
+        ASSERT_EQ(status.code(), ErrorCodes::CannotIndexParallelArrays);
 
-        ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
         ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+        ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
+
+        // Update bad documents to be good.
+        Helpers::upsert(_opCtx, collection->ns().ns(), BSON("_id" << 0 << "a" << 1 << "b" << 1));
+        Helpers::upsert(_opCtx, collection->ns().ns(), BSON("_id" << 1 << "a" << 2 << "b" << 2));
+
+        ASSERT_OK(buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection));
+        ASSERT_OK(indexer.drainBackgroundWrites());
+
+        ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+        ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
     }
 };
 

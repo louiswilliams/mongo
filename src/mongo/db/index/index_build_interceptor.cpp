@@ -387,6 +387,8 @@ Status IndexBuildInterceptor::retrySkippedRecords(OperationContext* opCtx,
         if (skippedRecord) {
             auto docBson = skippedRecord->data.toBson();
 
+            log() << "retrying index for " << docBson << ", " << recordId;
+
             // The assumption here is that this function is only called when GetKeysMode is set to
             // kEnforceConstraints. This means this will throw if there are any indexing errors.
             int64_t keysInserted;

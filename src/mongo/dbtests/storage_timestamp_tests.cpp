@@ -2413,7 +2413,7 @@ public:
         Helpers::upsert(_opCtx, collection->ns().ns(), BSON("_id" << 0 << "a" << 1 << "b" << 1));
         Helpers::upsert(_opCtx, collection->ns().ns(), BSON("_id" << 1 << "a" << 2 << "b" << 2));
 
-        // Retried skipped records get written to the side writes table out of convenience.
+        // Retried skipped records get written to the side writes table and must be drained.
         ASSERT_OK(buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection));
         ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
 
@@ -2425,7 +2425,6 @@ public:
 
         {
             WriteUnitOfWork wuow(_opCtx);
-
             ASSERT_OK(indexer.commit(
                 [&](const BSONObj& indexSpec) {
                     _opCtx->getServiceContext()->getOpObserver()->onCreateIndex(

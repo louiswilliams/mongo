@@ -372,8 +372,6 @@ Status IndexBuildInterceptor::retrySkippedRecords(OperationContext* opCtx,
     invariant(options.getKeysMode == IndexAccessMethod::GetKeysMode::kEnforceConstraints);
 
     auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
-
-    auto collCursor = collection->getCursor(opCtx);
     while (auto record = cursor->next()) {
         const BSONObj doc = record->data.toBson();
 
@@ -384,33 +382,36 @@ Status IndexBuildInterceptor::retrySkippedRecords(OperationContext* opCtx,
         WriteUnitOfWork wuow(opCtx);
 
         // If the record still exists, get a potentially new version of the document to index.
+        auto collCursor = collection->getCursor(opCtx);
         if (auto skippedRecord = collCursor->seekExact(recordId)) {
             const auto docBson = skippedRecord->data.toBson();
 
             try {
                 // Because constraint enforcement is set, this will throw if there are any indexing
                 // errors, instead of writing back to the skipped records table.
-                int64_t keysInserted;
+                int64_t unused;
                 auto status = sideWrite(opCtx,
                                         _indexCatalogEntry->accessMethod(),
                                         &docBson,
                                         options,
                                         recordId,
                                         Op::kInsert,
-                                        &keysInserted);
+                                        &unused);
                 if (!status.isOK()) {
-                    log() << "retry failed when indexing " << recordId << ": " << status;
-                    continue;
+                    return status;
                 }
+
             } catch (const DBException& ex) {
-                log() << "retry failed when indexing " << recordId << ": " << ex.toStatus();
-                continue;
+                return ex.toStatus();
             }
         }
 
         // Delete the record so it is not applied more than once.
         _skippedRecordsTable->rs()->deleteRecord(opCtx, record->id);
+
+        cursor->save();
         wuow.commit();
+        cursor->restore();
     }
 
     return Status::OK();

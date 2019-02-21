@@ -362,12 +362,13 @@ Status IndexBuildInterceptor::recordSkippedRecord(OperationContext* opCtx,
 }
 
 Status IndexBuildInterceptor::retrySkippedRecords(OperationContext* opCtx,
-                                                  const Collection* collection) try {
+                                                  const Collection* collection) {
     InsertDeleteOptions options;
     collection->getIndexCatalog()->prepareInsertDeleteOptions(
         opCtx, _indexCatalogEntry->descriptor(), &options);
 
-    // This should only be called when constraints are being enforced, on a primary.
+    // This should only be called when constraints are being enforced, on a primary. It does not
+    // make sense, nor is it necessary for this to be called on a secondary.
     invariant(options.getKeysMode == IndexAccessMethod::GetKeysMode::kEnforceConstraints);
 
     auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
@@ -379,40 +380,40 @@ Status IndexBuildInterceptor::retrySkippedRecords(OperationContext* opCtx,
         // This is the RecordId of the skipped record. We don't care about the RecordId of the item
         // in the temp table.
         const RecordId recordId(doc["recordId"].Long());
-        auto skippedRecord = collCursor->seekExact(recordId);
 
         WriteUnitOfWork wuow(opCtx);
 
-        // If the record still exists, attempt to index it.
-        if (skippedRecord) {
-            auto docBson = skippedRecord->data.toBson();
+        // If the record still exists, get a potentially new version of the document to index.
+        if (auto skippedRecord = collCursor->seekExact(recordId)) {
+            const auto docBson = skippedRecord->data.toBson();
 
-            log() << "retrying index for " << docBson << ", " << recordId;
-
-            // The assumption here is that this function is only called when GetKeysMode is set to
-            // kEnforceConstraints. This means this will throw if there are any indexing errors.
-            int64_t keysInserted;
-            auto status = sideWrite(opCtx,
-                                    _indexCatalogEntry->accessMethod(),
-                                    &docBson,
-                                    options,
-                                    recordId,
-                                    Op::kInsert,
-                                    &keysInserted);
-            if (!status.isOK()) {
-                return status;
+            try {
+                // Because constraint enforcement is set, this will throw if there are any indexing
+                // errors, instead of writing back to the skipped records table.
+                int64_t keysInserted;
+                auto status = sideWrite(opCtx,
+                                        _indexCatalogEntry->accessMethod(),
+                                        &docBson,
+                                        options,
+                                        recordId,
+                                        Op::kInsert,
+                                        &keysInserted);
+                if (!status.isOK()) {
+                    log() << "retry failed when indexing " << recordId << ": " << status;
+                    continue;
+                }
+            } catch (const DBException& ex) {
+                log() << "retry failed when indexing " << recordId << ": " << ex.toStatus();
+                continue;
             }
         }
 
         // Delete the record so it is not applied more than once.
         _skippedRecordsTable->rs()->deleteRecord(opCtx, record->id);
-
         wuow.commit();
     }
 
     return Status::OK();
-} catch (const AssertionException& ex) {
-    return ex.toStatus();
 }
 
 bool IndexBuildInterceptor::areAllSkippedRecordsApplied(OperationContext* opCtx) const {
@@ -455,9 +456,13 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     const auto getKeysMode = op == Op::kInsert
         ? options.getKeysMode
         : IndexAccessMethod::GetKeysMode::kRelaxConstraintsUnfiltered;
+
+    // When constraints are enforced, getKeys will throw on indexing errors and return 'false' when
+    // errors are suppressed.
     if (!indexAccessMethod->getKeys(
             *obj, getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths) &&
         op == Op::kInsert) {
+        invariant(options.getKeysMode == IndexAccessMethod::GetKeysMode::kRelaxConstraints);
         return recordSkippedRecord(opCtx, loc);
     }
 

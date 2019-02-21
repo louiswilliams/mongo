@@ -319,8 +319,12 @@ public:
      * keys are not associated with the document itself, but instead represent multi-key path
      * information that must be stored in a reserved keyspace within the index.
      *
-     * Returns 'true' if keys were successfully generated or no keys apply to the document, and
-     * 'false' if key generation failed and errors were supressed.
+     * When 'mode' is kEnforceConstraints, indexing errors will throw.
+     *
+     * Returns 'false' when 'mode' is kRelaxConstraints and key generation errors were encountered.
+     * Throws when 'mode' is kEnforceConstraints and key generation errors were encountered.
+     *
+     * Returns 'true' if no key generation errors were encountered.
      */
     virtual bool getKeys(const BSONObj& obj,
                          GetKeysMode mode,

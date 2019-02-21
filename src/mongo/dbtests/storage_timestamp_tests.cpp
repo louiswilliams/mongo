@@ -2316,6 +2316,7 @@ public:
         const auto badDoc3 =
             BSON("_id" << 2 << "a" << BSON_ARRAY(4 << 5) << "b" << BSON_ARRAY(4 << 5));
 
+        // NOTE: This test does not test any timestamp reads.
         const LogicalTime insert1 = _clock->reserveTicks(1);
         {
             log() << "inserting " << badDoc1;
@@ -2325,14 +2326,13 @@ public:
             wuow.commit();
         }
 
-
         IndexCatalogEntry* buildingIndex = nullptr;
         MultiIndexBlock indexer(_opCtx, collection);
-        indexer.ignoreUniqueConstraint();
 
         const LogicalTime indexInit = _clock->reserveTicks(3);
+
+        // First, simulate being a secondary. Indexing errors are ignored.
         {
-            // First, simulate being a secondary. Indexing errors are ignored.
             ASSERT_OK(_coordinatorMock->setFollowerMode({repl::MemberState::MS::RS_SECONDARY}));
             _coordinatorMock->alwaysAllowWrites(false);
             repl::UnreplicatedWritesBlock unreplicatedWrites(_opCtx);
@@ -2352,6 +2352,7 @@ public:
             }
 
             auto indexCatalog = collection->getIndexCatalog();
+            // TODO: Provide accessor instead of doing this.
             buildingIndex = const_cast<IndexCatalogEntry*>(indexCatalog->getEntry(
                 indexCatalog->findIndexByName(_opCtx, "a_1_b_1", /* includeUnfinished */ true)));
             ASSERT(buildingIndex);
@@ -2412,11 +2413,27 @@ public:
         Helpers::upsert(_opCtx, collection->ns().ns(), BSON("_id" << 0 << "a" << 1 << "b" << 1));
         Helpers::upsert(_opCtx, collection->ns().ns(), BSON("_id" << 1 << "a" << 2 << "b" << 2));
 
+        // Retried skipped records get written to the side writes table out of convenience.
         ASSERT_OK(buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection));
+        ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
+
         ASSERT_OK(indexer.drainBackgroundWrites());
 
         ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
         ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
+
+
+        {
+            WriteUnitOfWork wuow(_opCtx);
+
+            ASSERT_OK(indexer.commit(
+                [&](const BSONObj& indexSpec) {
+                    _opCtx->getServiceContext()->getOpObserver()->onCreateIndex(
+                        _opCtx, collection->ns(), *(collection->uuid()), indexSpec, false);
+                },
+                MultiIndexBlock::kNoopOnCommitFn));
+            wuow.commit();
+        }
     }
 };
 
@@ -2973,7 +2990,7 @@ public:
         add<CreateCollectionWithSystemIndex>();
         add<MultiDocumentTransaction>();
         add<PreparedMultiDocumentTransaction>();
-        add<IndexBuildsCheckErrorsDuringStepUp>();
+        add<IndexBuildsResolveErrorsDuringStateChangeToPrimary>();
     }
 };
 

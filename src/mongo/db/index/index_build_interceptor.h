@@ -103,10 +103,15 @@ public:
      * Records a RecordId which was unable to be indexed due to an indexing error, but due to the
      * relaxation of key constraint violations, allows the index build to proceed. This record is
      * written to a temporary table. At the conclusion of the build, the key generation and
-     * insertion is attempted again.
+     * insertion should be attempted again by calling 'retrySkippedRecords'.
      */
     Status recordSkippedRecord(OperationContext* opCtx, const RecordId& recordId);
 
+    /**
+     * Tries to index previously skipped records. For each record, if the new indexing attempt is
+     * successful, keys are written to the side-writes table, which must also be drained.
+     * Unsuccessful writes stay in the skipped records table.
+     */
     Status retrySkippedRecords(OperationContext* opCtx, const Collection* collection);
 
     void setIgnoreSkippedRecords(OperationContext* opCtx) {

@@ -613,6 +613,19 @@ Status MultiIndexBlock::drainBackgroundWrites(RecoveryUnit::ReadSource readSourc
     return Status::OK();
 }
 
+Status MultiIndexBlock::retrySkippedRecords(OperationContext* opCtx) {
+    for (auto&& index : _indexes) {
+        auto interceptor = index.block->getEntry()->indexBuildInterceptor();
+        if (!interceptor)
+            continue;
+
+        auto status = interceptor->retrySkippedRecords(opCtx, _collection);
+        if (!status.isOK()) {
+            return status;
+        }
+    }
+    return Status::OK();
+}
 
 Status MultiIndexBlock::checkConstraints() {
     if (State::kAborted == _getState()) {

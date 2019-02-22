@@ -2326,7 +2326,7 @@ public:
             wuow.commit();
         }
 
-        IndexCatalogEntry* buildingIndex = nullptr;
+        const IndexCatalogEntry* buildingIndex = nullptr;
         MultiIndexBlock indexer(_opCtx, collection);
 
         const LogicalTime indexInit = _clock->reserveTicks(3);
@@ -2353,8 +2353,8 @@ public:
 
             auto indexCatalog = collection->getIndexCatalog();
             // TODO: Provide accessor instead of doing this.
-            buildingIndex = const_cast<IndexCatalogEntry*>(indexCatalog->getEntry(
-                indexCatalog->findIndexByName(_opCtx, "a_1_b_1", /* includeUnfinished */ true)));
+            buildingIndex = indexCatalog->getEntry(
+                indexCatalog->findIndexByName(_opCtx, "a_1_b_1", /* includeUnfinished */ true));
             ASSERT(buildingIndex);
 
             ASSERT_OK(indexer.insertAllDocumentsInCollection());
@@ -2406,8 +2406,7 @@ public:
         ASSERT_FALSE(
             buildingIndex->indexBuildInterceptor()->getSkippedRecordTracker()->areAllRecordsApplied(
                 _opCtx));
-        auto status =
-            buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection);
+        auto status = indexer.retrySkippedRecords(_opCtx);
         ASSERT_EQ(status.code(), ErrorCodes::CannotIndexParallelArrays);
 
         ASSERT_FALSE(
@@ -2420,7 +2419,7 @@ public:
         Helpers::upsert(_opCtx, collection->ns().ns(), BSON("_id" << 1 << "a" << 2 << "b" << 2));
 
         // Retried skipped records get written to the side writes table and must be drained.
-        ASSERT_OK(buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection));
+        ASSERT_OK(indexer.retrySkippedRecords(_opCtx));
         ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
 
         ASSERT_OK(indexer.drainBackgroundWrites());

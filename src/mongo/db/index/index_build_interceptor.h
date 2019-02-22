@@ -104,6 +104,10 @@ public:
         return _skippedRecordTracker.get();
     }
 
+    const SkippedRecordTracker* getSkippedRecordTracker() const {
+        return _skippedRecordTracker.get();
+    }
+
     /**
      * Tries to index previously skipped records. For each record, if the new indexing attempt is
      * successful, keys are written to the side-writes table, which must also be drained.
@@ -163,8 +167,6 @@ private:
     int64_t _numApplied{0};
 
     AtomicWord<long long> _sideWritesCounter{0};
-
-    bool _ignoreSkippedRecords = false;
 
     mutable stdx::mutex _multikeyPathMutex;
     boost::optional<MultikeyPaths> _multikeyPaths;

@@ -166,6 +166,9 @@ public:
     Status drainBackgroundWrites(
         RecoveryUnit::ReadSource readSource = RecoveryUnit::ReadSource::kUnset);
 
+
+    Status retrySkippedRecords(OperationContext* opCtx);
+
     /**
      * Check any constraits that may have been temporarily violated during the index build for
      * background indexes using an IndexBuildInterceptor to capture writes. The caller is

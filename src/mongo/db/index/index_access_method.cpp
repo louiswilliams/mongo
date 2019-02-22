@@ -194,7 +194,9 @@ Status AbstractIndexAccessMethod::insert(OperationContext* opCtx,
     // consistent.
     if (!getKeys(obj, options.getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths) &&
         _indexCatalogEntry->isHybridBuilding()) {
-        auto status = _indexCatalogEntry->indexBuildInterceptor()->recordSkippedRecord(opCtx, loc);
+        auto status =
+            _indexCatalogEntry->indexBuildInterceptor()->getSkippedRecordTracker()->record(opCtx,
+                                                                                           loc);
         if (!status.isOK()) {
             return status;
         }
@@ -465,7 +467,8 @@ Status AbstractIndexAccessMethod::validateUpdate(OperationContext* opCtx,
                      &ticket->newMultikeyPaths) &&
             _indexCatalogEntry->isHybridBuilding()) {
             auto status =
-                _indexCatalogEntry->indexBuildInterceptor()->recordSkippedRecord(opCtx, record);
+                _indexCatalogEntry->indexBuildInterceptor()->getSkippedRecordTracker()->record(
+                    opCtx, record);
             if (!status.isOK()) {
                 return status;
             }
@@ -615,7 +618,7 @@ Status AbstractIndexAccessMethod::BulkBuilderImpl::insert(OperationContext* opCt
     // consistent.
     if (!_real->getKeys(obj, options.getKeysMode, &keys, &_multikeyMetadataKeys, &multikeyPaths) &&
         _interceptor) {
-        auto status = _interceptor->recordSkippedRecord(opCtx, loc);
+        auto status = _interceptor->getSkippedRecordTracker()->record(opCtx, loc);
         if (!status.isOK()) {
             return status;
         }

@@ -55,9 +55,9 @@ MONGO_FAIL_POINT_DEFINE(hangDuringIndexBuildDrainYield);
 IndexBuildInterceptor::IndexBuildInterceptor(OperationContext* opCtx, IndexCatalogEntry* entry)
     : _indexCatalogEntry(entry),
       _sideWritesTable(
-          opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx)),
-      _skippedRecordsTable(
           opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx)) {
+
+    _skippedRecordTracker = std::make_unique<SkippedRecordTracker>(opCtx, this, entry);
 
     if (entry->descriptor()->unique()) {
         _duplicateKeyTracker = std::make_unique<DuplicateKeyTracker>(opCtx, entry);
@@ -352,86 +352,6 @@ bool IndexBuildInterceptor::areAllWritesApplied(OperationContext* opCtx) const {
     return false;
 }
 
-Status IndexBuildInterceptor::recordSkippedRecord(OperationContext* opCtx,
-                                                  const RecordId& recordId) {
-    log() << "skipping indexing error for record " << recordId;
-    auto toInsert = BSON("recordId" << recordId.repr());
-    return _skippedRecordsTable->rs()
-        ->insertRecord(opCtx, toInsert.objdata(), toInsert.objsize(), Timestamp::min())
-        .getStatus();
-}
-
-Status IndexBuildInterceptor::retrySkippedRecords(OperationContext* opCtx,
-                                                  const Collection* collection) {
-    InsertDeleteOptions options;
-    collection->getIndexCatalog()->prepareInsertDeleteOptions(
-        opCtx, _indexCatalogEntry->descriptor(), &options);
-
-    // This should only be called when constraints are being enforced, on a primary. It does not
-    // make sense, nor is it necessary for this to be called on a secondary.
-    invariant(options.getKeysMode == IndexAccessMethod::GetKeysMode::kEnforceConstraints);
-
-    auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
-    while (auto record = cursor->next()) {
-        const BSONObj doc = record->data.toBson();
-
-        // This is the RecordId of the skipped record. We don't care about the RecordId of the item
-        // in the temp table.
-        const RecordId recordId(doc["recordId"].Long());
-
-        WriteUnitOfWork wuow(opCtx);
-
-        // If the record still exists, get a potentially new version of the document to index.
-        auto collCursor = collection->getCursor(opCtx);
-        if (auto skippedRecord = collCursor->seekExact(recordId)) {
-            const auto docBson = skippedRecord->data.toBson();
-
-            try {
-                // Because constraint enforcement is set, this will throw if there are any indexing
-                // errors, instead of writing back to the skipped records table.
-                int64_t unused;
-                auto status = sideWrite(opCtx,
-                                        _indexCatalogEntry->accessMethod(),
-                                        &docBson,
-                                        options,
-                                        recordId,
-                                        Op::kInsert,
-                                        &unused);
-                if (!status.isOK()) {
-                    return status;
-                }
-
-            } catch (const DBException& ex) {
-                return ex.toStatus();
-            }
-        }
-
-        // Delete the record so it is not applied more than once.
-        _skippedRecordsTable->rs()->deleteRecord(opCtx, record->id);
-
-        cursor->save();
-        wuow.commit();
-        cursor->restore();
-    }
-
-    return Status::OK();
-}
-
-bool IndexBuildInterceptor::areAllSkippedRecordsApplied(OperationContext* opCtx) const {
-    if (_ignoreSkippedRecords) {
-        return true;
-    }
-
-    auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
-    auto record = cursor->next();
-
-    // The table is empty only when all writes are applied.
-    if (!record)
-        return true;
-
-    return false;
-}
-
 boost::optional<MultikeyPaths> IndexBuildInterceptor::getMultikeyPaths() const {
     stdx::unique_lock<stdx::mutex> lk(_multikeyPathMutex);
     return _multikeyPaths;
@@ -464,7 +384,7 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
             *obj, getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths) &&
         op == Op::kInsert) {
         invariant(options.getKeysMode == IndexAccessMethod::GetKeysMode::kRelaxConstraints);
-        return recordSkippedRecord(opCtx, loc);
+        return _skippedRecordTracker->record(opCtx, loc);
     }
 
     // Maintain parity with IndexAccessMethods handling of key counting. Only include

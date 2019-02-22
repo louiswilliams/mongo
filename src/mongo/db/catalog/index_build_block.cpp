@@ -163,7 +163,8 @@ void IndexCatalogImpl::IndexBuildBlock::success() {
 
     if (_indexBuildInterceptor) {
         // An index build should never be completed with unapplied skipped writes.
-        invariant(_indexBuildInterceptor->areAllSkippedRecordsApplied(_opCtx));
+        invariant(
+            _indexBuildInterceptor->getSkippedRecordTracker()->areAllSkippedRecordsApplied(_opCtx));
 
         // An index build should never be completed with writes remaining in the interceptor.
         invariant(_indexBuildInterceptor->areAllWritesApplied(_opCtx));

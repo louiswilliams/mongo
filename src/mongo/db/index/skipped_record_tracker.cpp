@@ -31,19 +31,13 @@
 
 #include "mongo/db/index/skipped_record_tracker.h"
 
-#include "mongo/db/catalog/collection.h"
-#include "mongo/db/index/index_access_method.h"
 #include "mongo/db/index/index_build_interceptor.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
 
-SkippedRecordTracker::SkippedRecordTracker(OperationContext* opCtx,
-                                           IndexBuildInterceptor* interceptor,
-                                           IndexCatalogEntry* indexCatalogEntry)
-    : _interceptor(interceptor),
-      _indexCatalogEntry(indexCatalogEntry),
-      _skippedRecordsTable(
+SkippedRecordTracker::SkippedRecordTracker(OperationContext* opCtx)
+    : _skippedRecordsTable(
           opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx)) {}
 
 Status SkippedRecordTracker::record(OperationContext* opCtx, const RecordId& recordId) {
@@ -54,64 +48,7 @@ Status SkippedRecordTracker::record(OperationContext* opCtx, const RecordId& rec
         .getStatus();
 }
 
-Status SkippedRecordTracker::retrySkippedRecords(OperationContext* opCtx,
-                                                 const Collection* collection) {
-    InsertDeleteOptions options;
-    collection->getIndexCatalog()->prepareInsertDeleteOptions(
-        opCtx, _indexCatalogEntry->descriptor(), &options);
-
-    // This should only be called when constraints are being enforced, on a primary. It does not
-    // make sense, nor is it necessary for this to be called on a secondary.
-    invariant(options.getKeysMode == IndexAccessMethod::GetKeysMode::kEnforceConstraints);
-
-    auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
-    while (auto record = cursor->next()) {
-        const BSONObj doc = record->data.toBson();
-
-        // This is the RecordId of the skipped record. We don't care about the RecordId of the item
-        // in the temp table.
-        const RecordId recordId(doc["recordId"].Long());
-
-        WriteUnitOfWork wuow(opCtx);
-
-        // If the record still exists, get a potentially new version of the document to index.
-        auto collCursor = collection->getCursor(opCtx);
-        if (auto skippedRecord = collCursor->seekExact(recordId)) {
-            const auto docBson = skippedRecord->data.toBson();
-
-            try {
-                // Because constraint enforcement is set, this will throw if there are any indexing
-                // errors, instead of writing back to the skipped records table, which would
-                // normally happen if constraints were relaxed.
-                int64_t unused;
-                auto status = _interceptor->sideWrite(opCtx,
-                                                      _indexCatalogEntry->accessMethod(),
-                                                      &docBson,
-                                                      options,
-                                                      recordId,
-                                                      IndexBuildInterceptor::Op::kInsert,
-                                                      &unused);
-                if (!status.isOK()) {
-                    return status;
-                }
-
-            } catch (const DBException& ex) {
-                return ex.toStatus();
-            }
-        }
-
-        // Delete the record so it is not applied more than once.
-        _skippedRecordsTable->rs()->deleteRecord(opCtx, record->id);
-
-        cursor->save();
-        wuow.commit();
-        cursor->restore();
-    }
-
-    return Status::OK();
-}
-
-bool SkippedRecordTracker::areAllSkippedRecordsApplied(OperationContext* opCtx) const {
+bool SkippedRecordTracker::areAllRecordsApplied(OperationContext* opCtx) const {
     auto cursor = _skippedRecordsTable->rs()->getCursor(opCtx);
     auto record = cursor->next();
 

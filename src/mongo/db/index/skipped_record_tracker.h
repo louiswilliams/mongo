@@ -44,9 +44,7 @@ class IndexCatalogEntry;
 class SkippedRecordTracker {
 
 public:
-    SkippedRecordTracker(OperationContext* opCtx,
-                         IndexBuildInterceptor* interceptor,
-                         IndexCatalogEntry* indexCatalogEntry);
+    SkippedRecordTracker(OperationContext* opCtx);
 
     /**
      * Records a RecordId which was unable to be indexed due to an indexing error, but due to the
@@ -56,19 +54,13 @@ public:
      */
     Status record(OperationContext* opCtx, const RecordId& recordId);
 
-    /**
-     * Tries to index previously skipped records. For each record, if the new indexing attempt is
-     * successful, keys are written to the side-writes table, which must also be drained.
-     * Unsuccessful writes stay in the skipped records table.
-     */
-    Status retrySkippedRecords(OperationContext* opCtx, const Collection* collection);
+    TemporaryRecordStore* getTemporaryRecordStore() {
+        return _skippedRecordsTable.get();
+    }
 
-    bool areAllSkippedRecordsApplied(OperationContext* opCtx) const;
+    bool areAllRecordsApplied(OperationContext* opCtx) const;
 
 private:
-    IndexBuildInterceptor* _interceptor;
-    IndexCatalogEntry* _indexCatalogEntry;
-
     // This temporary record store is owned by the duplicate key tracker and dropped along with it.
     std::unique_ptr<TemporaryRecordStore> _skippedRecordsTable;
 };

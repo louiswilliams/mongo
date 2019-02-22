@@ -2362,8 +2362,9 @@ public:
             ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
 
             // There should be one skipped record from the collection scan.
-            ASSERT_FALSE(
-                buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+            ASSERT_FALSE(buildingIndex->indexBuildInterceptor()
+                             ->getSkippedRecordTracker()
+                             ->areAllRecordsApplied(_opCtx));
 
             {
                 // This write will get recorded as 'skipped' because it is not indexable.
@@ -2377,8 +2378,9 @@ public:
 
             ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
 
-            ASSERT_FALSE(
-                buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+            ASSERT_FALSE(buildingIndex->indexBuildInterceptor()
+                             ->getSkippedRecordTracker()
+                             ->areAllRecordsApplied(_opCtx));
         }
 
         // As a primary, stop ignoring indexing errors.
@@ -2401,12 +2403,16 @@ public:
         }
 
         // There should skipped records from failed collection scans and writes.
-        ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+        ASSERT_FALSE(
+            buildingIndex->indexBuildInterceptor()->getSkippedRecordTracker()->areAllRecordsApplied(
+                _opCtx));
         auto status =
             buildingIndex->indexBuildInterceptor()->retrySkippedRecords(_opCtx, collection);
         ASSERT_EQ(status.code(), ErrorCodes::CannotIndexParallelArrays);
 
-        ASSERT_FALSE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+        ASSERT_FALSE(
+            buildingIndex->indexBuildInterceptor()->getSkippedRecordTracker()->areAllRecordsApplied(
+                _opCtx));
         ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
 
         // Update bad documents to be good.
@@ -2419,7 +2425,9 @@ public:
 
         ASSERT_OK(indexer.drainBackgroundWrites());
 
-        ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllSkippedRecordsApplied(_opCtx));
+        ASSERT_TRUE(
+            buildingIndex->indexBuildInterceptor()->getSkippedRecordTracker()->areAllRecordsApplied(
+                _opCtx));
         ASSERT_TRUE(buildingIndex->indexBuildInterceptor()->areAllWritesApplied(_opCtx));
 
 

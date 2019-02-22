@@ -105,6 +105,13 @@ public:
     }
 
     /**
+     * Tries to index previously skipped records. For each record, if the new indexing attempt is
+     * successful, keys are written to the side-writes table, which must also be drained.
+     * Unsuccessful writes stay in the skipped records table.
+     */
+    Status retrySkippedRecords(OperationContext* opCtx, const Collection* collection);
+
+    /**
      * Returns 'true' if there are no visible records remaining to be applied from the side writes
      * table. Ensure that this returns 'true' when an index build is completed.
      */

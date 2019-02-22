@@ -57,7 +57,7 @@ IndexBuildInterceptor::IndexBuildInterceptor(OperationContext* opCtx, IndexCatal
       _sideWritesTable(
           opCtx->getServiceContext()->getStorageEngine()->makeTemporaryRecordStore(opCtx)) {
 
-    _skippedRecordTracker = std::make_unique<SkippedRecordTracker>(opCtx, this, entry);
+    _skippedRecordTracker = std::make_unique<SkippedRecordTracker>(opCtx);
 
     if (entry->descriptor()->unique()) {
         _duplicateKeyTracker = std::make_unique<DuplicateKeyTracker>(opCtx, entry);
@@ -454,5 +454,64 @@ Status IndexBuildInterceptor::sideWrite(OperationContext* opCtx,
     std::vector<Timestamp> timestamps(records.size());
     return _sideWritesTable->rs()->insertRecords(opCtx, &records, timestamps);
 }
+
+Status IndexBuildInterceptor::retrySkippedRecords(OperationContext* opCtx,
+                                                  const Collection* collection) {
+    InsertDeleteOptions options;
+    collection->getIndexCatalog()->prepareInsertDeleteOptions(
+        opCtx, _indexCatalogEntry->descriptor(), &options);
+
+    // This should only be called when constraints are being enforced, on a primary. It does not
+    // make sense, nor is it necessary for this to be called on a secondary.
+    invariant(options.getKeysMode == IndexAccessMethod::GetKeysMode::kEnforceConstraints);
+
+    auto recordStore = _skippedRecordTracker->getTemporaryRecordStore()->rs();
+    auto cursor = recordStore->getCursor(opCtx);
+    while (auto record = cursor->next()) {
+        const BSONObj doc = record->data.toBson();
+
+        // This is the RecordId of the skipped record. We don't care about the RecordId of the item
+        // in the temp table.
+        const RecordId recordId(doc["recordId"].Long());
+
+        WriteUnitOfWork wuow(opCtx);
+
+        // If the record still exists, get a potentially new version of the document to index.
+        auto collCursor = collection->getCursor(opCtx);
+        if (auto skippedRecord = collCursor->seekExact(recordId)) {
+            const auto docBson = skippedRecord->data.toBson();
+
+            try {
+                // Because constraint enforcement is set, this will throw if there are any indexing
+                // errors, instead of writing back to the skipped records table, which would
+                // normally happen if constraints were relaxed.
+                int64_t unused;
+                auto status = sideWrite(opCtx,
+                                        _indexCatalogEntry->accessMethod(),
+                                        &docBson,
+                                        options,
+                                        recordId,
+                                        IndexBuildInterceptor::Op::kInsert,
+                                        &unused);
+                if (!status.isOK()) {
+                    return status;
+                }
+
+            } catch (const DBException& ex) {
+                return ex.toStatus();
+            }
+        }
+
+        // Delete the record so it is not applied more than once.
+        recordStore->deleteRecord(opCtx, record->id);
+
+        cursor->save();
+        wuow.commit();
+        cursor->restore();
+    }
+
+    return Status::OK();
+}
+
 
 }  // namespace mongo

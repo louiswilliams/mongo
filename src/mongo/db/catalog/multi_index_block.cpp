@@ -821,10 +821,13 @@ curOp->ensureStarted();
 bool MultiIndexBlock::hasWildcardIndex() {
     for (const auto& index : _indexes) {
         // index.block->getEntry()
-        log() << "HasWildcard? " << index.block->getEntry()->descriptor()->toString();
+        if (0 == index.block->getEntry()->descriptor()->indexName().compare("$**_1")) {
+            log() << "has WildCard";
+            return true;
+        }
     }
 
-    return true;
+    return false;
 }
 
 std::ostream& operator<<(std::ostream& os, const MultiIndexBlock::State& state) {

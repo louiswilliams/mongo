@@ -350,7 +350,7 @@ void IndexBuildInterceptor::_tryYield(OperationContext* opCtx, bool withSleep) {
 
     if (withSleep) {
         log() << "DEBUG. Starting sleep.";
-        sleepmillis(100);
+        sleepmillis(10);
         log() << "DEBUG. Finishing sleep.";
     }
 

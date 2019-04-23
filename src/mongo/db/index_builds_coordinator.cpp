@@ -864,7 +864,7 @@ void IndexBuildsCoordinator::_buildIndex(OperationContext* opCtx,
         auto locker = opCtx->lockState();
         Locker::LockSnapshot snapshot;
         invariant(locker->saveLockStateAndUnlock(&snapshot));
-        sleepsecs(3);
+        sleepsecs(1);
         locker->restoreLockState(opCtx, snapshot);
         log() << "DEBUG. Closing a window.";
     }
@@ -888,7 +888,7 @@ void IndexBuildsCoordinator::_buildIndex(OperationContext* opCtx,
         auto locker = opCtx->lockState();
         Locker::LockSnapshot snapshot;
         invariant(locker->saveLockStateAndUnlock(&snapshot));
-        sleepsecs(3);
+        sleepsecs(1);
         locker->restoreLockState(opCtx, snapshot);
         log() << "DEBUG. Closing a window.";
     }

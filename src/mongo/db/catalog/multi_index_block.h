@@ -89,6 +89,8 @@ public:
 
     static bool areHybridIndexBuildsEnabled();
 
+    bool hasWildcardIndex();
+
     /**
      * By default we enforce the 'unique' flag in specs when building an index by failing.
      * If this is called before init(), we will ignore unique violations. This has no effect if
@@ -338,6 +340,8 @@ private:
     // Set to true when no work remains to be done, the object can safely destruct without leaving
     // incorrect state set anywhere.
     bool _buildIsCleanedUp = true;
+
+    bool __threwWriteConflict = false;
 
     // Protects member variables of this class declared below.
     mutable stdx::mutex _mutex;

@@ -203,6 +203,13 @@ StatusWith<std::pair<long long, long long>> IndexBuildsManager::startBuildingInd
     return std::make_pair(numRecords, dataSize);
 }
 
+bool IndexBuildsManager::hasWildcardIndex(OperationContext* opCtx, const UUID& buildUUID) {
+    auto builder = _getBuilder(buildUUID);
+
+    return builder->hasWildcardIndex();
+}
+
+
 Status IndexBuildsManager::drainBackgroundWrites(OperationContext* opCtx,
                                                  const UUID& buildUUID,
                                                  RecoveryUnit::ReadSource readSource) {

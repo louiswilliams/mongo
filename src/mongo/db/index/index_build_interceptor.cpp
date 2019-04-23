@@ -149,6 +149,11 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     int64_t batchSizeBytes = 0;
 
+    if (_indexCatalogEntry->descriptor()->indexName() == "$**") {
+        log() << "DEBUG. Sleeping on i_1";
+        _tryYield(opCtx, true);
+    }
+
     std::vector<SideWriteRecord> batch;
     batch.reserve(kBatchMaxSize);
 
@@ -157,6 +162,8 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
     boost::optional<SideWriteRecord> stashed;
 
     auto cursor = _sideWritesTable->rs()->getCursor(opCtx);
+
+    RecordId lastRecordId;
 
     bool atEof = false;
     while (!atEof) {
@@ -174,6 +181,11 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         if (record) {
             RecordId currentRecordId = record->id;
             BSONObj docOut = record->data.toBson().getOwned();
+
+            if (!lastRecordId.isNull()) {
+                invariant(currentRecordId > lastRecordId);
+            }
+            lastRecordId = currentRecordId;
 
             // If the total batch size in bytes would be too large, stash this document and let the
             // current batch insert.
@@ -237,7 +249,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
         progress->hit(batch.size());
 
         // Lock yielding will only happen if we are holding intent locks.
-        _tryYield(opCtx);
+        _tryYield(opCtx, true);
         cursor->restore();
 
         // Account for more writes coming in during a batch.
@@ -250,7 +262,7 @@ Status IndexBuildInterceptor::drainWritesIntoIndex(OperationContext* opCtx,
 
     progress->finished();
 
-    int logLevel = (_numApplied - appliedAtStart > 0) ? 0 : 1;
+    int logLevel = (_numApplied - appliedAtStart > 0) ? 0 : 0;
     LOG(logLevel) << "index build: drain applied " << (_numApplied - appliedAtStart)
                   << " side writes (inserted: " << totalInserted << ", deleted: " << totalDeleted
                   << ") for '" << _indexCatalogEntry->descriptor()->indexName() << "' in "
@@ -313,12 +325,15 @@ Status IndexBuildInterceptor::_applyWrite(OperationContext* opCtx,
     return Status::OK();
 }
 
-void IndexBuildInterceptor::_tryYield(OperationContext* opCtx) {
+void IndexBuildInterceptor::_tryYield(OperationContext* opCtx, bool withSleep) {
     // Never yield while holding locks that prevent writes to the collection: only yield while
     // holding intent locks. This check considers all locks in the hierarchy that would cover this
     // mode.
     const NamespaceString nss(_indexCatalogEntry->ns());
     if (opCtx->lockState()->isCollectionLockedForMode(nss, MODE_S)) {
+        if (withSleep) {
+            log() << "DEBUG. Collection is mode_s. Ns: " << _indexCatalogEntry->ns();
+        }
         return;
     }
     DEV {
@@ -333,6 +348,11 @@ void IndexBuildInterceptor::_tryYield(OperationContext* opCtx) {
     Locker::LockSnapshot snapshot;
     invariant(locker->saveLockStateAndUnlock(&snapshot));
 
+    if (withSleep) {
+        log() << "DEBUG. Starting sleep.";
+        sleepmillis(100);
+        log() << "DEBUG. Finishing sleep.";
+    }
 
     // Track the number of yields in CurOp.
     CurOp::get(opCtx)->yielded();

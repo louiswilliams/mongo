@@ -383,7 +383,6 @@ Status MultiIndexBlock::insertAllDocumentsInCollection(OperationContext* opCtx,
     Timer t;
 
     unsigned long long n = 0;
-
     PlanExecutor::YieldPolicy yieldPolicy;
     if (isBackgroundBuilding()) {
         yieldPolicy = PlanExecutor::YIELD_AUTO;
@@ -780,6 +779,52 @@ void MultiIndexBlock::_setStateToAbortedIfNotCommitted(StringData reason) {
     }
     _state = State::kAborted;
     _abortReason = reason.toString();
+}
+
+/*
+void MultiIndexBlock::_updateCurOpOpDescription(bool isBuildingPhaseComplete) const {
+BSONObjBuilder builder;
+
+// TODO(SERVER-37980): Replace with index build UUID.
+auto buildUUID = UUID::gen();
+buildUUID.appendToBuilder(&builder, kBuildUUIDFieldName);
+
+builder.append(kBuildingPhaseCompleteFieldName, isBuildingPhaseComplete);
+
+builder.appendBool(kRunTwoPhaseIndexBuildFieldName, false);
+
+auto replCoord = repl::ReplicationCoordinator::get(_opCtx);
+if (replCoord->isReplEnabled()) {
+    // TODO(SERVER-37939): Update the membersBuilder array to state the actual commit ready
+    // members.
+    BSONArrayBuilder membersBuilder;
+    auto config = replCoord->getConfig();
+    for (auto it = config.membersBegin(); it != config.membersEnd(); ++it) {
+        const auto& memberConfig = *it;
+        if (memberConfig.isArbiter()) {
+            continue;
+        }
+        membersBuilder.append(memberConfig.getHostAndPort().toString());
+    }
+    builder.append(kCommitReadyMembersFieldName, membersBuilder.arr());
+}
+
+stdx::unique_lock<Client> lk(*_opCtx->getClient());
+auto curOp = CurOp::get(_opCtx);
+builder.appendElementsUnique(curOp->opDescription());
+auto opDescObj = builder.obj();
+curOp->setOpDescription_inlock(opDescObj);
+curOp->ensureStarted();
+}
+*/
+
+bool MultiIndexBlock::hasWildcardIndex() {
+    for (const auto& index : _indexes) {
+        // index.block->getEntry()
+        log() << "HasWildcard? " << index.block->getEntry()->descriptor()->toString();
+    }
+
+    return true;
 }
 
 std::ostream& operator<<(std::ostream& os, const MultiIndexBlock::State& state) {

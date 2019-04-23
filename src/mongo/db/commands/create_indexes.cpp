@@ -406,6 +406,19 @@ bool runCreateIndexes(OperationContext* opCtx,
         MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildDumpsInsertsFromBulk);
     }
 
+    if (indexer.hasWildcardIndex()) {
+        log() << "DEBUG. Creating a window.";
+        // Releasing locks means a new snapshot should be acquired when restored.
+        opCtx->recoveryUnit()->abandonSnapshot();
+
+        auto locker = opCtx->lockState();
+        Locker::LockSnapshot snapshot;
+        invariant(locker->saveLockStateAndUnlock(&snapshot));
+        sleepsecs(1);
+        locker->restoreLockState(opCtx, snapshot);
+        log() << "DEBUG. Closing a window.";
+    }
+
     // Perform the first drain while holding an intent lock.
     {
         opCtx->recoveryUnit()->abandonSnapshot();
@@ -419,6 +432,19 @@ bool runCreateIndexes(OperationContext* opCtx,
     if (MONGO_FAIL_POINT(hangAfterIndexBuildFirstDrain)) {
         log() << "Hanging after index build first drain";
         MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildFirstDrain);
+    }
+
+    if (indexer.hasWildcardIndex()) {
+        log() << "DEBUG. Creating a window.";
+        // Releasing locks means a new snapshot should be acquired when restored.
+        opCtx->recoveryUnit()->abandonSnapshot();
+
+        auto locker = opCtx->lockState();
+        Locker::LockSnapshot snapshot;
+        invariant(locker->saveLockStateAndUnlock(&snapshot));
+        sleepsecs(1);
+        locker->restoreLockState(opCtx, snapshot);
+        log() << "DEBUG. Closing a window.";
     }
 
     // Perform the second drain while stopping writes on the collection.

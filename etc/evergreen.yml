@@ -6372,7 +6372,7 @@ tasks:
   - func: "do setup"
   - func: "run tests"
     vars:
-      resmoke_args: --suites=concurrency_simultaneous_replication --storageEngine=wiredTiger
+      resmoke_args: --suites=concurrency_simultaneous_replication --repeat=10 --storageEngine=wiredTiger --storageEngineCacheSizeGB=0.1
       resmoke_jobs_max: 1
 
 - <<: *task_template

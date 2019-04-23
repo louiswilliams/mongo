@@ -15,7 +15,7 @@ load('jstests/concurrency/fsm_workload_helpers/server_types.js');  // for isMong
 var $config = (function() {
 
     var data = {
-        nDocumentsToSeed: 1000,
+        nDocumentsToSeed: 200,
         nDocumentsToCreate: 200,
         nDocumentsToRead: 100,
         nDocumentsToUpdate: 50,
@@ -60,6 +60,11 @@ var $config = (function() {
 
             // In the first thread create the background index.
             if (this.tid === 0) {
+                assertAlways.commandWorked(db.adminCommand({
+                    configureFailPoint: 'WTWriteConflictException',
+                    mode: {activationProbability: 0.001}
+                }));
+
                 var coll = db[collName];
                 // Before creating the background index make sure insert or update
                 // CRUD operations are active.
@@ -75,6 +80,9 @@ var $config = (function() {
 
                 res = coll.createIndex(this.getIndexSpec(), createOptions);
                 assertAlways.commandWorked(res, tojson(res));
+
+                assertAlways.commandWorked(
+                    db.adminCommand({configureFailPoint: 'WTWriteConflictException', mode: "off"}));
             }
         }
 
@@ -242,7 +250,7 @@ var $config = (function() {
 
     return {
         threadCount: 5,
-        iterations: 3,
+        iterations: 10,
         data: data,
         states: states,
         setup: setup,

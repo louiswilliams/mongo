@@ -50,7 +50,9 @@ var BackupRestoreTest = function(options) {
             let iteration = 0;
 
             var coll = db.getSiblingDB(dbName).getCollection(collectionName);
+            jsTestLog("DEBUG. Starting index build");
             coll.ensureIndex({x: 1});
+            jsTestLog("DEBUG. Finished index build");
 
             var largeValue = new Array(1024).join('L');
 
@@ -69,12 +71,13 @@ var BackupRestoreTest = function(options) {
                 // although the updates performed by the CRUD client may in the worst case modify
                 // every document, the oplog entries produced as a result are 10x smaller than the
                 // document itself.
-                const writeConcern = (iteration % 100 === 0) ? {w: numNodes} : {w: 1};
+                const writeConcern = {w: 1};  // (iteration % 100 === 0) ? {w: numNodes} : {w: 1};
+                jsTestLog({"DEBUG. Iterating. ": iteration, "w": writeConcern});
 
                 try {
                     var op = Random.rand();
                     var match = Math.floor(Random.rand() * baseNum);
-                    if (op < 0.2) {
+                    if (iteration == 1 || op < 0.2) {
                         // 20% of the operations: bulk insert bulkNum docs.
                         var bulk = coll.initializeUnorderedBulkOp();
                         for (var i = 0; i < bulkNum; i++) {
@@ -173,7 +176,7 @@ var BackupRestoreTest = function(options) {
                 dbpath: dbpathFormat,
                 setParameter: {logComponentVerbosity: tojsononeline({storage: {recovery: 2}})}
             },
-            oplogSize: 1024
+            oplogSize: 10 * 1024
         });
 
         // Avoid stepdowns due to heavy workloads on slow machines.
@@ -196,7 +199,7 @@ var BackupRestoreTest = function(options) {
         var crudPid = _crudClient(primary.host, crudDb, crudColl, numNodes);
 
         // Launch FSM client
-        var fsmPid = _fsmClient(primary.host);
+        // var fsmPid = _fsmClient(primary.host);
 
         // Let clients run for specified time before backing up secondary
         sleep(clientTime);
@@ -341,6 +344,7 @@ var BackupRestoreTest = function(options) {
                    crudStatus.exitCode);
         stopMongoProgramByPid(crudPid);
 
+        /*
         var fsmStatus = checkProgram(fsmPid);
         assert(fsmStatus.alive,
                testName + ' FSM client was not running at end of test and exited with code: ' +
@@ -353,6 +357,7 @@ var BackupRestoreTest = function(options) {
             // interrupting resmoke.py test execution.
             assert.eq(130, exitCode, 'expected resmoke.py to exit due to being interrupted');
         }
+        */
 
         // Make sure the databases are not in a drop-pending state. This can happen if we
         // killed the FSM client while it was in the middle of dropping them.

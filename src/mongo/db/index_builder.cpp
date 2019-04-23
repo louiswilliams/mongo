@@ -171,6 +171,65 @@ Status IndexBuilder::_build(OperationContext* opCtx,
         return status;
     }
 
+    if (indexer.hasWildcardIndex()) {
+        log() << "DEBUG. Creating a window.";
+        // Releasing locks means a new snapshot should be acquired when restored.
+        opCtx->recoveryUnit()->abandonSnapshot();
+
+        auto locker = opCtx->lockState();
+        Locker::LockSnapshot snapshot;
+        invariant(locker->saveLockStateAndUnlock(&snapshot));
+        sleepsecs(3);
+        locker->restoreLockState(opCtx, snapshot);
+        log() << "DEBUG. Closing a window.";
+    }
+
+    {
+        // Perform the first drain while holding an intent lock.
+        Lock::CollectionLock collLock(opCtx, ns, MODE_IX);
+        if (indexer.hasWildcardIndex()) {
+            log() << "DEBUG. First drain. Coll locked in modes? Post MODE_IX "
+                  << opCtx->lockState()->isCollectionLockedForMode(ns, MODE_S);
+        }
+        status = indexer.drainBackgroundWrites(opCtx);
+    }
+    if (!status.isOK()) {
+        return status;
+    }
+
+    // Perform the second drain while stopping inserts into the collection.
+    {
+        log() << "DEBUG. Second drain";
+        Lock::CollectionLock colLock(opCtx, ns, MODE_S);
+        status = indexer.drainBackgroundWrites(opCtx);
+    }
+    if (!status.isOK()) {
+        return status;
+    }
+
+    if (buildInBackground) {
+        opCtx->recoveryUnit()->abandonSnapshot();
+
+        UninterruptibleLockGuard noInterrupt(opCtx->lockState());
+        dbLock->relockWithMode(MODE_X);
+    }
+
+    // Perform the third and final drain after releasing a shared lock and reacquiring an
+    // exclusive lock on the database.
+    log() << "DEBUG. Third drain";
+    status = indexer.drainBackgroundWrites(opCtx);
+    if (!status.isOK()) {
+        return status;
+    }
+
+    // Only perform constraint checking when enforced (on primaries).
+    if (_indexConstraints == IndexConstraints::kEnforce) {
+        status = indexer.checkConstraints(opCtx);
+        if (!status.isOK()) {
+            return status;
+        }
+    }
+
     status = writeConflictRetry(opCtx, "Commit index build", ns.ns(), [opCtx, coll, &indexer, &ns] {
         WriteUnitOfWork wunit(opCtx);
         auto status = indexer.commit(opCtx,

@@ -773,6 +773,9 @@ void SyncTail::_oplogApplication(ReplicationCoordinator* replCoord,
         const auto lastWallTimeInBatch = lastOpInBatch.getWallClockTime();
         const auto lastAppliedOpTimeAtStartOfBatch = replCoord->getMyLastAppliedOpTime();
 
+        // log() << "DEBUG. Applying batch. First: " << firstOpTimeInBatch
+        //<< " Last: " << lastOpTimeInBatch;
+
         // Make sure the oplog doesn't go back in time or repeat an entry.
         if (firstOpTimeInBatch <= lastAppliedOpTimeAtStartOfBatch) {
             fassert(34361,

@@ -84,6 +84,8 @@ public:
                            OnInitFn onInit,
                            SetupOptions options = {});
 
+    bool hasWildcardIndex(OperationContext* opCtx, const UUID& buildUUID);
+
     /**
      * Recovers the index build from its persisted state and sets it up to run again.
      *

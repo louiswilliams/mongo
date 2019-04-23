@@ -21,7 +21,11 @@ var $config = extendWorkload($config, function($config, $super) {
 
         // Insert a field which has an array as the value, to exercise the special multikey
         // metadata functionality wildcard indexes rely on.
-        originalDoc[fieldName] = [1, 2, "string", this.tid];
+        // This form generates an array of values from 0-99
+        let array = [...Array(20).keys()];
+        array.push("string");
+        array.push(this.tid);
+        originalDoc[fieldName] = array;
         return originalDoc;
     };
 

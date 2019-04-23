@@ -856,6 +856,19 @@ void IndexBuildsCoordinator::_buildIndex(OperationContext* opCtx,
         MONGO_FAIL_POINT_PAUSE_WHILE_SET(hangAfterIndexBuildDumpsInsertsFromBulk);
     }
 
+    if (_indexBuildsManager.hasWildcardIndex(opCtx, replState->buildUUID)) {
+        log() << "DEBUG. Creating a window.";
+        // Releasing locks means a new snapshot should be acquired when restored.
+        opCtx->recoveryUnit()->abandonSnapshot();
+
+        auto locker = opCtx->lockState();
+        Locker::LockSnapshot snapshot;
+        invariant(locker->saveLockStateAndUnlock(&snapshot));
+        sleepsecs(3);
+        locker->restoreLockState(opCtx, snapshot);
+        log() << "DEBUG. Closing a window.";
+    }
+
     // Perform the first drain while holding an intent lock.
     {
         opCtx->recoveryUnit()->abandonSnapshot();
@@ -865,6 +878,19 @@ void IndexBuildsCoordinator::_buildIndex(OperationContext* opCtx,
         // can never commit writes earlier than its read timestamp.
         uassertStatusOK(_indexBuildsManager.drainBackgroundWrites(
             opCtx, replState->buildUUID, RecoveryUnit::ReadSource::kNoOverlap));
+    }
+
+    if (_indexBuildsManager.hasWildcardIndex(opCtx, replState->buildUUID)) {
+        log() << "DEBUG. Creating a window.";
+        // Releasing locks means a new snapshot should be acquired when restored.
+        opCtx->recoveryUnit()->abandonSnapshot();
+
+        auto locker = opCtx->lockState();
+        Locker::LockSnapshot snapshot;
+        invariant(locker->saveLockStateAndUnlock(&snapshot));
+        sleepsecs(3);
+        locker->restoreLockState(opCtx, snapshot);
+        log() << "DEBUG. Closing a window.";
     }
 
     if (MONGO_FAIL_POINT(hangAfterIndexBuildFirstDrain)) {

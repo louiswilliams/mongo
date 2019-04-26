@@ -168,16 +168,6 @@ void DatabaseImpl::init(OperationContext* const opCtx) const {
         uasserted(10028, status.toString());
     }
 
-    auto& uuidCatalog = UUIDCatalog::get(opCtx);
-    for (const auto& nss : uuidCatalog.getAllCollectionNamesFromDb(opCtx, _name)) {
-        auto ownedCollection = _createCollectionInstance(opCtx, nss);
-        invariant(ownedCollection);
-
-        // Call registerCollectionObject directly because we're not in a WUOW.
-        auto uuid = *(ownedCollection->uuid());
-        uuidCatalog.registerCollectionObject(uuid, std::move(ownedCollection));
-    }
-
     // At construction time of the viewCatalog, the UUIDCatalog map wasn't initialized yet, so no
     // system.views collection would be found. Now we're sufficiently initialized, signal a version
     // change. Also force a reload, so if there are problems with the catalog contents as might be

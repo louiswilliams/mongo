@@ -212,8 +212,9 @@ CollectionImpl::CollectionImpl(OperationContext* opCtx,
           _parseValidationAction(_details->getCollectionOptions(opCtx).validationAction))),
       _validationLevel(uassertStatusOK(
           _parseValidationLevel(_details->getCollectionOptions(opCtx).validationLevel))),
-      _cappedNotifier(_recordStore->isCapped() ? stdx::make_unique<CappedInsertNotifier>()
-                                               : nullptr) {
+      _cappedNotifier(_recordStore && _recordStore->isCapped()
+                          ? stdx::make_unique<CappedInsertNotifier>()
+                          : nullptr) {
 
     _indexCatalog->init(opCtx).transitional_ignore();
     if (isCapped())

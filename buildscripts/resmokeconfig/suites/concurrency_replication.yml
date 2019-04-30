@@ -19,7 +19,6 @@ executor:
   archive:
     hooks:
       - CheckReplDBHashInBackground
-      - CheckReplDBHash
       - ValidateCollections
     tests: true
   config:
@@ -32,9 +31,7 @@ executor:
   #
   # TODO SERVER-26466: Add CheckReplOplogs hook to the concurrency suite.
   - class: CheckReplDBHashInBackground
-  - class: CheckReplDBHash
   - class: ValidateCollections
-  - class: CleanupConcurrencyWorkloads
   fixture:
     class: ReplicaSetFixture
     mongod_options:

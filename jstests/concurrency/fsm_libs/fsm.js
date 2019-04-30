@@ -76,6 +76,10 @@ var fsm = (function() {
                 fn.call(args.data, args.db, args.collName, connCache);
             }
 
+            if (i % 1000 == 0) {
+                print('completed iterations: ' + i);
+            }
+
             var nextState = getWeightedRandomChoice(args.transitions[currentState], Random.rand());
             currentState = nextState;
         }

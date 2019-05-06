@@ -216,7 +216,6 @@ CollectionImpl::CollectionImpl(OperationContext* opCtx,
                           ? stdx::make_unique<CappedInsertNotifier>()
                           : nullptr) {
 
-    _indexCatalog->init(opCtx).transitional_ignore();
     if (isCapped())
         _recordStore->setCappedCallback(this);
 

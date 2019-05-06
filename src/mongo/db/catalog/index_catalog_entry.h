@@ -94,8 +94,6 @@ public:
 
     virtual void setHead(OperationContext* const opCtx, const RecordId newHead) = 0;
 
-    virtual void setIsReady(const bool newIsReady) = 0;
-
     virtual HeadManager* headManager() const = 0;
 
     // --

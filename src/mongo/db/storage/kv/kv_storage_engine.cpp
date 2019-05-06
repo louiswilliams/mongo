@@ -36,7 +36,6 @@
 #include <algorithm>
 
 #include "mongo/db/catalog/catalog_control.h"
-#include "mongo/db/catalog/collection_factory.h"
 #include "mongo/db/catalog/uuid_catalog.h"
 #include "mongo/db/catalog/uuid_catalog_helper.h"
 #include "mongo/db/client.h"
@@ -183,9 +182,6 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
         }
     }
 
-    auto& uuidCatalog = UUIDCatalog::get(getGlobalServiceContext());
-    auto collectionFactory = CollectionFactory::get(getGlobalServiceContext());
-
     KVPrefix maxSeenPrefix = KVPrefix::kNotPrefixed;
     for (const auto& coll : collectionsKnownToCatalog) {
         NamespaceString nss(coll);
@@ -229,21 +225,6 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
         if (nss.isOrphanCollection()) {
             log() << "Orphaned collection found: " << nss;
         }
-
-        auto collectionCatalogEntry = uuidCatalog.lookupCollectionCatalogEntryByNamespace(nss);
-
-        std::unique_ptr<Collection> ownedCollection;
-        if (_options.forRepair) {
-            ownedCollection =
-                collectionFactory->createForRepair(opCtx, collectionCatalogEntry, nss);
-        } else {
-            ownedCollection = collectionFactory->create(opCtx, collectionCatalogEntry, nss);
-        }
-        invariant(ownedCollection);
-
-        // Call registerCollectionObject directly because we're not in a WUOW.
-        auto uuid = *(ownedCollection->uuid());
-        uuidCatalog.registerCollectionObject(uuid, std::move(ownedCollection));
     }
 
     KVPrefix::setLargestPrefix(maxSeenPrefix);

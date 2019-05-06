@@ -44,6 +44,7 @@
 namespace mongo {
 class Client;
 class Collection;
+class SortedDataInterface;
 
 class IndexDescriptor;
 struct InsertDeleteOptions;
@@ -210,7 +211,12 @@ public:
     inline IndexCatalog& operator=(IndexCatalog&&) = delete;
 
     // Must be called before used.
-    virtual Status init(OperationContext* const opCtx) = 0;
+    virtual Status init(OperationContext* opCtx) = 0;
+    virtual void registerIndex(OperationContext* const opCtx,
+                               const std::string& indexName,
+                               const CollectionCatalogEntry* collectionCatalogEntry,
+                               std::unique_ptr<IndexDescriptor> descriptor,
+                               SortedDataInterface* sortedDataInterface) = 0;
 
     virtual bool ok() const = 0;
 
@@ -232,6 +238,8 @@ public:
      * Returns the spec for the id index to create by default for this collection.
      */
     virtual BSONObj getDefaultIdIndexSpec() const = 0;
+
+    virtual std::unique_ptr<IndexDescriptor> makeDescriptor(const BSONObj& spec) const = 0;
 
     virtual const IndexDescriptor* findIdIndex(OperationContext* const opCtx) const = 0;
 

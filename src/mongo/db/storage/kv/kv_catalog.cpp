@@ -35,8 +35,10 @@
 
 #include "mongo/bson/util/bson_extract.h"
 #include "mongo/bson/util/builder.h"
+#include "mongo/db/catalog/collection_factory.h"
 #include "mongo/db/catalog/uuid_catalog.h"
 #include "mongo/db/concurrency/d_concurrency.h"
+#include "mongo/db/index/index_descriptor.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/db/storage/kv/kv_catalog_feature_tracker.h"
@@ -729,10 +731,38 @@ void KVCatalog::initCollection(OperationContext* opCtx,
         invariant(rs);
     }
 
-    UUIDCatalog::get(getGlobalServiceContext())
-        .registerCatalogEntry(uuid,
-                              std::make_unique<KVCollectionCatalogEntry>(
-                                  _engine, this, nss.ns(), ident, std::move(rs)));
+    auto& uuidCatalog = UUIDCatalog::get(getGlobalServiceContext());
+    uuidCatalog.registerCatalogEntry(
+        uuid, std::make_unique<KVCollectionCatalogEntry>(_engine, this, ns, ident, std::move(rs)));
+
+    const NamespaceString nss(ns);
+    auto collectionCatalogEntry = uuidCatalog.lookupCollectionCatalogEntryByNamespace(nss);
+
+    std::unique_ptr<Collection> ownedCollection;
+    auto collectionFactory = CollectionFactory::get(getGlobalServiceContext());
+    if (forRepair) {
+        ownedCollection = collectionFactory->createForRepair(opCtx, collectionCatalogEntry, nss);
+    } else {
+        ownedCollection = collectionFactory->create(opCtx, collectionCatalogEntry, nss);
+    }
+    invariant(ownedCollection);
+
+    std::vector<string> indexNames;
+    ownedCollection->getCatalogEntry()->getAllIndexes(opCtx, &indexNames);
+    for (auto&& indexName : indexNames) {
+
+        const auto prefix = collectionCatalogEntry->getIndexPrefix(opCtx, indexName);
+        const auto spec = collectionCatalogEntry->getIndexSpec(opCtx, indexName);
+        auto descriptor = ownedCollection->getIndexCatalog()->makeDescriptor(spec);
+
+        auto sortedDataInterface = _engine->getEngine()->getGroupedSortedDataInterface(
+            opCtx, ident, descriptor.get(), prefix);
+        ownedCollection->getIndexCatalog()->registerIndex(
+            opCtx, indexName, collectionCatalogEntry, std::move(descriptor), sortedDataInterface);
+    }
+
+    // Call registerCollectionObject directly because we're not in a WUOW.
+    uuidCatalog.registerCollectionObject(uuid, std::move(ownedCollection));
 }
 
 void KVCatalog::reinitCollectionAfterRepair(OperationContext* opCtx, const NamespaceString& nss) {

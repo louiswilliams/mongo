@@ -124,8 +124,6 @@ public:
 
     void setHead(OperationContext* opCtx, RecordId newHead) final;
 
-    void setIsReady(bool newIsReady) final;
-
     HeadManager* headManager() const final {
         return _headManager.get();
     }
@@ -229,7 +227,6 @@ private:
     // cached stuff
 
     Ordering _ordering;  // TODO: this might be b-tree specific
-    bool _isReady;       // cache of NamespaceDetails info
     RecordId _head;      // cache of IndexDetails
 
     // Set to true if this index supports path-level multikey tracking.

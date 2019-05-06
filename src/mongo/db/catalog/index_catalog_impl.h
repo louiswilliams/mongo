@@ -61,6 +61,11 @@ public:
 
     // must be called before used
     Status init(OperationContext* opCtx) override;
+    void registerIndex(OperationContext* const opCtx,
+                       const std::string& indexName,
+                       const CollectionCatalogEntry* collectionCatalogEntry,
+                       std::unique_ptr<IndexDescriptor> descriptor,
+                       SortedDataInterface* sortedDataInterface) override;
 
     bool ok() const override;
 
@@ -85,6 +90,8 @@ public:
      * Returns the spec for the id index to create by default for this collection.
      */
     BSONObj getDefaultIdIndexSpec() const override;
+
+    std::unique_ptr<IndexDescriptor> makeDescriptor(const BSONObj& spec) const override;
 
     const IndexDescriptor* findIdIndex(OperationContext* opCtx) const override;
 

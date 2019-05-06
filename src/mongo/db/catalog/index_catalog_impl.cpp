@@ -108,6 +108,58 @@ IndexCatalogImpl::~IndexCatalogImpl() {
     _magic = 123456;
 }
 
+void IndexCatalogImpl::registerIndex(OperationContext* const opCtx,
+                                     const std::string& indexName,
+                                     const CollectionCatalogEntry* collectionCatalogEntry,
+                                     std::unique_ptr<IndexDescriptor> descriptor,
+                                     SortedDataInterface* sortedDataInterface) {
+    if (!collectionCatalogEntry->isIndexReady(opCtx, indexName)) {
+        _unfinishedIndexes.push_back(descriptor->infoObj());
+        return;
+    }
+
+    Status status = _isSpecOk(opCtx, descriptor->infoObj());
+    if (!status.isOK()) {
+        severe() << "Found an invalid index " << descriptor->infoObj() << " on the "
+                 << _collection->ns() << " collection: " << redact(status);
+        fassertFailedNoTrace(51179);
+    }
+
+    auto entry = std::make_shared<IndexCatalogEntryImpl>(opCtx,
+                                                         _collection->ns().ns(),
+                                                         _collection->getCatalogEntry(),
+                                                         std::move(descriptor),
+                                                         _collection->infoCache());
+    fassert(51178, entry->isReady(opCtx));
+
+    IndexDescriptor* desc = entry->descriptor();
+
+    const std::string& type = desc->getAccessMethodName();
+    std::unique_ptr<IndexAccessMethod> accessMethod;
+    if ("" == type)
+        accessMethod.reset(new BtreeAccessMethod(entry.get(), sortedDataInterface));
+    else if (IndexNames::HASHED == type)
+        accessMethod.reset(new HashAccessMethod(entry.get(), sortedDataInterface));
+    else if (IndexNames::GEO_2DSPHERE == type)
+        accessMethod.reset(new S2AccessMethod(entry.get(), sortedDataInterface));
+    else if (IndexNames::TEXT == type)
+        accessMethod.reset(new FTSAccessMethod(entry.get(), sortedDataInterface));
+    else if (IndexNames::GEO_HAYSTACK == type)
+        accessMethod.reset(new HaystackAccessMethod(entry.get(), sortedDataInterface));
+    else if (IndexNames::GEO_2D == type)
+        accessMethod.reset(new TwoDAccessMethod(entry.get(), sortedDataInterface));
+    else if (IndexNames::WILDCARD == type)
+        accessMethod.reset(new WildcardAccessMethod(entry.get(), sortedDataInterface));
+    else {
+        log() << "Can't find index for keyPattern " << desc->keyPattern();
+        fassertFailed(51177);
+    }
+
+    entry->init(std::move(accessMethod));
+
+    _readyIndexes.add(std::move(entry));
+}
+
 Status IndexCatalogImpl::init(OperationContext* opCtx) {
     vector<string> indexNames;
     _collection->getCatalogEntry()->getAllIndexes(opCtx, &indexNames);
@@ -192,8 +244,6 @@ IndexCatalogEntry* IndexCatalogImpl::_setupInMemoryStructures(
         log() << "Can't find index for keyPattern " << desc->keyPattern();
         fassertFailed(51072);
     }
-
-    entry->init(std::move(accessMethod));
 
     IndexCatalogEntry* save = entry.get();
     if (isReadyIndex) {
@@ -869,6 +919,12 @@ BSONObj IndexCatalogImpl::getDefaultIdIndexSpec() const {
     }
     return b.obj();
 }
+
+std::unique_ptr<IndexDescriptor> IndexCatalogImpl::makeDescriptor(const BSONObj& spec) const {
+    return stdx::make_unique<IndexDescriptor>(
+        _collection, _getAccessMethodName(spec.getObjectField("key")), spec);
+}
+
 
 void IndexCatalogImpl::dropAllIndexes(OperationContext* opCtx,
                                       bool includingIdIndex,
@@ -1577,7 +1633,6 @@ void IndexCatalogImpl::indexBuildSuccess(OperationContext* opCtx, IndexCatalogEn
 
     auto interceptor = index->indexBuildInterceptor();
     index->setIndexBuildInterceptor(nullptr);
-    index->setIsReady(true);
 
     opCtx->recoveryUnit()->onRollback([this, index, interceptor]() {
         auto releasedEntry = _readyIndexes.release(index->descriptor());
@@ -1585,7 +1640,6 @@ void IndexCatalogImpl::indexBuildSuccess(OperationContext* opCtx, IndexCatalogEn
         _buildingIndexes.add(std::move(releasedEntry));
 
         index->setIndexBuildInterceptor(interceptor);
-        index->setIsReady(false);
     });
 }
 

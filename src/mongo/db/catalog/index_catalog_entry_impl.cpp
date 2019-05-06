@@ -87,11 +87,9 @@ IndexCatalogEntryImpl::IndexCatalogEntryImpl(OperationContext* const opCtx,
       _infoCache(infoCache),
       _headManager(stdx::make_unique<HeadManagerImpl>(this)),
       _ordering(Ordering::make(_descriptor->keyPattern())),
-      _isReady(false),
       _prefix(collection->getIndexPrefix(opCtx, _descriptor->indexName())) {
     _descriptor->_cachedEntry = this;
 
-    _isReady = _catalogIsReady(opCtx);
     _head = _catalogHead(opCtx);
 
     {
@@ -155,15 +153,14 @@ bool IndexCatalogEntryImpl::isReady(OperationContext* opCtx) const {
     // out-of-sync index catalog entries.  To fix this, we uassert if we detect that the
     // in-memory catalog is out-of-sync with the on-disk catalog.
     if (txnParticipant && txnParticipant.inMultiDocumentTransaction()) {
-        if (!_catalogIsPresent(opCtx) || _catalogIsReady(opCtx) != _isReady) {
+        if (!_catalogIsPresent(opCtx) || !_catalogIsReady(opCtx)) {
             uasserted(ErrorCodes::SnapshotUnavailable,
                       str::stream() << "Unable to read from a snapshot due to pending collection"
                                        " catalog changes; please retry the operation.");
         }
     }
 
-    DEV invariant(_isReady == _catalogIsReady(opCtx));
-    return _isReady;
+    return _catalogIsReady(opCtx);
 }
 
 bool IndexCatalogEntryImpl::isMultikey(OperationContext* opCtx) const {
@@ -217,10 +214,6 @@ void IndexCatalogEntryImpl::setMinimumVisibleSnapshot(Timestamp newMinimumVisibl
     if (!_minVisibleSnapshot || (newMinimumVisibleSnapshot > _minVisibleSnapshot.get())) {
         _minVisibleSnapshot = newMinimumVisibleSnapshot;
     }
-}
-
-void IndexCatalogEntryImpl::setIsReady(bool newIsReady) {
-    _isReady = newIsReady;
 }
 
 class IndexCatalogEntryImpl::SetHeadChange : public RecoveryUnit::Change {

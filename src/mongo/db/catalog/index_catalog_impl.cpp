@@ -122,7 +122,7 @@ void IndexCatalogImpl::registerIndex(OperationContext* const opCtx,
     if (!status.isOK()) {
         severe() << "Found an invalid index " << descriptor->infoObj() << " on the "
                  << _collection->ns() << " collection: " << redact(status);
-        fassertFailedNoTrace(51179);
+        fassertFailedNoTrace(31003);
     }
 
     auto entry = std::make_shared<IndexCatalogEntryImpl>(opCtx,
@@ -130,7 +130,7 @@ void IndexCatalogImpl::registerIndex(OperationContext* const opCtx,
                                                          _collection->getCatalogEntry(),
                                                          std::move(descriptor),
                                                          _collection->infoCache());
-    fassert(51178, entry->isReady(opCtx));
+    fassert(31020, entry->isReady(opCtx));
 
     IndexDescriptor* desc = entry->descriptor();
 
@@ -152,7 +152,7 @@ void IndexCatalogImpl::registerIndex(OperationContext* const opCtx,
         accessMethod.reset(new WildcardAccessMethod(entry.get(), sortedDataInterface));
     else {
         log() << "Can't find index for keyPattern " << desc->keyPattern();
-        fassertFailed(51177);
+        fassertFailed(31021);
     }
 
     entry->init(std::move(accessMethod));

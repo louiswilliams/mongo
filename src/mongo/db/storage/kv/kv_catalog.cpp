@@ -733,9 +733,9 @@ void KVCatalog::initCollection(OperationContext* opCtx,
 
     auto& uuidCatalog = UUIDCatalog::get(getGlobalServiceContext());
     uuidCatalog.registerCatalogEntry(
-        uuid, std::make_unique<KVCollectionCatalogEntry>(_engine, this, ns, ident, std::move(rs)));
+        uuid,
+        std::make_unique<KVCollectionCatalogEntry>(_engine, this, nss.ns(), ident, std::move(rs)));
 
-    const NamespaceString nss(ns);
     auto collectionCatalogEntry = uuidCatalog.lookupCollectionCatalogEntryByNamespace(nss);
 
     std::unique_ptr<Collection> ownedCollection;

@@ -738,31 +738,30 @@ void KVCatalog::initCollection(OperationContext* opCtx,
 
     auto collectionCatalogEntry = uuidCatalog.lookupCollectionCatalogEntryByNamespace(nss);
 
-    std::unique_ptr<Collection> ownedCollection;
+    std::unique_ptr<Collection> collection;
     auto collectionFactory = CollectionFactory::get(getGlobalServiceContext());
     if (forRepair) {
-        ownedCollection = collectionFactory->createForRepair(opCtx, collectionCatalogEntry, nss);
+        collection = collectionFactory->createForRepair(opCtx, collectionCatalogEntry, nss);
     } else {
-        ownedCollection = collectionFactory->create(opCtx, collectionCatalogEntry, nss);
+        collection = collectionFactory->create(opCtx, collectionCatalogEntry, nss);
     }
-    invariant(ownedCollection);
+    invariant(collection);
 
     std::vector<string> indexNames;
-    ownedCollection->getCatalogEntry()->getAllIndexes(opCtx, &indexNames);
+    collection->getCatalogEntry()->getAllIndexes(opCtx, &indexNames);
     for (auto&& indexName : indexNames) {
-
         const auto prefix = collectionCatalogEntry->getIndexPrefix(opCtx, indexName);
         const auto spec = collectionCatalogEntry->getIndexSpec(opCtx, indexName);
-        auto descriptor = ownedCollection->getIndexCatalog()->makeDescriptor(spec);
 
+        auto descriptor = collection->getIndexCatalog()->makeDescriptor(spec);
         auto sortedDataInterface = _engine->getEngine()->getGroupedSortedDataInterface(
             opCtx, ident, descriptor.get(), prefix);
-        ownedCollection->getIndexCatalog()->registerIndex(
+        collection->getIndexCatalog()->registerIndex(
             opCtx, indexName, collectionCatalogEntry, std::move(descriptor), sortedDataInterface);
     }
 
     // Call registerCollectionObject directly because we're not in a WUOW.
-    uuidCatalog.registerCollectionObject(uuid, std::move(ownedCollection));
+    uuidCatalog.registerCollectionObject(uuid, std::move(collection));
 }
 
 void KVCatalog::reinitCollectionAfterRepair(OperationContext* opCtx, const NamespaceString& nss) {

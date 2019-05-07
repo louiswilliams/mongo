@@ -62,10 +62,7 @@ Status IndexCatalogImpl::IndexBuildBlock::init(OperationContext* opCtx, Collecti
     // Being in a WUOW means all timestamping responsibility can be pushed up to the caller.
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
 
-    // need this first for names, etc...
-    BSONObj keyPattern = _spec.getObjectField("key");
-    auto descriptor = stdx::make_unique<IndexDescriptor>(
-        collection, IndexNames::findPluginName(keyPattern), _spec);
+    auto descriptor = collection->getIndexCatalog()->makeDescriptor(_spec);
 
     _indexName = descriptor->indexName();
     _indexNamespace = descriptor->indexNamespace();
@@ -79,17 +76,20 @@ Status IndexCatalogImpl::IndexBuildBlock::init(OperationContext* opCtx, Collecti
             replCoord->getMemberState().secondary() && isBackgroundIndex;
     }
 
+    auto* descriptorPtr = descriptor.get();
+
     // Setup on-disk structures.
     const auto protocol = IndexBuildProtocol::kTwoPhase;
-    Status status = collection->getCatalogEntry()->prepareForIndexBuild(
-        opCtx, descriptor.get(), protocol, isBackgroundSecondaryBuild);
+    Status status =
+        collection->getCatalogEntry()->prepareForIndexBuild(opCtx,
+                                                            collection->getIndexCatalog(),
+                                                            std::move(descriptor),
+                                                            protocol,
+                                                            isBackgroundSecondaryBuild);
     if (!status.isOK())
         return status;
 
-    const bool initFromDisk = false;
-    const bool isReadyIndex = false;
-    _entry = _catalog->_setupInMemoryStructures(
-        opCtx, std::move(descriptor), initFromDisk, isReadyIndex);
+    _entry = collection->getIndexCatalog()->getEntry(descriptorPtr);
 
     if (_method == IndexBuildMethod::kHybrid) {
         _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>(opCtx, _entry);

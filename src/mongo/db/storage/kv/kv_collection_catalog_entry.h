@@ -68,7 +68,8 @@ public:
     Status removeIndex(OperationContext* opCtx, StringData indexName) final;
 
     Status prepareForIndexBuild(OperationContext* opCtx,
-                                const IndexDescriptor* spec,
+                                IndexCatalog* indexCatalog,
+                                std::unique_ptr<IndexDescriptor> spec,
                                 IndexBuildProtocol indexBuildProtocol,
                                 bool isBackgroundSecondaryBuild) final;
 

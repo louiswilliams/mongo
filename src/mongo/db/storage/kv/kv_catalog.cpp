@@ -756,7 +756,7 @@ void KVCatalog::initCollection(OperationContext* opCtx,
         auto descriptor = collection->getIndexCatalog()->makeDescriptor(spec);
         auto sortedDataInterface = _engine->getEngine()->getGroupedSortedDataInterface(
             opCtx, ident, descriptor.get(), prefix);
-        collection->getIndexCatalog()->registerIndex(
+        collection->getIndexCatalog()->registerExistingIndex(
             opCtx, indexName, collectionCatalogEntry, std::move(descriptor), sortedDataInterface);
     }
 

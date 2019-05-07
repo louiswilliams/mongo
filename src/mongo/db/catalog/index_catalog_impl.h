@@ -59,13 +59,15 @@ public:
     explicit IndexCatalogImpl(Collection* collection, int maxNumIndexesAllowed);
     ~IndexCatalogImpl() override;
 
-    // must be called before used
-    Status init(OperationContext* opCtx) override;
-    void registerIndex(OperationContext* const opCtx,
-                       const std::string& indexName,
-                       const CollectionCatalogEntry* collectionCatalogEntry,
-                       std::unique_ptr<IndexDescriptor> descriptor,
-                       SortedDataInterface* sortedDataInterface) override;
+    void registerExistingIndex(OperationContext* const opCtx,
+                               const std::string& indexName,
+                               const CollectionCatalogEntry* collectionCatalogEntry,
+                               std::unique_ptr<IndexDescriptor> descriptor,
+                               SortedDataInterface* sortedDataInterface) override;
+
+    IndexCatalogEntry* registerBuildingIndex(OperationContext* const opCtx,
+                                             std::unique_ptr<IndexDescriptor> descriptor,
+                                             SortedDataInterface* sortedDataInterface) override;
 
     bool ok() const override;
 
@@ -170,6 +172,7 @@ public:
                                         const IndexDescriptor* oldDesc) override;
 
     const IndexCatalogEntry* getEntry(const IndexDescriptor* desc) const override;
+    IndexCatalogEntry* getEntry(const IndexDescriptor* const desc) override;
 
     std::shared_ptr<const IndexCatalogEntry> getEntryShared(const IndexDescriptor*) const override;
 

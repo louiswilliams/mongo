@@ -217,7 +217,8 @@ Status KVCollectionCatalogEntry::removeIndex(OperationContext* opCtx, StringData
 }
 
 Status KVCollectionCatalogEntry::prepareForIndexBuild(OperationContext* opCtx,
-                                                      const IndexDescriptor* spec,
+                                                      IndexCatalog* indexCatalog,
+                                                      std::unique_ptr<IndexDescriptor> spec,
                                                       IndexBuildProtocol indexBuildProtocol,
                                                       bool isBackgroundSecondaryBuild) {
     MetaData md = _getMetaData(opCtx);
@@ -255,10 +256,15 @@ Status KVCollectionCatalogEntry::prepareForIndexBuild(OperationContext* opCtx,
     string ident = _catalog->getIndexIdent(opCtx, ns(), spec->indexName());
 
     auto kvEngine = _engine->getEngine();
-    const Status status = kvEngine->createGroupedSortedDataInterface(opCtx, ident, spec, prefix);
+    const Status status =
+        kvEngine->createGroupedSortedDataInterface(opCtx, ident, spec.get(), prefix);
     if (status.isOK()) {
         opCtx->recoveryUnit()->registerChange(new AddIndexChange(opCtx, this, ident));
     }
+
+    auto sortedDataInterface =
+        _engine->getEngine()->getGroupedSortedDataInterface(opCtx, ident, spec.get(), prefix);
+    indexCatalog->registerBuildingIndex(opCtx, std::move(spec), sortedDataInterface);
 
     return status;
 }

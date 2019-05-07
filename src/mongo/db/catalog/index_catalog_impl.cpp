@@ -96,7 +96,7 @@ const BSONObj IndexCatalogImpl::_idObj = BSON("_id" << 1);
 // -------------
 
 IndexCatalogImpl::IndexCatalogImpl(Collection* collection, int maxNumIndexesAllowed)
-    : _magic(INDEX_CATALOG_UNINIT),
+    : _magic(INDEX_CATALOG_INIT),
       _collection(collection),
       _maxNumIndexesAllowed(maxNumIndexesAllowed) {}
 
@@ -108,11 +108,41 @@ IndexCatalogImpl::~IndexCatalogImpl() {
     _magic = 123456;
 }
 
-void IndexCatalogImpl::registerIndex(OperationContext* const opCtx,
-                                     const std::string& indexName,
-                                     const CollectionCatalogEntry* collectionCatalogEntry,
-                                     std::unique_ptr<IndexDescriptor> descriptor,
-                                     SortedDataInterface* sortedDataInterface) {
+namespace {
+
+std::unique_ptr<IndexAccessMethod> makeAccessMethod(const IndexDescriptor* desc,
+                                                    IndexCatalogEntry* entry,
+                                                    SortedDataInterface* sortedDataInterface) {
+    const std::string& type = desc->getAccessMethodName();
+    std::unique_ptr<IndexAccessMethod> accessMethod;
+    if ("" == type)
+        accessMethod.reset(new BtreeAccessMethod(entry, sortedDataInterface));
+    else if (IndexNames::HASHED == type)
+        accessMethod.reset(new HashAccessMethod(entry, sortedDataInterface));
+    else if (IndexNames::GEO_2DSPHERE == type)
+        accessMethod.reset(new S2AccessMethod(entry, sortedDataInterface));
+    else if (IndexNames::TEXT == type)
+        accessMethod.reset(new FTSAccessMethod(entry, sortedDataInterface));
+    else if (IndexNames::GEO_HAYSTACK == type)
+        accessMethod.reset(new HaystackAccessMethod(entry, sortedDataInterface));
+    else if (IndexNames::GEO_2D == type)
+        accessMethod.reset(new TwoDAccessMethod(entry, sortedDataInterface));
+    else if (IndexNames::WILDCARD == type)
+        accessMethod.reset(new WildcardAccessMethod(entry, sortedDataInterface));
+    else {
+        log() << "Can't find index for keyPattern " << desc->keyPattern();
+        fassertFailed(31021);
+    }
+    return accessMethod;
+}
+}
+
+
+void IndexCatalogImpl::registerExistingIndex(OperationContext* const opCtx,
+                                             const std::string& indexName,
+                                             const CollectionCatalogEntry* collectionCatalogEntry,
+                                             std::unique_ptr<IndexDescriptor> descriptor,
+                                             SortedDataInterface* sortedDataInterface) {
     if (!collectionCatalogEntry->isIndexReady(opCtx, indexName)) {
         _unfinishedIndexes.push_back(descriptor->infoObj());
         return;
@@ -132,67 +162,43 @@ void IndexCatalogImpl::registerIndex(OperationContext* const opCtx,
                                                          _collection->infoCache());
     fassert(31020, entry->isReady(opCtx));
 
-    IndexDescriptor* desc = entry->descriptor();
-
-    const std::string& type = desc->getAccessMethodName();
-    std::unique_ptr<IndexAccessMethod> accessMethod;
-    if ("" == type)
-        accessMethod.reset(new BtreeAccessMethod(entry.get(), sortedDataInterface));
-    else if (IndexNames::HASHED == type)
-        accessMethod.reset(new HashAccessMethod(entry.get(), sortedDataInterface));
-    else if (IndexNames::GEO_2DSPHERE == type)
-        accessMethod.reset(new S2AccessMethod(entry.get(), sortedDataInterface));
-    else if (IndexNames::TEXT == type)
-        accessMethod.reset(new FTSAccessMethod(entry.get(), sortedDataInterface));
-    else if (IndexNames::GEO_HAYSTACK == type)
-        accessMethod.reset(new HaystackAccessMethod(entry.get(), sortedDataInterface));
-    else if (IndexNames::GEO_2D == type)
-        accessMethod.reset(new TwoDAccessMethod(entry.get(), sortedDataInterface));
-    else if (IndexNames::WILDCARD == type)
-        accessMethod.reset(new WildcardAccessMethod(entry.get(), sortedDataInterface));
-    else {
-        log() << "Can't find index for keyPattern " << desc->keyPattern();
-        fassertFailed(31021);
-    }
-
-    entry->init(std::move(accessMethod));
+    entry->init(makeAccessMethod(entry->descriptor(), entry.get(), sortedDataInterface));
 
     _readyIndexes.add(std::move(entry));
 }
 
-Status IndexCatalogImpl::init(OperationContext* opCtx) {
-    vector<string> indexNames;
-    _collection->getCatalogEntry()->getAllIndexes(opCtx, &indexNames);
+IndexCatalogEntry* IndexCatalogImpl::registerBuildingIndex(
+    OperationContext* const opCtx,
+    std::unique_ptr<IndexDescriptor> descriptor,
+    SortedDataInterface* sortedDataInterface) {
 
-    for (size_t i = 0; i < indexNames.size(); i++) {
-        const string& indexName = indexNames[i];
-        BSONObj spec = _collection->getCatalogEntry()->getIndexSpec(opCtx, indexName).getOwned();
-
-        if (!_collection->getCatalogEntry()->isIndexReady(opCtx, indexName)) {
-            _unfinishedIndexes.push_back(spec);
-            continue;
-        }
-
-        BSONObj keyPattern = spec.getObjectField("key");
-        auto descriptor =
-            stdx::make_unique<IndexDescriptor>(_collection, _getAccessMethodName(keyPattern), spec);
-        const bool initFromDisk = true;
-        const bool isReadyIndex = true;
-        IndexCatalogEntry* entry =
-            _setupInMemoryStructures(opCtx, std::move(descriptor), initFromDisk, isReadyIndex);
-
-        fassert(17340, entry->isReady(opCtx));
+    Status status = _isSpecOk(opCtx, descriptor->infoObj());
+    if (!status.isOK()) {
+        severe() << "Found an invalid index " << descriptor->infoObj() << " on the "
+                 << _collection->ns() << " collection: " << redact(status);
+        fassertFailedNoTrace(51192);
     }
 
-    if (_unfinishedIndexes.size()) {
-        // if there are left over indexes, we don't let anyone add/drop indexes
-        // until someone goes and fixes them
-        log() << "found " << _unfinishedIndexes.size()
-              << " index(es) that wasn't finished before shutdown";
-    }
+    auto* const descriptorPtr = descriptor.get();
+    auto entry = std::make_shared<IndexCatalogEntryImpl>(opCtx,
+                                                         _collection->ns().ns(),
+                                                         _collection->getCatalogEntry(),
+                                                         std::move(descriptor),
+                                                         _collection->infoCache());
 
-    _magic = INDEX_CATALOG_INIT;
-    return Status::OK();
+    entry->init(makeAccessMethod(entry->descriptor(), entry.get(), sortedDataInterface));
+
+    IndexCatalogEntry* save = entry.get();
+    _buildingIndexes.add(std::move(entry));
+
+    opCtx->recoveryUnit()->onRollback([ this, opCtx, descriptor = descriptorPtr ] {
+        // Need to preserve indexName as descriptor no longer exists after remove().
+        const std::string indexName = descriptor->indexName();
+        _buildingIndexes.remove(descriptor);
+        _collection->infoCache()->droppedIndex(opCtx, indexName);
+    });
+
+    return save;
 }
 
 IndexCatalogEntry* IndexCatalogImpl::_setupInMemoryStructures(
@@ -224,26 +230,7 @@ IndexCatalogEntry* IndexCatalogImpl::_setupInMemoryStructures(
     SortedDataInterface* sdi =
         engine->getEngine()->getGroupedSortedDataInterface(opCtx, ident, desc, entry->getPrefix());
 
-    const std::string& type = desc->getAccessMethodName();
-    std::unique_ptr<IndexAccessMethod> accessMethod;
-    if ("" == type)
-        accessMethod.reset(new BtreeAccessMethod(entry.get(), sdi));
-    else if (IndexNames::HASHED == type)
-        accessMethod.reset(new HashAccessMethod(entry.get(), sdi));
-    else if (IndexNames::GEO_2DSPHERE == type)
-        accessMethod.reset(new S2AccessMethod(entry.get(), sdi));
-    else if (IndexNames::TEXT == type)
-        accessMethod.reset(new FTSAccessMethod(entry.get(), sdi));
-    else if (IndexNames::GEO_HAYSTACK == type)
-        accessMethod.reset(new HaystackAccessMethod(entry.get(), sdi));
-    else if (IndexNames::GEO_2D == type)
-        accessMethod.reset(new TwoDAccessMethod(entry.get(), sdi));
-    else if (IndexNames::WILDCARD == type)
-        accessMethod.reset(new WildcardAccessMethod(entry.get(), sdi));
-    else {
-        log() << "Can't find index for keyPattern " << desc->keyPattern();
-        fassertFailed(51072);
-    }
+    entry->init(makeAccessMethod(entry->descriptor(), entry.get(), sdi));
 
     IndexCatalogEntry* save = entry.get();
     if (isReadyIndex) {
@@ -1298,6 +1285,17 @@ const IndexCatalogEntry* IndexCatalogImpl::getEntry(const IndexDescriptor* desc)
     massert(17357, "cannot find index entry", entry);
     return entry;
 }
+
+IndexCatalogEntry* IndexCatalogImpl::getEntry(const IndexDescriptor* const desc) {
+    IndexCatalogEntry* entry = _readyIndexes.find(desc);
+    if (!entry) {
+        entry = _buildingIndexes.find(desc);
+    }
+
+    massert(51191, "cannot find index entry", entry);
+    return entry;
+}
+
 
 std::shared_ptr<const IndexCatalogEntry> IndexCatalogImpl::getEntryShared(
     const IndexDescriptor* indexDescriptor) const {

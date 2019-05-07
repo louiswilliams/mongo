@@ -211,12 +211,15 @@ public:
     inline IndexCatalog& operator=(IndexCatalog&&) = delete;
 
     // Must be called before used.
-    virtual Status init(OperationContext* opCtx) = 0;
-    virtual void registerIndex(OperationContext* const opCtx,
-                               const std::string& indexName,
-                               const CollectionCatalogEntry* collectionCatalogEntry,
-                               std::unique_ptr<IndexDescriptor> descriptor,
-                               SortedDataInterface* sortedDataInterface) = 0;
+    virtual void registerExistingIndex(OperationContext* const opCtx,
+                                       const std::string& indexName,
+                                       const CollectionCatalogEntry* collectionCatalogEntry,
+                                       std::unique_ptr<IndexDescriptor> descriptor,
+                                       SortedDataInterface* sortedDataInterface) = 0;
+
+    virtual IndexCatalogEntry* registerBuildingIndex(OperationContext* const opCtx,
+                                                     std::unique_ptr<IndexDescriptor> descriptor,
+                                                     SortedDataInterface* sortedDataInterface) = 0;
 
     virtual bool ok() const = 0;
 
@@ -323,6 +326,7 @@ public:
      * such index. Never returns nullptr.
      */
     virtual const IndexCatalogEntry* getEntry(const IndexDescriptor* const desc) const = 0;
+    virtual IndexCatalogEntry* getEntry(const IndexDescriptor* const desc) = 0;
 
     /**
      * Returns a pointer to the index catalog entry associated with 'desc', where the caller assumes

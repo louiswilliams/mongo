@@ -31,6 +31,7 @@
 
 #include "mongo/base/string_data.h"
 #include "mongo/db/catalog/collection_options.h"
+#include "mongo/db/catalog/index_catalog.h"
 #include "mongo/db/index/multikey_paths.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/record_id.h"
@@ -142,7 +143,8 @@ public:
     virtual Status removeIndex(OperationContext* opCtx, StringData indexName) = 0;
 
     virtual Status prepareForIndexBuild(OperationContext* opCtx,
-                                        const IndexDescriptor* spec,
+                                        IndexCatalog* indexCatalog,
+                                        std::unique_ptr<IndexDescriptor> spec,
                                         IndexBuildProtocol indexBuildProtocol,
                                         bool isBackgroundSecondaryBuild) = 0;
 

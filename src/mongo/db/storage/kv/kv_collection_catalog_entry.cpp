@@ -36,6 +36,7 @@
 #include <memory>
 
 #include "mongo/db/catalog/uuid_catalog.h"
+#include "mongo/db/index/index_access_method.h"
 #include "mongo/db/index/index_descriptor.h"
 #include "mongo/db/storage/kv/kv_catalog.h"
 #include "mongo/db/storage/kv/kv_catalog_feature_tracker.h"
@@ -125,6 +126,22 @@ KVCollectionCatalogEntry::KVCollectionCatalogEntry(KVStorageEngineInterface* eng
       _recordStore(std::move(rs)) {}
 
 KVCollectionCatalogEntry::~KVCollectionCatalogEntry() {}
+
+std::unique_ptr<IndexCatalogEntry> KVCollectionCatalogEntry::initIndex(
+    OperationContext* opCtx, IndexCatalog* indexCatalog, const std::string& indexName) {
+    const auto prefix = getIndexPrefix(opCtx, indexName);
+    const auto spec = getIndexSpec(opCtx, indexName);
+    const auto indexIdent = _catalog->getIndexIdent(opCtx, ns(), indexName);
+
+    auto descriptor = indexCatalog->makeDescriptor(spec);
+    auto sortedDataInterface = _engine->getEngine()->getGroupedSortedDataInterface(
+        opCtx, indexIdent, descriptor.get(), prefix);
+
+    auto entry = indexCatalog->makeExistingEntry(opCtx, std::move(descriptor));
+    auto accessMethod = indexCatalog->makeAccessMethod(entry.get(), sortedDataInterface);
+    entry->init(std::move(accessMethod));
+    return entry;
+}
 
 bool KVCollectionCatalogEntry::setIndexIsMultikey(OperationContext* opCtx,
                                                   StringData indexName,

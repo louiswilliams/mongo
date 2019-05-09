@@ -35,7 +35,6 @@
 
 #include "mongo/bson/util/bson_extract.h"
 #include "mongo/bson/util/builder.h"
-#include "mongo/db/catalog/collection_factory.h"
 #include "mongo/db/catalog/uuid_catalog.h"
 #include "mongo/db/concurrency/d_concurrency.h"
 #include "mongo/db/index/index_descriptor.h"
@@ -709,15 +708,14 @@ StatusWith<std::string> KVCatalog::newOrphanedIdent(OperationContext* opCtx, std
     return StatusWith<std::string>(std::move(ns));
 }
 
-void KVCatalog::initCollection(OperationContext* opCtx,
-                               const NamespaceString& nss,
-                               bool forRepair) {
+std::unique_ptr<CollectionCatalogEntry> KVCatalog::initCollection(OperationContext* opCtx,
+                                                                  const NamespaceString& nss,
+                                                                  bool forRepair) {
     BSONCollectionCatalogEntry::MetaData md = getMetaData(opCtx, nss);
     uassert(ErrorCodes::MustDowngrade,
             str::stream() << "Collection does not have UUID in KVCatalog. Collection: " << nss,
             md.options.uuid);
 
-    auto uuid = md.options.uuid.get();
     auto ident = getCollectionIdent(nss);
 
     std::unique_ptr<RecordStore> rs;
@@ -731,37 +729,8 @@ void KVCatalog::initCollection(OperationContext* opCtx,
         invariant(rs);
     }
 
-    auto& uuidCatalog = UUIDCatalog::get(getGlobalServiceContext());
-    uuidCatalog.registerCatalogEntry(
-        uuid,
-        std::make_unique<KVCollectionCatalogEntry>(_engine, this, nss.ns(), ident, std::move(rs)));
-
-    auto collectionCatalogEntry = uuidCatalog.lookupCollectionCatalogEntryByNamespace(nss);
-
-    std::unique_ptr<Collection> collection;
-    auto collectionFactory = CollectionFactory::get(getGlobalServiceContext());
-    if (forRepair) {
-        collection = collectionFactory->createForRepair(opCtx, collectionCatalogEntry, nss);
-    } else {
-        collection = collectionFactory->create(opCtx, collectionCatalogEntry, nss);
-    }
-    invariant(collection);
-
-    std::vector<string> indexNames;
-    collection->getCatalogEntry()->getAllIndexes(opCtx, &indexNames);
-    for (auto&& indexName : indexNames) {
-        const auto prefix = collectionCatalogEntry->getIndexPrefix(opCtx, indexName);
-        const auto spec = collectionCatalogEntry->getIndexSpec(opCtx, indexName);
-
-        auto descriptor = collection->getIndexCatalog()->makeDescriptor(spec);
-        auto sortedDataInterface = _engine->getEngine()->getGroupedSortedDataInterface(
-            opCtx, ident, descriptor.get(), prefix);
-        collection->getIndexCatalog()->registerExistingIndex(
-            opCtx, indexName, collectionCatalogEntry, std::move(descriptor), sortedDataInterface);
-    }
-
-    // Call registerCollectionObject directly because we're not in a WUOW.
-    uuidCatalog.registerCollectionObject(uuid, std::move(collection));
+    return std::make_unique<KVCollectionCatalogEntry>(
+        _engine, this, nss.ns(), ident, std::move(rs));
 }
 
 void KVCatalog::reinitCollectionAfterRepair(OperationContext* opCtx, const NamespaceString& nss) {

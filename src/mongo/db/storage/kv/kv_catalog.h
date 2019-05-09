@@ -111,7 +111,9 @@ public:
      */
     std::string newInternalIdent();
 
-    void initCollection(OperationContext* opCtx, const NamespaceString& nss, bool forRepair);
+    std::unique_ptr<CollectionCatalogEntry> initCollection(OperationContext* opCtx,
+                                                           const NamespaceString& nss,
+                                                           bool forRepair);
 
     void reinitCollectionAfterRepair(OperationContext* opCtx, const NamespaceString& nss);
 

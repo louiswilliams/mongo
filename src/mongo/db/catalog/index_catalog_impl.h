@@ -59,11 +59,14 @@ public:
     explicit IndexCatalogImpl(Collection* collection, int maxNumIndexesAllowed);
     ~IndexCatalogImpl() override;
 
+    std::unique_ptr<IndexAccessMethod> makeAccessMethod(
+        IndexCatalogEntry* entry, SortedDataInterface* sortedDataInterface) const override;
+
+    std::unique_ptr<IndexCatalogEntry> makeExistingEntry(
+        OperationContext* opCtx, std::unique_ptr<IndexDescriptor> descriptor) const override;
+
     void registerExistingIndex(OperationContext* const opCtx,
-                               const std::string& indexName,
-                               const CollectionCatalogEntry* collectionCatalogEntry,
-                               std::unique_ptr<IndexDescriptor> descriptor,
-                               SortedDataInterface* sortedDataInterface) override;
+                               std::unique_ptr<IndexCatalogEntry> entry) override;
 
     IndexCatalogEntry* registerBuildingIndex(OperationContext* const opCtx,
                                              std::unique_ptr<IndexDescriptor> descriptor,

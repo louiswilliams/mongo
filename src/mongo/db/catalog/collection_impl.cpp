@@ -218,8 +218,6 @@ CollectionImpl::CollectionImpl(OperationContext* opCtx,
 
     if (isCapped())
         _recordStore->setCappedCallback(this);
-
-    _infoCache->init(opCtx);
 }
 
 CollectionImpl::~CollectionImpl() {

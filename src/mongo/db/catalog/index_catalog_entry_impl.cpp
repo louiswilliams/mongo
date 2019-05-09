@@ -136,11 +136,6 @@ IndexCatalogEntryImpl::~IndexCatalogEntryImpl() {
     _descriptor.reset();
 }
 
-void IndexCatalogEntryImpl::init(std::unique_ptr<IndexAccessMethod> accessMethod) {
-    invariant(!_accessMethod);
-    _accessMethod = std::move(accessMethod);
-}
-
 const RecordId& IndexCatalogEntryImpl::head(OperationContext* opCtx) const {
     DEV invariant(_head == _catalogHead(opCtx));
     return _head;

@@ -82,6 +82,10 @@ public:
 
     // ------- indexes ----------
 
+    virtual std::unique_ptr<IndexCatalogEntry> initIndex(OperationContext* opCtx,
+                                                         IndexCatalog* indexCatalog,
+                                                         const std::string& indexName) = 0;
+
     virtual CollectionOptions getCollectionOptions(OperationContext* opCtx) const = 0;
 
     virtual int getTotalIndexCount(OperationContext* opCtx) const = 0;

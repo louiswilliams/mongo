@@ -210,12 +210,15 @@ public:
     inline IndexCatalog(IndexCatalog&&) = delete;
     inline IndexCatalog& operator=(IndexCatalog&&) = delete;
 
-    // Must be called before used.
+    virtual std::unique_ptr<IndexAccessMethod> makeAccessMethod(
+        IndexCatalogEntry* catalogEntry, SortedDataInterface* sortedDataInterface) const = 0;
+
+    virtual std::unique_ptr<IndexCatalogEntry> makeExistingEntry(
+        OperationContext* opCtx, std::unique_ptr<IndexDescriptor> descriptor) const = 0;
+
+
     virtual void registerExistingIndex(OperationContext* const opCtx,
-                                       const std::string& indexName,
-                                       const CollectionCatalogEntry* collectionCatalogEntry,
-                                       std::unique_ptr<IndexDescriptor> descriptor,
-                                       SortedDataInterface* sortedDataInterface) = 0;
+                                       std::unique_ptr<IndexCatalogEntry> entry) = 0;
 
     virtual IndexCatalogEntry* registerBuildingIndex(OperationContext* const opCtx,
                                                      std::unique_ptr<IndexDescriptor> descriptor,

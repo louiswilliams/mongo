@@ -55,6 +55,10 @@ public:
         return 64;
     };
 
+    std::unique_ptr<IndexCatalogEntry> initIndex(OperationContext* opCtx,
+                                                 IndexCatalog* indexCatalog,
+                                                 const std::string& indexName) final;
+
     bool setIndexIsMultikey(OperationContext* opCtx,
                             StringData indexName,
                             const MultikeyPaths& multikeyPaths) final;

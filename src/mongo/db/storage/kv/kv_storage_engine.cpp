@@ -36,6 +36,7 @@
 #include <algorithm>
 
 #include "mongo/db/catalog/catalog_control.h"
+#include "mongo/db/catalog/collection_factory.h"
 #include "mongo/db/catalog/uuid_catalog.h"
 #include "mongo/db/catalog/uuid_catalog_helper.h"
 #include "mongo/db/client.h"
@@ -218,13 +219,41 @@ void KVStorageEngine::loadCatalog(OperationContext* opCtx) {
             }
         }
 
-        _catalog->initCollection(opCtx, coll, _options.forRepair);
-        auto maxPrefixForCollection = _catalog->getMetaData(opCtx, coll).getMaxPrefix();
-        maxSeenPrefix = std::max(maxSeenPrefix, maxPrefixForCollection);
-
         if (nss.isOrphanCollection()) {
             log() << "Orphaned collection found: " << nss;
         }
+
+        auto uniqueCollectionCatalogEntry =
+            _catalog->initCollection(opCtx, coll, _options.forRepair);
+        auto collectionCatalogEntryPtr = uniqueCollectionCatalogEntry.get();
+
+        auto uuid = collectionCatalogEntryPtr->getCollectionOptions(opCtx).uuid.get();
+        auto& uuidCatalog = UUIDCatalog::get(getGlobalServiceContext());
+        uuidCatalog.registerCatalogEntry(uuid, std::move(uniqueCollectionCatalogEntry));
+
+        std::unique_ptr<Collection> collection;
+        auto collectionFactory = CollectionFactory::get(getGlobalServiceContext());
+        if (_options.forRepair) {
+            collection = collectionFactory->createForRepair(opCtx, collectionCatalogEntryPtr, nss);
+        } else {
+            collection = collectionFactory->create(opCtx, collectionCatalogEntryPtr, nss);
+        }
+
+        auto maxPrefixForCollection = _catalog->getMetaData(opCtx, coll).getMaxPrefix();
+        maxSeenPrefix = std::max(maxSeenPrefix, maxPrefixForCollection);
+
+        std::vector<string> indexNames;
+        collection->getCatalogEntry()->getAllIndexes(opCtx, &indexNames);
+        for (auto&& indexName : indexNames) {
+            auto entry = collectionCatalogEntryPtr->initIndex(
+                opCtx, collection->getIndexCatalog(), indexName);
+            collection->getIndexCatalog()->registerExistingIndex(opCtx, std::move(entry));
+        }
+
+        collection->infoCache()->init(opCtx);
+
+        // Call registerCollectionObject directly because we're not in a WUOW.
+        uuidCatalog.registerCollectionObject(uuid, std::move(collection));
     }
 
     KVPrefix::setLargestPrefix(maxSeenPrefix);

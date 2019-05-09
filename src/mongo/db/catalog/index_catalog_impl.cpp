@@ -108,11 +108,9 @@ IndexCatalogImpl::~IndexCatalogImpl() {
     _magic = 123456;
 }
 
-namespace {
-
-std::unique_ptr<IndexAccessMethod> makeAccessMethod(const IndexDescriptor* desc,
-                                                    IndexCatalogEntry* entry,
-                                                    SortedDataInterface* sortedDataInterface) {
+std::unique_ptr<IndexAccessMethod> IndexCatalogImpl::makeAccessMethod(
+    IndexCatalogEntry* entry, SortedDataInterface* sortedDataInterface) const {
+    auto desc = entry->descriptor();
     const std::string& type = desc->getAccessMethodName();
     std::unique_ptr<IndexAccessMethod> accessMethod;
     if ("" == type)
@@ -135,15 +133,16 @@ std::unique_ptr<IndexAccessMethod> makeAccessMethod(const IndexDescriptor* desc,
     }
     return accessMethod;
 }
+
+void IndexCatalogEntryImpl::init(std::unique_ptr<IndexAccessMethod> accessMethod) {
+    invariant(!_accessMethod);
+    _accessMethod = std::move(accessMethod);
 }
 
-
 void IndexCatalogImpl::registerExistingIndex(OperationContext* const opCtx,
-                                             const std::string& indexName,
-                                             const CollectionCatalogEntry* collectionCatalogEntry,
-                                             std::unique_ptr<IndexDescriptor> descriptor,
-                                             SortedDataInterface* sortedDataInterface) {
-    if (!collectionCatalogEntry->isIndexReady(opCtx, indexName)) {
+                                             std::unique_ptr<IndexCatalogEntry> entry) {
+    auto descriptor = entry->descriptor();
+    if (!entry->isReady(opCtx)) {
         _unfinishedIndexes.push_back(descriptor->infoObj());
         return;
     }
@@ -155,16 +154,19 @@ void IndexCatalogImpl::registerExistingIndex(OperationContext* const opCtx,
         fassertFailedNoTrace(31003);
     }
 
-    auto entry = std::make_shared<IndexCatalogEntryImpl>(opCtx,
-                                                         _collection->ns().ns(),
-                                                         _collection->getCatalogEntry(),
-                                                         std::move(descriptor),
-                                                         _collection->infoCache());
     fassert(31020, entry->isReady(opCtx));
 
-    entry->init(makeAccessMethod(entry->descriptor(), entry.get(), sortedDataInterface));
-
     _readyIndexes.add(std::move(entry));
+}
+
+std::unique_ptr<IndexCatalogEntry> IndexCatalogImpl::makeExistingEntry(
+    OperationContext* opCtx, std::unique_ptr<IndexDescriptor> descriptor) const {
+
+    return std::make_unique<IndexCatalogEntryImpl>(opCtx,
+                                                   _collection->ns().ns(),
+                                                   _collection->getCatalogEntry(),
+                                                   std::move(descriptor),
+                                                   _collection->infoCache());
 }
 
 IndexCatalogEntry* IndexCatalogImpl::registerBuildingIndex(
@@ -180,13 +182,14 @@ IndexCatalogEntry* IndexCatalogImpl::registerBuildingIndex(
     }
 
     auto* const descriptorPtr = descriptor.get();
+
     auto entry = std::make_shared<IndexCatalogEntryImpl>(opCtx,
                                                          _collection->ns().ns(),
                                                          _collection->getCatalogEntry(),
                                                          std::move(descriptor),
                                                          _collection->infoCache());
 
-    entry->init(makeAccessMethod(entry->descriptor(), entry.get(), sortedDataInterface));
+    entry->init(makeAccessMethod(entry.get(), sortedDataInterface));
 
     IndexCatalogEntry* save = entry.get();
     _buildingIndexes.add(std::move(entry));
@@ -230,7 +233,7 @@ IndexCatalogEntry* IndexCatalogImpl::_setupInMemoryStructures(
     SortedDataInterface* sdi =
         engine->getEngine()->getGroupedSortedDataInterface(opCtx, ident, desc, entry->getPrefix());
 
-    entry->init(makeAccessMethod(entry->descriptor(), entry.get(), sdi));
+    entry->init(makeAccessMethod(entry.get(), sdi));
 
     IndexCatalogEntry* save = entry.get();
     if (isReadyIndex) {

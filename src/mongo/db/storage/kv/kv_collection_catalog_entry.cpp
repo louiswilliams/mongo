@@ -137,7 +137,7 @@ std::unique_ptr<IndexCatalogEntry> KVCollectionCatalogEntry::initIndex(
     auto sortedDataInterface = _engine->getEngine()->getGroupedSortedDataInterface(
         opCtx, indexIdent, descriptor.get(), prefix);
 
-    auto entry = indexCatalog->makeExistingEntry(opCtx, std::move(descriptor));
+    auto entry = indexCatalog->makeEntry(opCtx, std::move(descriptor));
     auto accessMethod = indexCatalog->makeAccessMethod(entry.get(), sortedDataInterface);
     entry->init(std::move(accessMethod));
     return entry;
@@ -233,11 +233,12 @@ Status KVCollectionCatalogEntry::removeIndex(OperationContext* opCtx, StringData
     return Status::OK();
 }
 
-Status KVCollectionCatalogEntry::prepareForIndexBuild(OperationContext* opCtx,
-                                                      IndexCatalog* indexCatalog,
-                                                      std::unique_ptr<IndexDescriptor> spec,
-                                                      IndexBuildProtocol indexBuildProtocol,
-                                                      bool isBackgroundSecondaryBuild) {
+std::unique_ptr<IndexCatalogEntry> KVCollectionCatalogEntry::prepareForIndexBuild(
+    OperationContext* opCtx,
+    IndexCatalog* indexCatalog,
+    std::unique_ptr<IndexDescriptor> spec,
+    IndexBuildProtocol indexBuildProtocol,
+    bool isBackgroundSecondaryBuild) {
     MetaData md = _getMetaData(opCtx);
 
     KVPrefix prefix = KVPrefix::getNextPrefix(ns());
@@ -278,12 +279,15 @@ Status KVCollectionCatalogEntry::prepareForIndexBuild(OperationContext* opCtx,
     if (status.isOK()) {
         opCtx->recoveryUnit()->registerChange(new AddIndexChange(opCtx, this, ident));
     }
+    uassertStatusOK(status);
 
     auto sortedDataInterface =
         _engine->getEngine()->getGroupedSortedDataInterface(opCtx, ident, spec.get(), prefix);
-    indexCatalog->registerBuildingIndex(opCtx, std::move(spec), sortedDataInterface);
 
-    return status;
+    auto entry = indexCatalog->makeEntry(opCtx, std::move(spec));
+    auto accessMethod = indexCatalog->makeAccessMethod(entry.get(), sortedDataInterface);
+    entry->init(std::move(accessMethod));
+    return entry;
 }
 
 bool KVCollectionCatalogEntry::isTwoPhaseIndexBuild(OperationContext* opCtx,

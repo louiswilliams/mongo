@@ -159,7 +159,7 @@ void IndexCatalogImpl::registerExistingIndex(OperationContext* const opCtx,
     _readyIndexes.add(std::move(entry));
 }
 
-std::unique_ptr<IndexCatalogEntry> IndexCatalogImpl::makeExistingEntry(
+std::unique_ptr<IndexCatalogEntry> IndexCatalogImpl::makeEntry(
     OperationContext* opCtx, std::unique_ptr<IndexDescriptor> descriptor) const {
 
     return std::make_unique<IndexCatalogEntryImpl>(opCtx,
@@ -169,11 +169,9 @@ std::unique_ptr<IndexCatalogEntry> IndexCatalogImpl::makeExistingEntry(
                                                    _collection->infoCache());
 }
 
-IndexCatalogEntry* IndexCatalogImpl::registerBuildingIndex(
-    OperationContext* const opCtx,
-    std::unique_ptr<IndexDescriptor> descriptor,
-    SortedDataInterface* sortedDataInterface) {
-
+void IndexCatalogImpl::registerBuildingIndex(OperationContext* const opCtx,
+                                             std::unique_ptr<IndexCatalogEntry> entry) {
+    auto descriptor = entry->descriptor();
     Status status = _isSpecOk(opCtx, descriptor->infoObj());
     if (!status.isOK()) {
         severe() << "Found an invalid index " << descriptor->infoObj() << " on the "
@@ -181,27 +179,15 @@ IndexCatalogEntry* IndexCatalogImpl::registerBuildingIndex(
         fassertFailedNoTrace(51192);
     }
 
-    auto* const descriptorPtr = descriptor.get();
-
-    auto entry = std::make_shared<IndexCatalogEntryImpl>(opCtx,
-                                                         _collection->ns().ns(),
-                                                         _collection->getCatalogEntry(),
-                                                         std::move(descriptor),
-                                                         _collection->infoCache());
-
-    entry->init(makeAccessMethod(entry.get(), sortedDataInterface));
-
     IndexCatalogEntry* save = entry.get();
     _buildingIndexes.add(std::move(entry));
 
-    opCtx->recoveryUnit()->onRollback([ this, opCtx, descriptor = descriptorPtr ] {
+    opCtx->recoveryUnit()->onRollback([ this, opCtx, descriptor = save->descriptor() ] {
         // Need to preserve indexName as descriptor no longer exists after remove().
         const std::string indexName = descriptor->indexName();
         _buildingIndexes.remove(descriptor);
         _collection->infoCache()->droppedIndex(opCtx, indexName);
     });
-
-    return save;
 }
 
 IndexCatalogEntry* IndexCatalogImpl::_setupInMemoryStructures(

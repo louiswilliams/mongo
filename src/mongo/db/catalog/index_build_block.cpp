@@ -76,20 +76,17 @@ Status IndexCatalogImpl::IndexBuildBlock::init(OperationContext* opCtx, Collecti
             replCoord->getMemberState().secondary() && isBackgroundIndex;
     }
 
-    auto* descriptorPtr = descriptor.get();
-
     // Setup on-disk structures.
     const auto protocol = IndexBuildProtocol::kTwoPhase;
-    Status status =
+    auto newIndex =
         collection->getCatalogEntry()->prepareForIndexBuild(opCtx,
                                                             collection->getIndexCatalog(),
                                                             std::move(descriptor),
                                                             protocol,
                                                             isBackgroundSecondaryBuild);
-    if (!status.isOK())
-        return status;
 
-    _entry = collection->getIndexCatalog()->getEntry(descriptorPtr);
+    _entry = newIndex.get();
+    collection->getIndexCatalog()->registerBuildingIndex(opCtx, std::move(newIndex));
 
     if (_method == IndexBuildMethod::kHybrid) {
         _indexBuildInterceptor = stdx::make_unique<IndexBuildInterceptor>(opCtx, _entry);

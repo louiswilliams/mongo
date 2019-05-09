@@ -62,15 +62,14 @@ public:
     std::unique_ptr<IndexAccessMethod> makeAccessMethod(
         IndexCatalogEntry* entry, SortedDataInterface* sortedDataInterface) const override;
 
-    std::unique_ptr<IndexCatalogEntry> makeExistingEntry(
+    std::unique_ptr<IndexCatalogEntry> makeEntry(
         OperationContext* opCtx, std::unique_ptr<IndexDescriptor> descriptor) const override;
 
     void registerExistingIndex(OperationContext* const opCtx,
                                std::unique_ptr<IndexCatalogEntry> entry) override;
 
-    IndexCatalogEntry* registerBuildingIndex(OperationContext* const opCtx,
-                                             std::unique_ptr<IndexDescriptor> descriptor,
-                                             SortedDataInterface* sortedDataInterface) override;
+    void registerBuildingIndex(OperationContext* const opCtx,
+                               std::unique_ptr<IndexCatalogEntry> entry) override;
 
     bool ok() const override;
 

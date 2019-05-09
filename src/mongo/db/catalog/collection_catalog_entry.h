@@ -146,11 +146,12 @@ public:
 
     virtual Status removeIndex(OperationContext* opCtx, StringData indexName) = 0;
 
-    virtual Status prepareForIndexBuild(OperationContext* opCtx,
-                                        IndexCatalog* indexCatalog,
-                                        std::unique_ptr<IndexDescriptor> spec,
-                                        IndexBuildProtocol indexBuildProtocol,
-                                        bool isBackgroundSecondaryBuild) = 0;
+    virtual std::unique_ptr<IndexCatalogEntry> prepareForIndexBuild(
+        OperationContext* opCtx,
+        IndexCatalog* indexCatalog,
+        std::unique_ptr<IndexDescriptor> spec,
+        IndexBuildProtocol indexBuildProtocol,
+        bool isBackgroundSecondaryBuild) = 0;
 
     /**
      * Returns whether or not the index is being built with the two-phase index build procedure.

@@ -213,16 +213,14 @@ public:
     virtual std::unique_ptr<IndexAccessMethod> makeAccessMethod(
         IndexCatalogEntry* catalogEntry, SortedDataInterface* sortedDataInterface) const = 0;
 
-    virtual std::unique_ptr<IndexCatalogEntry> makeExistingEntry(
+    virtual std::unique_ptr<IndexCatalogEntry> makeEntry(
         OperationContext* opCtx, std::unique_ptr<IndexDescriptor> descriptor) const = 0;
-
 
     virtual void registerExistingIndex(OperationContext* const opCtx,
                                        std::unique_ptr<IndexCatalogEntry> entry) = 0;
 
-    virtual IndexCatalogEntry* registerBuildingIndex(OperationContext* const opCtx,
-                                                     std::unique_ptr<IndexDescriptor> descriptor,
-                                                     SortedDataInterface* sortedDataInterface) = 0;
+    virtual void registerBuildingIndex(OperationContext* const opCtx,
+                                       std::unique_ptr<IndexCatalogEntry> entry) = 0;
 
     virtual bool ok() const = 0;
 

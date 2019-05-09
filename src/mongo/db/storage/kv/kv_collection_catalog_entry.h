@@ -71,11 +71,11 @@ public:
 
     Status removeIndex(OperationContext* opCtx, StringData indexName) final;
 
-    Status prepareForIndexBuild(OperationContext* opCtx,
-                                IndexCatalog* indexCatalog,
-                                std::unique_ptr<IndexDescriptor> spec,
-                                IndexBuildProtocol indexBuildProtocol,
-                                bool isBackgroundSecondaryBuild) final;
+    std::unique_ptr<IndexCatalogEntry> prepareForIndexBuild(OperationContext* opCtx,
+                                                            IndexCatalog* indexCatalog,
+                                                            std::unique_ptr<IndexDescriptor> spec,
+                                                            IndexBuildProtocol indexBuildProtocol,
+                                                            bool isBackgroundSecondaryBuild) final;
 
     bool isTwoPhaseIndexBuild(OperationContext* opCtx, StringData indexName) const final;
 

@@ -68,6 +68,10 @@ bool WorkingSetCommon::fetch(OperationContext* opCtx,
     member->obj.reset();
     auto record = cursor->seekExact(member->recordId);
     if (!record) {
+        // This can only happen if we're fetching an suspcious member, which means yielding took
+        // place. Otherwise, this may indicate data corruption.
+        uassert(
+            31130, str::stream() << "failed to fetch " << member->recordId, member->isSuspicious);
         return false;
     }
 

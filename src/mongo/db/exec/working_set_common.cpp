@@ -70,8 +70,11 @@ bool WorkingSetCommon::fetch(OperationContext* opCtx,
     if (!record) {
         // This can only happen if we're fetching an suspcious member, which means yielding took
         // place. Otherwise, this may indicate data corruption.
-        uassert(
-            31130, str::stream() << "failed to fetch " << member->recordId, member->isSuspicious);
+        if (!member->isSuspicious) {
+            fassert(31130,
+                    {ErrorCodes::NoMatchingDocument,
+                     str::stream() << "Document not found: " << member->recordId});
+        }
         return false;
     }
 

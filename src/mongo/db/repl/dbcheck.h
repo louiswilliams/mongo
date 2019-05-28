@@ -153,6 +153,7 @@ private:
 
     OperationContext* _opCtx;
     std::unique_ptr<PlanExecutor, PlanExecutor::Deleter> _exec;
+    std::unique_ptr<SeekableRecordCursor> _cursor;
     md5_state_t _state;
 
     BSONKey _maxKey;

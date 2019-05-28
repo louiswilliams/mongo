@@ -7,10 +7,6 @@
 (function() {
     "use strict";
 
-    // TODO(SERVER-31323): Re-enable when existing dbCheck issues are fixed.
-    if (true)
-        return;
-
     let nodeCount = 3;
     let replSet = new ReplSetTest({name: "dbCheckSet", nodes: nodeCount});
 
@@ -200,8 +196,90 @@
         forEachSecondary(secondary => checkLogAllConsistent(secondary, true));
     }
 
-    simpleTestConsistent();
-    concurrentTestConsistent();
+    function checkPrimaryIndexCorruption() {
+        let master = replSet.getPrimary();
+        let db = master.getDB(dbName);
+
+        clearLog();
+
+        const doc = {_id: 42, a: 1};
+        const coll = db[collName];
+        assert.commandWorked(coll.insert(doc));
+        assert.commandWorked(coll.createIndex({a: 1}));
+
+        // Introduce corruption on primary where an _id index key exists but the document is
+        // missing.
+        assert.commandWorked(master.adminCommand({
+            configureFailPoint: 'failUnindexRecord',
+            mode: 'alwaysOn',
+            data: {ns: coll.getFullName(), index: "_id_"}
+        }));
+        // Remove on primary.
+        assert.commandWorked(coll.remove(doc));
+        assert.commandWorked(
+            master.adminCommand({configureFailPoint: 'failUnindexRecord', mode: 'off'}));
+        // Validate should catch this.
+        let res = assert.commandWorked(coll.validate({full: false}));
+        assert.eq(false, res.valid);
+
+        assert.commandWorked(db.runCommand({dbCheck: collName}));
+        awaitDbCheckCompletion(db);
+
+        let nErrors = replSet.getPrimary()
+                          .getDB("local")
+                          .system.healthlog.find({operation: /dbCheck.*/, severity: "error"})
+                          .count();
+
+        assert.eq(nErrors,
+                  1,
+                  "dbCheck should have found one error after corrupting an index on the primary");
+        // Fix corruption.
+        assert.commandWorked(coll.insert(doc));
+    }
+
+    function checkSecondaryIndexCorruption() {
+        const primary = replSet.getPrimary();
+        const primaryDB = primary.getDB(dbName);
+        const secondary = replSet.getSecondary();
+        secondary.setSlaveOk();
+        const secondaryDB = secondary.getDB(dbName);
+
+        clearLog();
+
+        const doc = {_id: 43, a: 1};
+        const coll = primaryDB[collName];
+        assert.commandWorked(coll.insert(doc));
+        assert.commandWorked(coll.createIndex({a: 1}));
+
+        // Introduce corruption on secondary where an _id index key exists but the document is
+        // missing.
+        assert.commandWorked(secondary.adminCommand({
+            configureFailPoint: 'failUnindexRecord',
+            mode: 'alwaysOn',
+            data: {ns: coll.getFullName(), index: "_id_"}
+        }));
+        // Remove on primary.
+        assert.commandWorked(coll.remove(doc));
+        assert.commandWorked(
+            secondary.adminCommand({configureFailPoint: 'failUnindexRecord', mode: 'off'}));
+
+        // Validate should catch this.
+        let res = assert.commandWorked(secondaryDB[collName].validate({full: false}));
+        assert.eq(false, res.valid);
+
+        assert.commandWorked(primaryDB.runCommand({dbCheck: collName}));
+        awaitDbCheckCompletion(primaryDB);
+
+        let nErrors = secondary.getDB("local")
+                          .system.healthlog.find({operation: /dbCheck.*/, severity: "error"})
+                          .count();
+
+        assert.eq(nErrors,
+                  1,
+                  "dbCheck should have found one error after corrupting an index on the secondary");
+        // Fix corruption.
+        assert.commandWorked(coll.insert(doc));
+    }
 
     // Test the various other parameters.
     function testDbCheckParameters() {
@@ -272,8 +350,6 @@
         checkEntryBounds(start, start + maxCount);
     }
 
-    testDbCheckParameters();
-
     // Now, test some unusual cases where the command should fail.
     function testErrorOnNonexistent() {
         let master = replSet.getPrimary();
@@ -300,10 +376,6 @@
         assert.commandFailed(master.getDB(dbName).runCommand({dbCheck: "system.profile"}),
                              "dbCheck spuriously succeeded on system.profile");
     }
-
-    testErrorOnNonexistent();
-    testErrorOnSecondary();
-    testErrorOnUnreplicated();
 
     // Test stepdown.
     function testSucceedsOnStepdown() {
@@ -338,8 +410,6 @@
         assert(dbCheckCompleted(db), "dbCheck failed to terminate on stepdown");
     }
 
-    testSucceedsOnStepdown();
-
     function collectionUuid(db, collName) {
         return db.getCollectionInfos().filter(coll => coll.name === collName)[0].info.uuid;
     }
@@ -366,6 +436,15 @@
         let master = replSet.getPrimary();
         let entry = getDummyOplogEntry();
         entry["op"] = "i";
+        entry["o"] = doc;
+
+        master.getDB("local").oplog.rs.insertOne(entry);
+    }
+
+    function deleteOnSecondaries(doc) {
+        let master = replSet.getPrimary();
+        let entry = getDummyOplogEntry();
+        entry["op"] = "d";
         entry["o"] = doc;
 
         master.getDB("local").oplog.rs.insertOne(entry);
@@ -430,6 +509,8 @@
         runCommandOnSecondaries({createIndexes: collName, v: 2, key: {"foo": 1}, name: "foo_1"},
                                 dbName + ".$cmd");
 
+        replSet.waitForAllIndexBuildsToFinish(dbName, collName);
+
         assert.commandWorked(db.runCommand({dbCheck: collName}));
         awaitDbCheckCompletion(db);
 
@@ -442,9 +523,21 @@
 
         assert.eq(nErrors, 1, "dbCheck found wrong number of errors after inconsistent `create`");
 
+        runCommandOnSecondaries({dropIndexes: collName, index: "foo_1"}, dbName + ".$cmd");
         clearLog();
     }
 
-    simpleTestCatchesExtra();
-    testCollectionMetadataChanges();
+    // simpleTestConsistent();
+    // concurrentTestConsistent();
+    // checkPrimaryIndexCorruption();
+    checkSecondaryIndexCorruption();
+    // testDbCheckParameters();
+    // testErrorOnNonexistent();
+    // testErrorOnSecondary();
+    // testErrorOnUnreplicated();
+    // testSucceedsOnStepdown();
+    // simpleTestCatchesExtra();
+    // testCollectionMetadataChanges();
+
+    replSet.stopSet();
 })();

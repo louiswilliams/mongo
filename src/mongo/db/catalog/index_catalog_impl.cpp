@@ -88,6 +88,8 @@ using std::vector;
 
 using IndexVersion = IndexDescriptor::IndexVersion;
 
+MONGO_FAIL_POINT_DEFINE(failUnindexRecord);
+
 static const int INDEX_CATALOG_INIT = 283711;
 static const int INDEX_CATALOG_UNINIT = 654321;
 
@@ -1378,6 +1380,22 @@ Status IndexCatalogImpl::_unindexRecord(OperationContext* opCtx,
                                         const RecordId& loc,
                                         bool logIfError,
                                         int64_t* keysDeletedOut) {
+    MONGO_FAIL_POINT_BLOCK(failUnindexRecord, options) {
+        const BSONObj& data = options.getData();
+        const BSONElement ns = data["ns"];
+        const BSONElement indexName = data["index"];
+        if (!ns.eoo() && ns.valueStringDataSafe() != _collection->ns().ns()) {
+            break;
+        }
+        if (!indexName.eoo() &&
+            indexName.valueStringDataSafe() != index->descriptor()->indexName()) {
+            break;
+        }
+        log() << "Intentionally not unindexing " << loc << ": " << obj;
+        return Status::OK();
+    }
+
+
     InsertDeleteOptions options;
     prepareInsertDeleteOptions(opCtx, index->descriptor(), &options);
     options.logIfError = logIfError;

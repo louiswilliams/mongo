@@ -27,6 +27,8 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kCommand
+
 #include "mongo/platform/basic.h"
 
 #include "mongo/bson/simple_bsonelement_comparator.h"
@@ -45,6 +47,7 @@
 #include "mongo/db/repl/dbcheck_gen.h"
 #include "mongo/db/repl/oplog.h"
 #include "mongo/db/repl/optime.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 
@@ -194,15 +197,20 @@ DbCheckHasher::DbCheckHasher(OperationContext* opCtx,
     uassert(ErrorCodes::IndexNotFound, "dbCheck needs _id index", desc);
 
     // Set up a simple index scan on that.
-    _exec = InternalPlanner::indexScan(opCtx,
-                                       collection,
-                                       desc,
-                                       start.obj(),
-                                       end.obj(),
-                                       BoundInclusion::kIncludeEndKeyOnly,
-                                       PlanExecutor::NO_YIELD,
-                                       InternalPlanner::FORWARD,
-                                       InternalPlanner::IXSCAN_FETCH);
+    _exec = InternalPlanner::indexScan(
+        opCtx,
+        collection,
+        desc,
+        start.obj(),
+        end.obj(),
+        BoundInclusion::kIncludeEndKeyOnly,
+        PlanExecutor::NO_YIELD,
+        InternalPlanner::FORWARD,
+        // Do not use IXSCAN_FETCH, which would fetch documents after
+        // index keys. Instead fetch the keys and manually lookup the documents.
+        InternalPlanner::IXSCAN_DEFAULT);
+
+    _cursor = collection->getRecordStore()->getCursor(opCtx);
 }
 
 
@@ -302,10 +310,22 @@ std::unique_ptr<HealthLogEntry> dbCheckCollectionEntry(const NamespaceString& ns
 }
 
 Status DbCheckHasher::hashAll(void) {
-    BSONObj currentObj;
+    BSONObj key;
+    RecordId recordId;
+
+    // Estabish a cursor on the RecordStore to verify the entries from the index. Since no yielding
+    // is occuring, this is safe to do.
 
     PlanExecutor::ExecState lastState;
-    while (PlanExecutor::ADVANCED == (lastState = _exec->getNext(&currentObj, nullptr))) {
+    while (PlanExecutor::ADVANCED == (lastState = _exec->getNext(&key, &recordId))) {
+        // If there is no document for a given key, that is an indication of data corruption.
+        auto record = _cursor->seekExact(recordId);
+        if (!record) {
+            return Status(ErrorCodes::NoMatchingDocument,
+                          str::stream() << "Could not find document for " << recordId);
+        }
+
+        BSONObj currentObj = record->data.toBson();
         if (!currentObj.hasField("_id")) {
             return Status(ErrorCodes::NoSuchKey, "Document missing _id");
         }
@@ -395,41 +415,27 @@ BSONObj collectionOptions(OperationContext* opCtx, Collection* collection) {
     return collection->getCatalogEntry()->getCollectionOptions(opCtx).toBSON();
 }
 
-AutoGetDbForDbCheck::AutoGetDbForDbCheck(OperationContext* opCtx, const NamespaceString& nss)
-    : localLock(opCtx, "local"_sd, MODE_IX), agd(opCtx, nss.db(), MODE_S) {}
-
-AutoGetCollectionForDbCheck::AutoGetCollectionForDbCheck(OperationContext* opCtx,
-                                                         const NamespaceString& nss,
-                                                         const OplogEntriesEnum& type)
-    : _agd(opCtx, nss), _collLock(opCtx, nss, MODE_S) {
-    std::string msg;
-
-    _collection = _agd.getDb() ? _agd.getDb()->getCollection(opCtx, nss) : nullptr;
-
-    // If the collection gets deleted after the check is launched, record that in the health log.
-    if (!_collection) {
-        msg = "Collection under dbCheck no longer exists";
-
-        auto entry = dbCheckHealthLogEntry(nss,
-                                           SeverityEnum::Error,
-                                           "dbCheck failed",
-                                           type,
-                                           BSON("success" << false << "error" << msg));
-        HealthLog::get(opCtx).log(*entry);
-    }
-}
-
-namespace {
-
 Status dbCheckBatchOnSecondary(OperationContext* opCtx,
                                const repl::OpTime& optime,
                                const DbCheckOplogBatch& entry) {
-    AutoGetCollectionForDbCheck agc(opCtx, entry.getNss(), entry.getType());
-    Collection* collection = agc.getCollection();
+    AutoGetCollectionForRead autoColl(opCtx, entry.getNss());
+    Collection* collection = autoColl.getCollection();
     std::string msg = "replication consistency check";
 
+    log() << "reading at lastApplied (" << collection->ns()
+          << "): " << (opCtx->recoveryUnit()->getTimestampReadSource() ==
+                       RecoveryUnit::ReadSource::kLastApplied);
+
+    // If the collection gets deleted after the check is launched, record that in the health log.
     if (!collection) {
-        return Status::OK();
+        msg = "Collection under dbCheck no longer exists";
+
+        auto logEntry = dbCheckHealthLogEntry(entry.getNss(),
+                                              SeverityEnum::Error,
+                                              "dbCheck failed",
+                                              entry.getType(),
+                                              BSON("success" << false << "error" << msg));
+        HealthLog::get(opCtx).log(*logEntry);
     }
 
     // Set up the hasher,
@@ -498,15 +504,15 @@ Status dbCheckDatabaseOnSecondary(OperationContext* opCtx,
     expected.collectionName = entry.getNss().coll().toString();
     found.collectionName = collection->ns().coll().toString();
 
-    auto prevAndNext = getPrevAndNextUUIDs(opCtx, collection);
+    // auto prevAndNext = getPrevAndNextUUIDs(opCtx, collection);
 
     // found/expected previous UUID,
-    expected.prev = entry.getPrev();
-    found.prev = prevAndNext.first;
+    // expected.prev = entry.getPrev();
+    // found.prev = prevAndNext.first;
 
     // found/expected next UUID,
-    expected.next = entry.getNext();
-    found.next = prevAndNext.second;
+    // expected.next = entry.getNext();
+    // found.next = prevAndNext.second;
 
     // found/expected indices,
     expected.indexes = entry.getIndexes();

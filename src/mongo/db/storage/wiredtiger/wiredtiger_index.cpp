@@ -497,7 +497,7 @@ bool WiredTigerIndex::isDup(OperationContext* opCtx, WT_CURSOR* c, const BSONObj
     invariant(unique());
 
     // First check whether the key exists.
-    KeyString data(keyStringVersion(), key, _ordering);
+    KeyString data = KeyString::Builder(keyStringVersion(), key, _ordering).done();
     WiredTigerItem item(data.getBuffer(), data.getSize());
     setKey(c, item.Get());
 
@@ -607,7 +607,8 @@ public:
         : BulkBuilder(idx, opCtx, prefix), _idx(idx) {}
 
     StatusWith<SpecialFormatInserted> addKey(const BSONObj& key, const RecordId& id) override {
-        KeyString data(_idx->keyStringVersion(), key, _idx->_ordering, id);
+        const KeyString data =
+            KeyString::Builder(_idx->keyStringVersion(), key, _idx->_ordering, id).done();
 
         // Can't use WiredTigerCursor since we aren't using the cache.
         WiredTigerItem item(data.getBuffer(), data.getSize());
@@ -782,7 +783,7 @@ private:
 
     WiredTigerIndex* _idx;
     const bool _dupsAllowed;
-    KeyString _keyString;
+    KeyString::Builder _keyString;
     std::vector<std::pair<RecordId, KeyString::TypeBits>> _records;
     BSONObj _previousKey;
 };
@@ -801,9 +802,9 @@ public:
         : _opCtx(opCtx),
           _idx(idx),
           _forward(forward),
-          _key(idx.keyStringVersion()),
+          _key(idx.keyStringVersion(), _idx.ordering()),
           _typeBits(idx.keyStringVersion()),
-          _query(idx.keyStringVersion()),
+          _query(idx.keyStringVersion(), _idx.ordering()),
           _prefix(prefix) {
         _cursor.emplace(_idx.uri(), _idx.tableId(), false, _opCtx);
     }
@@ -831,8 +832,8 @@ public:
         // end after the key if inclusive and before if exclusive.
         const auto discriminator =
             _forward == inclusive ? KeyString::kExclusiveAfter : KeyString::kExclusiveBefore;
-        _endPosition = std::make_unique<KeyString>(_idx.keyStringVersion());
-        _endPosition->resetToKey(stripFieldNames(key), _idx.ordering(), discriminator);
+        _endPosition = std::make_unique<KeyString::Builder>(
+            _idx.keyStringVersion(), stripFieldNames(key), _idx.ordering(), discriminator);
     }
 
     boost::optional<IndexKeyEntry> seek(const BSONObj& key,
@@ -846,7 +847,7 @@ public:
         // By using a discriminator other than kInclusive, there is no need to distinguish
         // unique vs non-unique key formats since both start with the key.
         _query.resetToKey(finalKey, _idx.ordering(), discriminator);
-        seekWTCursor(_query);
+        seekWTCursor(_query.getView());
         updatePosition();
         return curr(parts);
     }
@@ -861,7 +862,7 @@ public:
         const auto discriminator =
             _forward ? KeyString::kExclusiveBefore : KeyString::kExclusiveAfter;
         _query.resetToKey(key, _idx.ordering(), discriminator);
-        seekWTCursor(_query);
+        seekWTCursor(_query.getView());
         updatePosition();
         return curr(parts);
     }
@@ -984,7 +985,7 @@ protected:
         if (!_endPosition)
             return false;
 
-        const int cmp = _key.compare(*_endPosition);
+        const int cmp = _key.compare(_endPosition->getView());
 
         // We set up _endPosition to be in between the last in-range value and the first
         // out-of-range value. In particular, it is constructed to never equal any legal index
@@ -1068,13 +1069,14 @@ protected:
         WT_ITEM item;
         getKey(c, &item);
 
-        const auto isForwardNextCall = _forward && inNext && !_key.isEmpty();
+        const KeyString key = _keyBuilder.getView();
+        const auto isForwardNextCall = _forward && inNext && !key.isEmpty();
         if (isForwardNextCall) {
             // Due to a bug in wired tiger (SERVER-21867) sometimes calling next
             // returns something prev.
             const int cmp =
-                std::memcmp(_key.getBuffer(), item.data, std::min(_key.getSize(), item.size));
-            bool nextNotIncreasing = cmp > 0 || (cmp == 0 && _key.getSize() > item.size);
+                std::memcmp(key.getBuffer(), item.data, std::min(key.getSize(), item.size));
+            bool nextNotIncreasing = cmp > 0 || (cmp == 0 && key.getSize() > item.size);
 
             if (MONGO_FAIL_POINT(WTEmulateOutOfOrderNextIndexKey)) {
                 log() << "WTIndex::updatePosition simulating next key not increasing.";
@@ -1085,7 +1087,7 @@ protected:
                 // Our new key is less than the old key which means the next call moved to !next.
                 log() << "WTIndex::updatePosition -- the new key ( "
                       << redact(toHex(item.data, item.size)) << ") is less than the previous key ("
-                      << redact(_key.toString()) << "), which is a bug.";
+                      << redact(key.toString()) << "), which is a bug.";
 
                 // Crash when test commands are enabled.
                 invariant(!getTestCommandsEnabled());
@@ -1097,7 +1099,7 @@ protected:
         }
 
         // Store (a copy of) the new item data as the current key for this cursor.
-        _key.resetFromBuffer(item.data, item.size);
+        _keyBuilder.resetFromBuffer(item.data, item.size);
 
         if (atOrPastEndPointAfterSeeking()) {
             _eof = true;
@@ -1114,7 +1116,7 @@ protected:
 
     // These are where this cursor instance is. They are not changed in the face of a failing
     // next().
-    KeyString _key;
+    KeyString::Builder _keyBuilder;
     KeyString::TypeBits _typeBits;
     RecordId _id;
     bool _eof = true;
@@ -1127,10 +1129,10 @@ protected:
     // false by any operation that moves the cursor, other than subsequent save/restore pairs.
     bool _lastMoveSkippedKey = false;
 
-    KeyString _query;
+    KeyString::Builder _query;
     KVPrefix _prefix;
 
-    std::unique_ptr<KeyString> _endPosition;
+    std::unique_ptr<KeyString::Builder> _endPosition;
 };
 
 // The Standard Cursor doesn't need anything more than the base has.

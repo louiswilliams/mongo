@@ -322,13 +322,24 @@ string readInvertedCStringWithNuls(BufReader* reader) {
 }
 }  // namespace
 
-void KeyString::resetToKey(const BSONObj& obj, Ordering ord, RecordId recordId) {
+void KeyString::Builder::append(const BSONElement& elem) {}
+KeyString KeyString::Builder::done() {
+    return KeyString{
+        _version, _typeBits, _buffer.release(), static_cast<size_t>(_buffer.getSize())};
+}
+
+const KeyString KeyString::Builder::getView() {
+    return KeyString{_version, _typeBits, _buffer.buf(), static_cast<size_t>(_buffer.getSize())};
+}
+
+
+void KeyString::Builder::resetToKey(const BSONObj& obj, Ordering ord, RecordId recordId) {
     resetToEmpty();
     _appendAllElementsForIndexing(obj, ord, kInclusive);
     appendRecordId(recordId);
 }
 
-void KeyString::resetToKey(const BSONObj& obj, Ordering ord, Discriminator discriminator) {
+void KeyString::Builder::resetToKey(const BSONObj& obj, Ordering ord, Discriminator discriminator) {
     resetToEmpty();
     _appendAllElementsForIndexing(obj, ord, discriminator);
 }
@@ -337,9 +348,9 @@ void KeyString::resetToKey(const BSONObj& obj, Ordering ord, Discriminator discr
 // -----------   APPEND CODE  -------------------------------------------
 // ----------------------------------------------------------------------
 
-void KeyString::_appendAllElementsForIndexing(const BSONObj& obj,
-                                              Ordering ord,
-                                              Discriminator discriminator) {
+void KeyString::Builder::_appendAllElementsForIndexing(const BSONObj& obj,
+                                                       Ordering ord,
+                                                       Discriminator discriminator) {
     int elemCount = 0;
     BSONObjIterator it(obj);
     while (auto elem = it.next()) {
@@ -382,7 +393,7 @@ void KeyString::_appendAllElementsForIndexing(const BSONObj& obj,
     _append(kEnd, false);
 }
 
-void KeyString::appendRecordId(RecordId loc) {
+void KeyString::Builder::appendRecordId(RecordId loc) {
     // The RecordId encoding must be able to determine the full length starting from the last
     // byte, without knowing where the first byte is since it is stored at the end of a
     // KeyString, and we need to be able to read the RecordId without decoding the whole thing.
@@ -428,7 +439,7 @@ void KeyString::appendRecordId(RecordId loc) {
     _append(lastByte, false);
 }
 
-void KeyString::appendTypeBits(const TypeBits& typeBits) {
+void KeyString::Builder::appendTypeBits(const TypeBits& typeBits) {
     // As an optimization, encode AllZeros as a single 0 byte.
     if (typeBits.isAllZeros()) {
         _append(uint8_t(0), false);
@@ -438,11 +449,11 @@ void KeyString::appendTypeBits(const TypeBits& typeBits) {
     _appendBytes(typeBits.getBuffer(), typeBits.getSize(), false);
 }
 
-void KeyString::_appendBool(bool val, bool invert) {
+void KeyString::Builder::_appendBool(bool val, bool invert) {
     _append(val ? CType::kBoolTrue : CType::kBoolFalse, invert);
 }
 
-void KeyString::_appendDate(Date_t val, bool invert) {
+void KeyString::Builder::_appendDate(Date_t val, bool invert) {
     _append(CType::kDate, invert);
     // see: http://en.wikipedia.org/wiki/Offset_binary
     uint64_t encoded = static_cast<uint64_t>(val.asInt64());
@@ -450,40 +461,40 @@ void KeyString::_appendDate(Date_t val, bool invert) {
     _append(endian::nativeToBig(encoded), invert);
 }
 
-void KeyString::_appendTimestamp(Timestamp val, bool invert) {
+void KeyString::Builder::_appendTimestamp(Timestamp val, bool invert) {
     _append(CType::kTimestamp, invert);
     _append(endian::nativeToBig(val.asLL()), invert);
 }
 
-void KeyString::_appendOID(OID val, bool invert) {
+void KeyString::Builder::_appendOID(OID val, bool invert) {
     _append(CType::kOID, invert);
     _appendBytes(val.view().view(), OID::kOIDSize, invert);
 }
 
-void KeyString::_appendString(StringData val, bool invert) {
+void KeyString::Builder::_appendString(StringData val, bool invert) {
     _typeBits.appendString();
     _append(CType::kStringLike, invert);
     _appendStringLike(val, invert);
 }
 
-void KeyString::_appendSymbol(StringData val, bool invert) {
+void KeyString::Builder::_appendSymbol(StringData val, bool invert) {
     _typeBits.appendSymbol();
     _append(CType::kStringLike, invert);  // Symbols and Strings compare equally
     _appendStringLike(val, invert);
 }
 
-void KeyString::_appendCode(StringData val, bool invert) {
+void KeyString::Builder::_appendCode(StringData val, bool invert) {
     _append(CType::kCode, invert);
     _appendStringLike(val, invert);
 }
 
-void KeyString::_appendCodeWString(const BSONCodeWScope& val, bool invert) {
+void KeyString::Builder::_appendCodeWString(const BSONCodeWScope& val, bool invert) {
     _append(CType::kCodeWithScope, invert);
     _appendStringLike(val.code, invert);
     _appendBson(val.scope, invert);
 }
 
-void KeyString::_appendBinData(const BSONBinData& val, bool invert) {
+void KeyString::Builder::_appendBinData(const BSONBinData& val, bool invert) {
     _append(CType::kBinData, invert);
     if (val.length < 0xff) {
         // size fits in one byte so use one byte to encode.
@@ -497,7 +508,7 @@ void KeyString::_appendBinData(const BSONBinData& val, bool invert) {
     _appendBytes(val.data, val.length, invert);
 }
 
-void KeyString::_appendRegex(const BSONRegEx& val, bool invert) {
+void KeyString::Builder::_appendRegex(const BSONRegEx& val, bool invert) {
     _append(CType::kRegEx, invert);
     // note: NULL is not allowed in pattern or flags
     _appendBytes(val.pattern.rawData(), val.pattern.size(), invert);
@@ -506,14 +517,14 @@ void KeyString::_appendRegex(const BSONRegEx& val, bool invert) {
     _append(int8_t(0), invert);
 }
 
-void KeyString::_appendDBRef(const BSONDBRef& val, bool invert) {
+void KeyString::Builder::_appendDBRef(const BSONDBRef& val, bool invert) {
     _append(CType::kDBRef, invert);
     _append(endian::nativeToBig(int32_t(val.ns.size())), invert);
     _appendBytes(val.ns.rawData(), val.ns.size(), invert);
     _appendBytes(val.oid.view().view(), OID::kOIDSize, invert);
 }
 
-void KeyString::_appendArray(const BSONArray& val, bool invert) {
+void KeyString::Builder::_appendArray(const BSONArray& val, bool invert) {
     _append(CType::kArray, invert);
     BSONForEach(elem, val) {
         // No generic ctype byte needed here since no name is encoded.
@@ -522,12 +533,12 @@ void KeyString::_appendArray(const BSONArray& val, bool invert) {
     _append(int8_t(0), invert);
 }
 
-void KeyString::_appendObject(const BSONObj& val, bool invert) {
+void KeyString::Builder::_appendObject(const BSONObj& val, bool invert) {
     _append(CType::kObject, invert);
     _appendBson(val, invert);
 }
 
-void KeyString::_appendNumberDouble(const double num, bool invert) {
+void KeyString::Builder::_appendNumberDouble(const double num, bool invert) {
     if (num == 0.0 && std::signbit(num))
         _typeBits.appendZero(TypeBits::kNegativeDoubleZero);
     else
@@ -536,9 +547,9 @@ void KeyString::_appendNumberDouble(const double num, bool invert) {
     _appendDoubleWithoutTypeBits(num, kDCMEqualToDouble, invert);
 }
 
-void KeyString::_appendDoubleWithoutTypeBits(const double num,
-                                             DecimalContinuationMarker dcm,
-                                             bool invert) {
+void KeyString::Builder::_appendDoubleWithoutTypeBits(const double num,
+                                                      DecimalContinuationMarker dcm,
+                                                      bool invert) {
     const bool isNegative = num < 0.0;
     const double magnitude = isNegative ? -num : num;
 
@@ -565,7 +576,7 @@ void KeyString::_appendDoubleWithoutTypeBits(const double num,
             return;
         }
 
-        if (version == Version::V0) {
+        if (_version == Version::V0) {
             invariant(dcm == kDCMEqualToDouble);
             // There is a fractional part.
             _appendPreshiftedIntegerPortion((integerPart << 1) | 1, isNegative, invert);
@@ -609,17 +620,17 @@ void KeyString::_appendDoubleWithoutTypeBits(const double num,
     }
 }
 
-void KeyString::_appendNumberLong(const long long num, bool invert) {
+void KeyString::Builder::_appendNumberLong(const long long num, bool invert) {
     _typeBits.appendNumberLong();
     _appendInteger(num, invert);
 }
 
-void KeyString::_appendNumberInt(const int num, bool invert) {
+void KeyString::Builder::_appendNumberInt(const int num, bool invert) {
     _typeBits.appendNumberInt();
     _appendInteger(num, invert);
 }
 
-void KeyString::_appendNumberDecimal(const Decimal128 dec, bool invert) {
+void KeyString::Builder::_appendNumberDecimal(const Decimal128 dec, bool invert) {
     bool isNegative = dec.isNegative();
     if (dec.isZero()) {
         uint32_t zeroExp = dec.getBiasedExponent();
@@ -773,7 +784,9 @@ void KeyString::_appendNumberDecimal(const Decimal128 dec, bool invert) {
     _append(decimalContinuation, isNegative ? !invert : invert);
 }
 
-void KeyString::_appendBsonValue(const BSONElement& elem, bool invert, const StringData* name) {
+void KeyString::Builder::_appendBsonValue(const BSONElement& elem,
+                                          bool invert,
+                                          const StringData* name) {
     if (name) {
         _appendBytes(name->rawData(), name->size() + 1, invert);  // + 1 for NUL
     }
@@ -847,7 +860,7 @@ void KeyString::_appendBsonValue(const BSONElement& elem, bool invert, const Str
         case NumberDecimal:
             uassert(ErrorCodes::UnsupportedFormat,
                     "Index version does not support NumberDecimal",
-                    version >= Version::V1);
+                    _version >= Version::V1);
             _appendNumberDecimal(elem._numberDecimal(), invert);
             break;
     }
@@ -856,7 +869,7 @@ void KeyString::_appendBsonValue(const BSONElement& elem, bool invert, const Str
 
 /// -- lowest level
 
-void KeyString::_appendStringLike(StringData str, bool invert) {
+void KeyString::Builder::_appendStringLike(StringData str, bool invert) {
     while (true) {
         size_t firstNul = strnlen(str.rawData(), str.size());
         // No NULs in string.
@@ -872,7 +885,7 @@ void KeyString::_appendStringLike(StringData str, bool invert) {
     }
 }
 
-void KeyString::_appendBson(const BSONObj& obj, bool invert) {
+void KeyString::Builder::_appendBson(const BSONObj& obj, bool invert) {
     BSONForEach(elem, obj) {
         // Force the order to be based on (ctype, name, value).
         _append(bsonTypeToGenericKeyStringType(elem.type()), invert);
@@ -882,7 +895,9 @@ void KeyString::_appendBson(const BSONObj& obj, bool invert) {
     _append(int8_t(0), invert);
 }
 
-void KeyString::_appendSmallDouble(double value, DecimalContinuationMarker dcm, bool invert) {
+void KeyString::Builder::_appendSmallDouble(double value,
+                                            DecimalContinuationMarker dcm,
+                                            bool invert) {
     bool isNegative = value < 0;
     double magnitude = isNegative ? -value : value;
     dassert(!std::isnan(value) && value != 0 && magnitude < 1);
@@ -893,7 +908,7 @@ void KeyString::_appendSmallDouble(double value, DecimalContinuationMarker dcm, 
 
     uint64_t encoded;
 
-    if (version == KeyString::Version::V0) {
+    if (_version == KeyString::Version::V0) {
         // Not using magnitude to preserve sign bit in V0
         memcpy(&encoded, &value, sizeof(encoded));
     } else if (magnitude >= kTiniestDoubleWith2BitDCM) {
@@ -920,7 +935,9 @@ void KeyString::_appendSmallDouble(double value, DecimalContinuationMarker dcm, 
     _append(endian::nativeToBig(encoded), isNegative ? !invert : invert);
 }
 
-void KeyString::_appendLargeDouble(double value, DecimalContinuationMarker dcm, bool invert) {
+void KeyString::Builder::_appendLargeDouble(double value,
+                                            DecimalContinuationMarker dcm,
+                                            bool invert) {
     dassert(!std::isnan(value));
     dassert(value != 0.0);
     invariant(dcm != kDCMEqualToDoubleRoundedUpTo15Digits);  // only single DCM bit here
@@ -932,7 +949,7 @@ void KeyString::_appendLargeDouble(double value, DecimalContinuationMarker dcm, 
     uint64_t encoded;
     memcpy(&encoded, &value, sizeof(encoded));
 
-    if (version != Version::V0) {
+    if (_version != Version::V0) {
         if (std::isfinite(value)) {
             encoded <<= 1;
             encoded &= ~(1ULL << 63);
@@ -945,9 +962,9 @@ void KeyString::_appendLargeDouble(double value, DecimalContinuationMarker dcm, 
     _append(encoded, value > 0 ? invert : !invert);
 }
 
-void KeyString::_appendTinyDecimalWithoutTypeBits(const Decimal128 dec,
-                                                  const double bin,
-                                                  bool invert) {
+void KeyString::Builder::_appendTinyDecimalWithoutTypeBits(const Decimal128 dec,
+                                                           const double bin,
+                                                           bool invert) {
     // This function is only for 'dec' that doesn't exactly equal a double, but rounds to 'bin'
     dassert(bin == dec.toDouble(Decimal128::kRoundTowardZero));
     dassert(std::abs(bin) < DBL_MIN);
@@ -1002,7 +1019,7 @@ void KeyString::_appendTinyDecimalWithoutTypeBits(const Decimal128 dec,
 }
 
 
-void KeyString::_appendHugeDecimalWithoutTypeBits(const Decimal128 dec, bool invert) {
+void KeyString::Builder::_appendHugeDecimalWithoutTypeBits(const Decimal128 dec, bool invert) {
     // To allow us to use CType::kNumericNegativeLargeMagnitude we need to fit between the highest
     // finite double and the representation of +/-Inf. We do this by forcing the high bit to 1
     // (large doubles always have 0) and never encoding ~0 here.
@@ -1021,7 +1038,7 @@ void KeyString::_appendHugeDecimalWithoutTypeBits(const Decimal128 dec, bool inv
 }
 
 // Handles NumberLong and NumberInt which are encoded identically except for the TypeBits.
-void KeyString::_appendInteger(const long long num, bool invert) {
+void KeyString::Builder::_appendInteger(const long long num, bool invert) {
     if (num == std::numeric_limits<long long>::min()) {
         // -2**63 is exactly representable as a double and not as a positive int64.
         // Therefore we encode it as a double.
@@ -1040,7 +1057,9 @@ void KeyString::_appendInteger(const long long num, bool invert) {
     _appendPreshiftedIntegerPortion(magnitude << 1, isNegative, invert);
 }
 
-void KeyString::_appendPreshiftedIntegerPortion(uint64_t value, bool isNegative, bool invert) {
+void KeyString::Builder::_appendPreshiftedIntegerPortion(uint64_t value,
+                                                         bool isNegative,
+                                                         bool invert) {
     dassert(value != 0ULL);
     dassert(value != 1ULL);
 
@@ -1060,11 +1079,11 @@ void KeyString::_appendPreshiftedIntegerPortion(uint64_t value, bool isNegative,
 }
 
 template <typename T>
-void KeyString::_append(const T& thing, bool invert) {
+void KeyString::Builder::_append(const T& thing, bool invert) {
     _appendBytes(&thing, sizeof(thing), invert);
 }
 
-void KeyString::_appendBytes(const void* source, size_t bytes, bool invert) {
+void KeyString::Builder::_appendBytes(const void* source, size_t bytes, bool invert) {
     char* const base = _buffer.skip(bytes);
 
     if (invert) {

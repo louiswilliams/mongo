@@ -53,6 +53,12 @@ public:
         return version == Version::V0 ? "V0" : "V1";
     }
 
+    enum Discriminator {
+        kInclusive,  // Anything to be stored in an index must use this.
+        kExclusiveBefore,
+        kExclusiveAfter,
+    };
+
     /**
      * Provides the latest version of KeyString available.
      */
@@ -288,12 +294,6 @@ public:
         StackBufBuilder _buf;
     };
 
-    enum Discriminator {
-        kInclusive,  // Anything to be stored in an index must use this.
-        kExclusiveBefore,
-        kExclusiveAfter,
-    };
-
     /**
      * Encodes the kind of NumberDecimal that is stored.
      */
@@ -304,24 +304,114 @@ public:
         kDCMHasContinuationLargerThanDoubleRoundedUpTo15Digits = 0x3
     };
 
-    explicit KeyString(Version version) : version(version), _typeBits(version) {}
+    class Builder {
+    public:
+        Builder(Version version, Ordering ordering, Discriminator discriminator = kInclusive)
+            : _version(version),
+              _typeBits(version),
+              _ordering(ordering),
+              _discriminator(discriminator) {}
+        Builder(Version version, Ordering ordering, RecordId recordId)
+            : _version(version),
+              _typeBits(version),
+              _ordering(ordering),
+              _discriminator(kInclusive),
+              _recordId(recordId) {}
 
-    KeyString(Version version, const BSONObj& obj, Ordering ord, RecordId recordId)
-        : KeyString(version) {
-        resetToKey(obj, ord, recordId);
-    }
+        Builder(Version version, const BSONObj& obj, Ordering ord, RecordId recordId)
+            : Builder(version, ord, recordId) {
+            resetToKey(obj, ord, recordId);
+        }
 
-    KeyString(Version version,
-              const BSONObj& obj,
-              Ordering ord,
-              Discriminator discriminator = kInclusive)
-        : KeyString(version) {
-        resetToKey(obj, ord, discriminator);
-    }
+        Builder(Version version,
+                const BSONObj& obj,
+                Ordering ord,
+                Discriminator discriminator = kInclusive)
+            : Builder(version, ord, discriminator) {
+            resetToKey(obj, ord, discriminator);
+        }
 
-    KeyString(Version version, RecordId rid) : version(version), _typeBits(version) {
-        appendRecordId(rid);
-    }
+        void append(const BSONElement& elem);
+        KeyString done();
+        const KeyString getView();
+
+        void appendRecordId(RecordId loc);
+        void appendTypeBits(const TypeBits& bits);
+
+        /**
+         * Resets to an empty state.
+         * Equivalent to but faster than *this = KeyString()
+         */
+        void resetToEmpty() {
+            _buffer = {};
+            _typeBits.reset();
+        }
+
+        void resetToKey(const BSONObj& obj, Ordering ord, RecordId recordId);
+        void resetToKey(const BSONObj& obj, Ordering ord, Discriminator discriminator = kInclusive);
+        void resetFromBuffer(const void* buffer, size_t size) {
+            _buffer = {};
+            memcpy(_buffer.skip(size), buffer, size);
+        }
+
+    private:
+        void _appendAllElementsForIndexing(const BSONObj& obj,
+                                           Ordering ord,
+                                           Discriminator discriminator);
+
+        void _appendBool(bool val, bool invert);
+        void _appendDate(Date_t val, bool invert);
+        void _appendTimestamp(Timestamp val, bool invert);
+        void _appendOID(OID val, bool invert);
+        void _appendString(StringData val, bool invert);
+        void _appendSymbol(StringData val, bool invert);
+        void _appendCode(StringData val, bool invert);
+        void _appendCodeWString(const BSONCodeWScope& val, bool invert);
+        void _appendBinData(const BSONBinData& val, bool invert);
+        void _appendRegex(const BSONRegEx& val, bool invert);
+        void _appendDBRef(const BSONDBRef& val, bool invert);
+        void _appendArray(const BSONArray& val, bool invert);
+        void _appendObject(const BSONObj& val, bool invert);
+        void _appendNumberDouble(const double num, bool invert);
+        void _appendNumberLong(const long long num, bool invert);
+        void _appendNumberInt(const int num, bool invert);
+        void _appendNumberDecimal(const Decimal128 num, bool invert);
+
+        /**
+         * @param name - optional, can be NULL
+         *              if NULL, not included in encoding
+         *              if not NULL, put in after type, before value
+         */
+        void _appendBsonValue(const BSONElement& elem, bool invert, const StringData* name);
+
+        void _appendStringLike(StringData str, bool invert);
+        void _appendBson(const BSONObj& obj, bool invert);
+        void _appendSmallDouble(double value, DecimalContinuationMarker dcm, bool invert);
+        void _appendLargeDouble(double value, DecimalContinuationMarker dcm, bool invert);
+        void _appendInteger(const long long num, bool invert);
+        void _appendPreshiftedIntegerPortion(uint64_t value, bool isNegative, bool invert);
+
+        void _appendDoubleWithoutTypeBits(const double num,
+                                          DecimalContinuationMarker dcm,
+                                          bool invert);
+        void _appendHugeDecimalWithoutTypeBits(const Decimal128 dec, bool invert);
+        void _appendTinyDecimalWithoutTypeBits(const Decimal128 dec, const double bin, bool invert);
+
+        template <typename T>
+        void _append(const T& thing, bool invert);
+        void _appendBytes(const void* source, size_t bytes, bool invert);
+
+        const Version _version;
+        TypeBits _typeBits;
+        Ordering _ordering;
+        Discriminator _discriminator;
+        RecordId _recordId;
+
+        BufBuilder _buffer;
+    };
+
+    KeyString(Version version, TypeBits typeBits, ConstSharedBuffer buffer, size_t size)
+        : _version(version), _typeBits(typeBits), _buffer(std::move(buffer)), _size(size) {}
 
     static size_t getKeySize(const char* buffer,
                              size_t len,
@@ -356,33 +446,14 @@ public:
      */
     static RecordId decodeRecordId(BufReader* reader);
 
-    void appendRecordId(RecordId loc);
-    void appendTypeBits(const TypeBits& bits);
-
-    /**
-     * Resets to an empty state.
-     * Equivalent to but faster than *this = KeyString()
-     */
-    void resetToEmpty() {
-        _buffer.reset();
-        _typeBits.reset();
-    }
-
-    void resetToKey(const BSONObj& obj, Ordering ord, RecordId recordId);
-    void resetToKey(const BSONObj& obj, Ordering ord, Discriminator discriminator = kInclusive);
-    void resetFromBuffer(const void* buffer, size_t size) {
-        _buffer.reset();
-        memcpy(_buffer.skip(size), buffer, size);
-    }
-
     const char* getBuffer() const {
-        return _buffer.buf();
+        return _buffer.get();
     }
     size_t getSize() const {
-        return _buffer.len();
+        return _size;
     }
     bool isEmpty() const {
-        return _buffer.len() == 0;
+        return _size == 0;
     }
 
     const TypeBits& getTypeBits() const {
@@ -396,59 +467,15 @@ public:
      */
     std::string toString() const;
 
+private:
     /**
      * Version to use for conversion to/from KeyString. V1 has different encodings for numeric
      * values.
      */
-    const Version version;
-
-private:
-    void _appendAllElementsForIndexing(const BSONObj& obj,
-                                       Ordering ord,
-                                       Discriminator discriminator);
-
-    void _appendBool(bool val, bool invert);
-    void _appendDate(Date_t val, bool invert);
-    void _appendTimestamp(Timestamp val, bool invert);
-    void _appendOID(OID val, bool invert);
-    void _appendString(StringData val, bool invert);
-    void _appendSymbol(StringData val, bool invert);
-    void _appendCode(StringData val, bool invert);
-    void _appendCodeWString(const BSONCodeWScope& val, bool invert);
-    void _appendBinData(const BSONBinData& val, bool invert);
-    void _appendRegex(const BSONRegEx& val, bool invert);
-    void _appendDBRef(const BSONDBRef& val, bool invert);
-    void _appendArray(const BSONArray& val, bool invert);
-    void _appendObject(const BSONObj& val, bool invert);
-    void _appendNumberDouble(const double num, bool invert);
-    void _appendNumberLong(const long long num, bool invert);
-    void _appendNumberInt(const int num, bool invert);
-    void _appendNumberDecimal(const Decimal128 num, bool invert);
-
-    /**
-     * @param name - optional, can be NULL
-     *              if NULL, not included in encoding
-     *              if not NULL, put in after type, before value
-     */
-    void _appendBsonValue(const BSONElement& elem, bool invert, const StringData* name);
-
-    void _appendStringLike(StringData str, bool invert);
-    void _appendBson(const BSONObj& obj, bool invert);
-    void _appendSmallDouble(double value, DecimalContinuationMarker dcm, bool invert);
-    void _appendLargeDouble(double value, DecimalContinuationMarker dcm, bool invert);
-    void _appendInteger(const long long num, bool invert);
-    void _appendPreshiftedIntegerPortion(uint64_t value, bool isNegative, bool invert);
-
-    void _appendDoubleWithoutTypeBits(const double num, DecimalContinuationMarker dcm, bool invert);
-    void _appendHugeDecimalWithoutTypeBits(const Decimal128 dec, bool invert);
-    void _appendTinyDecimalWithoutTypeBits(const Decimal128 dec, const double bin, bool invert);
-
-    template <typename T>
-    void _append(const T& thing, bool invert);
-    void _appendBytes(const void* source, size_t bytes, bool invert);
-
-    TypeBits _typeBits;
-    StackBufBuilder _buffer;
+    const Version _version;
+    const TypeBits _typeBits;
+    ConstSharedBuffer _buffer;
+    const size_t _size;
 };
 
 inline bool operator<(const KeyString& lhs, const KeyString& rhs) {

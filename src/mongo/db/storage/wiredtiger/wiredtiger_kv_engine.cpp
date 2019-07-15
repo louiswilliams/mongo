@@ -1218,6 +1218,7 @@ std::unique_ptr<RecordStore> WiredTigerKVEngine::getGroupedRecordStore(
     params.cappedCallback = nullptr;
     params.sizeStorer = _sizeStorer.get();
     params.isReadOnly = _readOnly;
+    params.isClustered = options.clusteredIdIndex;
 
     params.cappedMaxSize = -1;
     if (options.capped) {

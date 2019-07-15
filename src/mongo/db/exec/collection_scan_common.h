@@ -44,6 +44,7 @@ struct CollectionScanParams {
 
     // The RecordId to which we should seek to as the first document of the scan.
     RecordId start;
+    RecordId stop;
 
     // If present, the collection scan will stop and return EOF the first time it sees a document
     // that does not pass the filter and has 'ts' greater than 'maxTs'.

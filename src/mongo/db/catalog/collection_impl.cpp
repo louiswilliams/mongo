@@ -266,6 +266,10 @@ bool CollectionImpl::requiresIdIndex() const {
         }
     }
 
+    if (_recordStore->isClustered()) {
+        return false;
+    }
+
     return true;
 }
 

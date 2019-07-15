@@ -260,6 +260,10 @@ public:
 
     virtual bool isCapped() const = 0;
 
+    virtual bool isClustered() const {
+        return false;
+    };
+
     virtual void setCappedCallback(CappedCallback*) {
         MONGO_UNREACHABLE;
     }

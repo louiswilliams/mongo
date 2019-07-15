@@ -132,6 +132,8 @@ StatusWith<CollectionOptions> CollectionOptions::parse(const BSONObj& options, P
             collectionOptions.uuid = res.getValue();
         } else if (fieldName == "capped") {
             collectionOptions.capped = e.trueValue();
+        } else if (fieldName == "clusteredIdIndex") {
+            collectionOptions.clusteredIdIndex = e.trueValue();
         } else if (fieldName == "size") {
             if (!e.isNumber()) {
                 // Ignoring for backwards compatibility.

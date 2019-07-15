@@ -108,7 +108,7 @@ server_parameters:
         set_at: [ startup, runtime ]
         cpp_vartype: 'AtomicWord<std::int32_t>'
         cpp_varname: gWiredTigerCursorCacheSize
-        default: -100
+        default: 0
 
     wiredTigerMaxCacheOverflowSizeGB:
       description: >-

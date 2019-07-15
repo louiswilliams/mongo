@@ -112,6 +112,7 @@ public:
         CappedCallback* cappedCallback;
         WiredTigerSizeStorer* sizeStorer;
         bool isReadOnly;
+        bool isClustered;
     };
 
     WiredTigerRecordStore(WiredTigerKVEngine* kvEngine, OperationContext* opCtx, Params params);
@@ -128,6 +129,10 @@ public:
     virtual long long numRecords(OperationContext* opCtx) const;
 
     virtual bool isCapped() const;
+
+    virtual bool isClustered() const {
+        return _isClustered;
+    };
 
     virtual int64_t storageSize(OperationContext* opCtx,
                                 BSONObjBuilder* extraInfo = nullptr,
@@ -339,6 +344,7 @@ private:
     const bool _isLogged;
     // True if the namespace of this record store starts with "local.oplog.", and false otherwise.
     const bool _isOplog;
+    const bool _isClustered;
     int64_t _cappedMaxSize;
     const int64_t _cappedMaxSizeSlack;  // when to start applying backpressure
     const int64_t _cappedMaxDocs;

@@ -650,6 +650,7 @@ WiredTigerRecordStore::WiredTigerRecordStore(WiredTigerKVEngine* kvEngine,
                                  getGlobalReplSettings().usingReplSets() ||
                                      repl::ReplSettings::shouldRecoverFromOplogAsStandalone())),
       _isOplog(NamespaceString::oplog(params.ns)),
+      _isClustered(params.isClustered),
       _cappedMaxSize(params.cappedMaxSize),
       _cappedMaxSizeSlack(std::min(params.cappedMaxSize / 10, int64_t(16 * 1024 * 1024))),
       _cappedMaxDocs(params.cappedMaxDocs),
@@ -846,7 +847,7 @@ bool WiredTigerRecordStore::findRecord(OperationContext* opCtx,
                                        RecordData* out) const {
     dassert(opCtx->lockState()->isReadLocked());
 
-    WiredTigerCursor curwrap(_uri, _tableId, true, opCtx);
+    WiredTigerCursor curwrap(_uri, _tableId, !_isClustered, opCtx);
     WT_CURSOR* c = curwrap.get();
     invariant(c);
     setKey(c, id);
@@ -866,7 +867,7 @@ void WiredTigerRecordStore::deleteRecord(OperationContext* opCtx, const RecordId
     // WT_SESSION::truncate().
     invariant(!isCapped());
 
-    WiredTigerCursor cursor(_uri, _tableId, true, opCtx);
+    WiredTigerCursor cursor(_uri, _tableId, !_isClustered, opCtx);
     cursor.assertInActiveTxn();
     WT_CURSOR* c = cursor.get();
     setKey(c, id);
@@ -1239,6 +1240,36 @@ Status WiredTigerRecordStore::insertRecords(OperationContext* opCtx,
     return _insertRecords(opCtx, records->data(), timestamps.data(), records->size());
 }
 
+namespace {
+
+/**
+ * data and len must be the arguments from RecordStore::insert() on an oplog collection.
+ */
+StatusWith<RecordId> extractIdKey(const char* data, int len) {
+    // Use the latest BSON validation version. Oplog entries are allowed to contain decimal data
+    // even if decimal is disabled.
+    DEV invariant(validateBSON(data, len, BSONVersion::kLatest).isOK());
+
+    const BSONObj obj(data);
+    const BSONElement elem = obj["_id"];
+    if (elem.eoo())
+        return StatusWith<RecordId>(ErrorCodes::BadValue, "no _id field");
+    if (!elem.isNumber())
+        return StatusWith<RecordId>(ErrorCodes::BadValue, "_id must be a Number");
+
+    int64_t id = elem.safeNumberLong();
+    if (id < RecordId::kMinRepr) {
+        return StatusWith<RecordId>(ErrorCodes::BadValue, "_id is too small");
+    }
+    if (id == RecordId::kNullRepr) {
+        return StatusWith<RecordId>(ErrorCodes::BadValue, "_id cannot be 0");
+    }
+
+    return RecordId{id};
+}
+}
+
+
 Status WiredTigerRecordStore::_insertRecords(OperationContext* opCtx,
                                              Record* records,
                                              const Timestamp* timestamps,
@@ -1255,7 +1286,7 @@ Status WiredTigerRecordStore::_insertRecords(OperationContext* opCtx,
     if (_isCapped && totalLength > _cappedMaxSize)
         return Status(ErrorCodes::BadValue, "object to insert exceeds cappedMaxSize");
 
-    WiredTigerCursor curwrap(_uri, _tableId, true, opCtx);
+    WiredTigerCursor curwrap(_uri, _tableId, !_isClustered, opCtx);
     curwrap.assertInActiveTxn();
     WT_CURSOR* c = curwrap.get();
     invariant(c);
@@ -1272,6 +1303,12 @@ Status WiredTigerRecordStore::_insertRecords(OperationContext* opCtx,
             record.id = status.getValue();
         } else if (_isCapped) {
             record.id = _nextId();
+        } else if (_isClustered) {
+            auto swId = extractIdKey(record.data.data(), record.data.size());
+            if (!swId.isOK()) {
+                return swId.getStatus();
+            }
+            record.id = swId.getValue();
         } else {
             record.id = _nextId();
         }

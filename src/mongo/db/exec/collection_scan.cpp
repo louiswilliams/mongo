@@ -129,6 +129,12 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
             return PlanStage::NEED_TIME;
         }
 
+        // If we've already scanned passed the stopping point, finish early.
+        if (!_params.stop.isNull() && _lastSeenId >= _params.stop) {
+            _commonStats.isEOF = true;
+            return PlanStage::IS_EOF;
+        }
+
         if (_lastSeenId.isNull() && !_params.start.isNull()) {
             record = _cursor->seekExact(_params.start);
         } else {

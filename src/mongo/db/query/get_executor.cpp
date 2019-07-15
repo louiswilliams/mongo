@@ -674,6 +674,61 @@ std::pair<boost::optional<Timestamp>, boost::optional<Timestamp>> extractTsRange
     }
 }
 
+boost::optional<RecordId> parseClusteredStart(const MatchExpression* matchExpr) {
+    if (!ComparisonMatchExpression::isComparisonMatchExpression(matchExpr) ||
+        matchExpr->path() != "_id") {
+        return boost::none;
+    }
+
+    auto rawElem = static_cast<const ComparisonMatchExpression*>(matchExpr)->getData();
+    if (!rawElem.isNumber()) {
+        return boost::none;
+    }
+
+    switch (matchExpr->matchType()) {
+        case MatchExpression::EQ:
+            return RecordId(rawElem.safeNumberLong());
+        default:
+            return boost::none;
+    }
+}
+
+StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> getClusteredScan(
+    OperationContext* opCtx,
+    Collection* collection,
+    unique_ptr<CanonicalQuery> cq,
+    size_t plannerOptions,
+    PlanExecutor::YieldPolicy yieldPolicy) {
+    invariant(collection);
+    invariant(cq.get());
+
+    auto startLoc = parseClusteredStart(cq->root());
+
+    if (!startLoc) {
+        return Status(ErrorCodes::OplogOperationUnsupported,
+                      "Clustered scan does not contain top-level "
+                      "$eq over the '_id' field.");
+    }
+
+    // Build our collection scan.
+    CollectionScanParams params;
+    if (startLoc) {
+        LOG(1) << "Using direct seek to loc: " << startLoc;
+        params.start = *startLoc;
+        params.stop = *startLoc;
+    }
+    params.direction = CollectionScanParams::FORWARD;
+
+    // Since we've already parsed the matchExpression's to minimum and maximum bounds, don't apply
+    // any filters.
+    // params.stopApplyingFilterAfterFirstMatch = true;
+
+    auto ws = std::make_unique<WorkingSet>();
+    auto cs = std::make_unique<CollectionScan>(opCtx, collection, params, ws.get(), cq->root());
+    return PlanExecutor::make(
+        opCtx, std::move(ws), std::move(cs), std::move(cq), collection, yieldPolicy);
+}
+
 StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> getOplogStartHack(
     OperationContext* opCtx,
     Collection* collection,
@@ -747,6 +802,10 @@ StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> _getExecutorFind(
     size_t plannerOptions) {
     if (nullptr != collection && canonicalQuery->getQueryRequest().isOplogReplay()) {
         return getOplogStartHack(
+            opCtx, collection, std::move(canonicalQuery), plannerOptions, yieldPolicy);
+    }
+    if (nullptr != collection && collection->getRecordStore()->isClustered()) {
+        return getClusteredScan(
             opCtx, collection, std::move(canonicalQuery), plannerOptions, yieldPolicy);
     }
 

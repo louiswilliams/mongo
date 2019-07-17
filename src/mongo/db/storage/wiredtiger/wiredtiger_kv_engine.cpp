@@ -1214,6 +1214,7 @@ std::unique_ptr<RecordStore> WiredTigerKVEngine::getGroupedRecordStore(
     params.ident = ident.toString();
     params.engineName = _canonicalName;
     params.isCapped = options.capped;
+    params.isClustered = options.clusteredIdIndex;
     params.isEphemeral = _ephemeral;
     params.cappedCallback = nullptr;
     params.sizeStorer = _sizeStorer.get();

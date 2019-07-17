@@ -674,22 +674,47 @@ std::pair<boost::optional<Timestamp>, boost::optional<Timestamp>> extractTsRange
     }
 }
 
-boost::optional<RecordId> parseClusteredStart(const MatchExpression* matchExpr) {
+std::pair<boost::optional<RecordId>, boost::optional<RecordId>> parseClusteredStart(
+    const MatchExpression* matchExpr, bool topLevel = true) {
+    boost::optional<RecordId> min;
+    boost::optional<RecordId> max;
+
+    if (matchExpr->matchType() == MatchExpression::AND && topLevel) {
+        for (size_t i = 0; i < matchExpr->numChildren(); ++i) {
+            auto[childMin, childMax] = parseClusteredStart(matchExpr->getChild(i), false);
+            if (childMin && (!min || childMin.get() > min.get())) {
+                min = childMin;
+            }
+            if (childMax && (!max || childMax.get() < max.get())) {
+                max = childMax;
+            }
+        }
+        return {min, max};
+    }
     if (!ComparisonMatchExpression::isComparisonMatchExpression(matchExpr) ||
         matchExpr->path() != "_id") {
-        return boost::none;
+        return {min, max};
     }
 
     auto rawElem = static_cast<const ComparisonMatchExpression*>(matchExpr)->getData();
     if (!rawElem.isNumber()) {
-        return boost::none;
+        return {min, max};
     }
 
     switch (matchExpr->matchType()) {
         case MatchExpression::EQ:
-            return RecordId(rawElem.safeNumberLong());
+            min = RecordId(rawElem.safeNumberLong());
+            max = RecordId(rawElem.safeNumberLong());
+        case MatchExpression::GT:
+        case MatchExpression::GTE:
+            min = RecordId(rawElem.safeNumberLong());
+            return {min, max};
+        case MatchExpression::LT:
+        case MatchExpression::LTE:
+            max = RecordId(rawElem.safeNumberLong());
+            return {min, max};
         default:
-            return boost::none;
+            return {min, max};
     }
 }
 
@@ -702,20 +727,16 @@ StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> getClusteredScan(
     invariant(collection);
     invariant(cq.get());
 
-    auto startLoc = parseClusteredStart(cq->root());
-
-    if (!startLoc) {
-        return Status(ErrorCodes::OplogOperationUnsupported,
-                      "Clustered scan does not contain top-level "
-                      "$eq over the '_id' field.");
-    }
+    auto[startLoc, endLoc] = parseClusteredStart(cq->root());
 
     // Build our collection scan.
     CollectionScanParams params;
     if (startLoc) {
         LOG(1) << "Using direct seek to loc: " << startLoc;
         params.start = *startLoc;
-        params.stop = *startLoc;
+    }
+    if (endLoc) {
+        params.stop = *endLoc;
     }
     params.direction = CollectionScanParams::FORWARD;
 

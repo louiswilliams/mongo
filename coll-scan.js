@@ -8,7 +8,7 @@
 
     assert.commandWorked(db.runCommand({create: collA.getName(), clusteredIdIndex: false}));
     assert.commandWorked(db.runCommand({create: collB.getName(), clusteredIdIndex: true}));
-    const nDocs = 100 * 1000;
+    const nDocs = 2000 * 1000;
 
     [collA, collB].forEach(function(coll) {
         const start = new Date();
@@ -26,15 +26,23 @@
         print('inserted ' + nDocs + ' docs into ' + coll.getName() + ' in ' + elapsed +
               'ms. ops/s: ' + (nDocs / elapsed));
 
-        const collRes = benchRun({
+        const lookupRes = benchRun({
             ops: [
                 {op: "find", ns: coll.getFullName(), query: {_id: {"#RAND_INT": [1, nDocs]}}},
             ],
             seconds: 10,
             host: db.getMongo().host
         });
-        printjson(collRes);
-    });
+        printjson(lookupRes);
 
+        const scanRes = benchRun({
+            ops: [
+                {op: "find", ns: coll.getFullName(), query: {_id: {$gt: 0}}},
+            ],
+            seconds: 30,
+            host: db.getMongo().host
+        });
+        printjson(scanRes);
+    });
 }());
 

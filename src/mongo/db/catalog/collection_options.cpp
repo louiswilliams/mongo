@@ -289,6 +289,9 @@ void CollectionOptions::appendBSON(BSONObjBuilder* builder) const {
             builder->appendNumber("max", cappedMaxDocs);
     }
 
+    if (clusteredIdIndex)
+        builder->appendBool("clusteredIdIndex", true);
+
     if (initialNumExtents)
         builder->appendNumber("$nExtents", initialNumExtents);
     if (!initialExtentSizes.empty())

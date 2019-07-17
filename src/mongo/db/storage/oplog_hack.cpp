@@ -52,7 +52,7 @@ StatusWith<RecordId> keyForOptime(const Timestamp& opTime) {
     if (opTime.getInc() > uint32_t(std::numeric_limits<int32_t>::max()))
         return StatusWith<RecordId>(ErrorCodes::BadValue, "ts inc too high");
 
-    const RecordId out = RecordId(opTime.getSecs(), opTime.getInc());
+    const RecordId out = RecordId((uint64_t(opTime.getSecs()) << 32) + opTime.getInc());
     if (out <= RecordId::min())
         return StatusWith<RecordId>(ErrorCodes::BadValue, "ts too low");
     if (out >= RecordId::max())

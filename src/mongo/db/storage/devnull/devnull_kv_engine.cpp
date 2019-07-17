@@ -103,7 +103,7 @@ public:
                                  const std::vector<Timestamp>& timestamps) {
         _numInserts += inOutRecords->size();
         for (auto& record : *inOutRecords) {
-            record.id = RecordId(6, 4);
+            record.id = RecordId((6l << 32) + 4);
         }
         return Status::OK();
     }

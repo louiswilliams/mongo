@@ -60,18 +60,21 @@ public:
     /**
      * Constructs a Null RecordId.
      */
-    RecordId() : _repr(kNullRepr) {}
-
-    explicit RecordId(int64_t repr) : _repr(repr) {}
+    RecordId() : RecordId(kNullRepr) {}
 
     explicit RecordId(ReservedId repr) : RecordId(static_cast<int64_t>(repr)) {}
+    explicit RecordId(int64_t repr) : RecordId(_fromRepr(repr)) {}
 
+    explicit RecordId(const char* data, size_t len) : RecordId(std::string(data, len)) {}
+    explicit RecordId(std::string data) : _data(data) {}
     /**
      * Construct a RecordId from two halves.
      * TODO consider removing.
      */
-    RecordId(int high, int low) : _repr((uint64_t(high) << 32) | uint32_t(low)) {}
-
+    RecordId(const RecordId& other) : _data(other._data) {}
+    RecordId operator=(const RecordId& other) {
+        return RecordId(other._data);
+    }
     /**
      * A RecordId that compares less than all ids that represent documents in a collection.
      */
@@ -94,11 +97,12 @@ public:
     }
 
     bool isNull() const {
-        return _repr == 0;
+        return repr() == 0;
     }
 
     int64_t repr() const {
-        return _repr;
+        invariant(_data.length() == 4);
+        return *static_cast<int64_t*>((void*)_data.c_str());
     }
 
     /**
@@ -115,18 +119,18 @@ public:
      * excluding the reserved range at the top of the RecordId space.
      */
     bool isNormal() const {
-        return _repr > 0 && _repr < kMinReservedRepr;
+        return repr() > 0 && repr() < kMinReservedRepr;
     }
 
     /**
      * Returns true if this RecordId falls within the reserved range at the top of the record space.
      */
     bool isReserved() const {
-        return _repr >= kMinReservedRepr && _repr < kMaxRepr;
+        return repr() >= kMinReservedRepr && repr() < kMaxRepr;
     }
 
     int compare(RecordId rhs) const {
-        return _repr == rhs._repr ? 0 : _repr < rhs._repr ? -1 : 1;
+        return repr() == rhs.repr() ? 0 : repr() < rhs.repr() ? -1 : 1;
     }
 
     /**
@@ -145,7 +149,7 @@ public:
     /// members for Sorter
     struct SorterDeserializeSettings {};  // unused
     void serializeForSorter(BufBuilder& buf) const {
-        buf.appendNum(static_cast<long long>(_repr));
+        buf.appendNum(static_cast<long long>(repr()));
     }
     static RecordId deserializeForSorter(BufReader& buf, const SorterDeserializeSettings&) {
         return RecordId(buf.read<LittleEndian<int64_t>>());
@@ -158,7 +162,11 @@ public:
     }
 
 private:
-    int64_t _repr;
+    std::string _fromRepr(int64_t repr) {
+        return std::string(static_cast<const char*>((void*)&repr), 4);
+    }
+
+    const std::string _data;
 };
 
 inline bool operator==(RecordId lhs, RecordId rhs) {

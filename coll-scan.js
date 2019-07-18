@@ -9,8 +9,8 @@
     assert.commandWorked(db.runCommand({create: collA.getName(), clusteredIdIndex: false}));
     assert.commandWorked(db.runCommand({create: collB.getName(), clusteredIdIndex: true}));
 
-    const targetDataSize = 10 * 1024 * 1024;
-    const docSize = 10;
+    const targetDataSize = 1.5 * 1024 * 1024 * 1024;
+    const docSize = 1024;
 
     const nDocs = targetDataSize / docSize;
     print("Inserting " + nDocs + " documents");
@@ -23,7 +23,7 @@
         for (let i = 1; i <= nDocs; i++) {
             bulk.insert({
                 // Space out range to reduce possibility of duplicates
-                _id: Random.randInt(nDocs * 100),
+                _id: NumberInt(Random.randInt(nDocs * 100)),
                 a: 'x'.repeat(docSize),
             });
         }
@@ -49,7 +49,12 @@
 
         const scanRes = benchRun({
             ops: [
-                {op: "find", ns: coll.getFullName(), query: {_id: {$gte: 1}}},
+                {
+                  op: "find",
+                  ns: coll.getFullName(),
+                  query: {_id: {$gte: {"#RAND_INT": [1, nDocs]}}},
+                  limit: 1000
+                },
             ],
             seconds: 30,
             host: db.getMongo().host

@@ -734,13 +734,14 @@ StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> getClusteredScan(
     // Build our collection scan.
     CollectionScanParams params;
     if (startLoc) {
-        auto cursor = collection->getRecordStore()->getCursor(opCtx);
-        auto record = cursor->seek(*startLoc);
-        if (!record) {
-            return {ErrorCodes::KeyNotFound, "Could not find any records"};
-        }
-        LOG(1) << "Using direct seek to loc: " << record->id;
-        params.start = record->id;
+        // auto cursor = collection->getRecordStore()->getCursor(opCtx);
+        // auto record = cursor->seek(*startLoc);
+        // if (!record) {
+        // return {ErrorCodes::KeyNotFound, "Could not find any records"};
+        //}
+        // LOG(1) << "Using direct seek to loc: " << record->id;
+        // params.start = record->id;
+        params.start = *startLoc;
     }
     if (endLoc) {
         LOG(1) << "End  loc: " << *endLoc;

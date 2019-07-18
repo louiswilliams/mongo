@@ -136,7 +136,11 @@ PlanStage::StageState CollectionScan::doWork(WorkingSetID* out) {
         }
 
         if (_lastSeenId.isNull() && !_params.start.isNull()) {
-            record = _cursor->seekExact(_params.start);
+            if (collection()->getRecordStore()->isClustered()) {
+                record = _cursor->seek(_params.start);
+            } else {
+                record = _cursor->seekExact(_params.start);
+            }
         } else {
             record = _cursor->next();
         }

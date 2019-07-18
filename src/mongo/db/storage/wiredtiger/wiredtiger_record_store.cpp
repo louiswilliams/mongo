@@ -1964,8 +1964,11 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::seek(const RecordId& id
         }
         invariantWTOK(ret);
     }
-
-    RecordId result = getKey(c);
+    RecordId result;
+    if (hasWrongPrefix(c, &result)) {
+        _eof = true;
+        return {};
+    }
 
     WT_ITEM value;
     invariantWTOK(c->get_value(c, &value));

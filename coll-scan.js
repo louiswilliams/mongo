@@ -8,7 +8,7 @@
 
     assert.commandWorked(db.runCommand({create: collA.getName(), clusteredIdIndex: false}));
     assert.commandWorked(db.runCommand({create: collB.getName(), clusteredIdIndex: true}));
-    const nDocs = 2000 * 1000;
+    const nDocs = 10 * 1000;
 
     [collA, collB].forEach(function(coll) {
         const start = new Date();

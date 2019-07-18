@@ -67,14 +67,12 @@ public:
 
     explicit RecordId(const char* data, size_t len) : RecordId(std::string(data, len)) {}
     explicit RecordId(std::string data) : _data(data) {}
-    /**
-     * Construct a RecordId from two halves.
-     * TODO consider removing.
-     */
-    RecordId(const RecordId& other) : _data(other._data) {}
-    RecordId operator=(const RecordId& other) {
-        return RecordId(other._data);
-    }
+
+    // RecordId(const RecordId& other) : _data(other._data) {}
+    // RecordId& operator=(const RecordId& other) {
+    //_data = other._data;
+    // return *this;
+    //}
     /**
      * A RecordId that compares less than all ids that represent documents in a collection.
      */
@@ -101,7 +99,7 @@ public:
     }
 
     int64_t repr() const {
-        invariant(_data.length() == 4);
+        invariant(_data.length() == sizeof(int64_t));
         return *static_cast<int64_t*>((void*)_data.c_str());
     }
 
@@ -163,10 +161,10 @@ public:
 
 private:
     std::string _fromRepr(int64_t repr) {
-        return std::string(static_cast<const char*>((void*)&repr), 4);
+        return std::string(static_cast<const char*>((void*)&repr), sizeof(int64_t));
     }
 
-    const std::string _data;
+    std::string _data;
 };
 
 inline bool operator==(RecordId lhs, RecordId rhs) {

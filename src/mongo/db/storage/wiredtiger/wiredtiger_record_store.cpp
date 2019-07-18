@@ -51,6 +51,7 @@
 #include "mongo/db/repl/repl_settings.h"
 #include "mongo/db/server_recovery.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/storage/key_string.h"
 #include "mongo/db/storage/oplog_hack.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_customization_hooks.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_global_options.h"
@@ -1254,18 +1255,15 @@ StatusWith<RecordId> extractIdKey(const char* data, int len) {
     const BSONElement elem = obj["_id"];
     if (elem.eoo())
         return StatusWith<RecordId>(ErrorCodes::BadValue, "no _id field");
-    if (!elem.isNumber())
-        return StatusWith<RecordId>(ErrorCodes::BadValue, "_id must be a Number");
+    // if (!elem.isNumber())
+    // return StatusWith<RecordId>(ErrorCodes::BadValue, "_id must be a Number");
+    // int64_t id = elem.safeNumberLong();
+    BSONObjBuilder bob;
+    bob.appendAs(elem, "");
 
-    int64_t id = elem.safeNumberLong();
-    if (id < RecordId::kMinRepr) {
-        return StatusWith<RecordId>(ErrorCodes::BadValue, "_id is too small");
-    }
-    if (id == RecordId::kNullRepr) {
-        return StatusWith<RecordId>(ErrorCodes::BadValue, "_id cannot be 0");
-    }
+    KeyString idString(KeyString::Version::V1, bob.obj(), Ordering::make(BSONObj()));
 
-    return RecordId{id};
+    return RecordId{idString.getBuffer(), idString.getSize()};
 }
 }
 
@@ -2081,7 +2079,9 @@ RecordId WiredTigerRecordStoreStandardCursor::getKey(WT_CURSOR* cursor) const {
 
 bool WiredTigerRecordStoreStandardCursor::hasWrongPrefix(WT_CURSOR* cursor,
                                                          RecordId* recordId) const {
-    invariantWTOK(cursor->get_key(cursor, recordId));
+    std::int64_t key;
+    invariantWTOK(cursor->get_key(cursor, &key));
+    *recordId = RecordId(key);
     return false;
 }
 
@@ -2149,7 +2149,9 @@ RecordId WiredTigerRecordStorePrefixedCursor::getKey(WT_CURSOR* cursor) const {
 bool WiredTigerRecordStorePrefixedCursor::hasWrongPrefix(WT_CURSOR* cursor,
                                                          RecordId* recordId) const {
     std::int64_t prefix;
-    invariantWTOK(cursor->get_key(cursor, &prefix, recordId));
+    std::int64_t key;
+    invariantWTOK(cursor->get_key(cursor, &prefix, &key));
+    *recordId = RecordId(key);
 
     return prefix != _prefix.repr();
 }

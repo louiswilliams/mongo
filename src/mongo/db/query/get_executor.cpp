@@ -81,6 +81,7 @@
 #include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/db/server_options.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/storage/key_string.h"
 #include "mongo/db/storage/oplog_hack.h"
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/scripting/engine.h"
@@ -696,22 +697,23 @@ std::pair<boost::optional<RecordId>, boost::optional<RecordId>> parseClusteredSt
         return {min, max};
     }
 
-    auto rawElem = static_cast<const ComparisonMatchExpression*>(matchExpr)->getData();
-    if (!rawElem.isNumber()) {
-        return {min, max};
-    }
+    // Build RecordIds for clustered seeks.
+    BSONObjBuilder bob;
+    auto elem = static_cast<const ComparisonMatchExpression*>(matchExpr)->getData();
+    bob.appendAs(elem, "");
+    KeyString idString(KeyString::Version::V1, bob.obj(), Ordering::make(BSONObj()));
 
     switch (matchExpr->matchType()) {
         case MatchExpression::EQ:
-            min = RecordId(rawElem.safeNumberLong());
-            max = RecordId(rawElem.safeNumberLong());
+            min = RecordId{idString.getBuffer(), idString.getSize()};
+            max = RecordId{idString.getBuffer(), idString.getSize()};
         case MatchExpression::GT:
         case MatchExpression::GTE:
-            min = RecordId(rawElem.safeNumberLong());
+            min = RecordId{idString.getBuffer(), idString.getSize()};
             return {min, max};
         case MatchExpression::LT:
         case MatchExpression::LTE:
-            max = RecordId(rawElem.safeNumberLong());
+            max = RecordId{idString.getBuffer(), idString.getSize()};
             return {min, max};
         default:
             return {min, max};
@@ -732,10 +734,11 @@ StatusWith<unique_ptr<PlanExecutor, PlanExecutor::Deleter>> getClusteredScan(
     // Build our collection scan.
     CollectionScanParams params;
     if (startLoc) {
-        LOG(1) << "Using direct seek to loc: " << startLoc;
+        LOG(0) << "Using direct seek to loc: " << *startLoc;
         params.start = *startLoc;
     }
     if (endLoc) {
+        LOG(0) << "End  loc: " << *endLoc;
         params.stop = *endLoc;
     }
     params.direction = CollectionScanParams::FORWARD;

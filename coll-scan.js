@@ -10,7 +10,7 @@
     assert.commandWorked(db.runCommand({create: collB.getName(), clusteredIdIndex: true}));
     const nDocs = 10 * 1000;
 
-    [collA, collB].forEach(function(coll) {
+    [collB].forEach(function(coll) {
         const start = new Date();
         const bulk = coll.initializeUnorderedBulkOp();
         for (let i = 1; i <= nDocs; i++) {
@@ -30,7 +30,7 @@
             ops: [
                 {op: "find", ns: coll.getFullName(), query: {_id: {"#RAND_INT": [1, nDocs]}}},
             ],
-            seconds: 10,
+            seconds: 5,
             host: db.getMongo().host
         });
         printjson(lookupRes);
@@ -39,7 +39,7 @@
             ops: [
                 {op: "find", ns: coll.getFullName(), query: {_id: {$gt: 0}}},
             ],
-            seconds: 30,
+            seconds: 5,
             host: db.getMongo().host
         });
         printjson(scanRes);

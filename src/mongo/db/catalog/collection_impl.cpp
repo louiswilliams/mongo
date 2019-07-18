@@ -544,8 +544,9 @@ Status CollectionImpl::_insertDocuments(OperationContext* opCtx,
     int recordIndex = 0;
     for (auto it = begin; it != end; it++) {
         RecordId loc = records[recordIndex++].id;
-        invariant(RecordId::min() < loc);
-        invariant(loc < RecordId::max());
+        // Clustered record stores have no RecordId restrictions
+        invariant(_recordStore->isClustered() || RecordId::min() < loc);
+        invariant(_recordStore->isClustered() || loc < RecordId::max());
 
         BsonRecord bsonRecord = {loc, Timestamp(it->oplogSlot.getTimestamp()), &(it->doc)};
         bsonRecords.push_back(bsonRecord);

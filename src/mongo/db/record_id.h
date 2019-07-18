@@ -60,7 +60,7 @@ public:
     /**
      * Constructs a Null RecordId.
      */
-    RecordId() : RecordId(kNullRepr) {}
+    RecordId() {}
 
     explicit RecordId(ReservedId repr) : RecordId(static_cast<int64_t>(repr)) {}
     explicit RecordId(int64_t repr) : RecordId(_fromRepr(repr)) {}
@@ -94,13 +94,25 @@ public:
         return RecordId(kMinReservedRepr);
     }
 
+    size_t size() const {
+        return _data.size();
+    }
+
+
     bool isNull() const {
-        return repr() == 0;
+        if (size() == 0) {
+            return true;
+        }
+        return size() == sizeof(uint64_t) ? repr() == 0 : false;
     }
 
     int64_t repr() const {
         invariant(_data.length() == sizeof(int64_t));
         return *static_cast<int64_t*>((void*)_data.c_str());
+    }
+
+    const std::string& data() const {
+        return _data;
     }
 
     /**
@@ -117,6 +129,10 @@ public:
      * excluding the reserved range at the top of the RecordId space.
      */
     bool isNormal() const {
+        // "normal" means it can be represented as a 64-bit integer.
+        if (size() != sizeof(uint64_t)) {
+            return false;
+        }
         return repr() > 0 && repr() < kMinReservedRepr;
     }
 
@@ -124,11 +140,30 @@ public:
      * Returns true if this RecordId falls within the reserved range at the top of the record space.
      */
     bool isReserved() const {
+        if (size() != sizeof(uint64_t)) {
+            return false;
+        }
         return repr() >= kMinReservedRepr && repr() < kMaxRepr;
     }
 
-    int compare(RecordId rhs) const {
-        return repr() == rhs.repr() ? 0 : repr() < rhs.repr() ? -1 : 1;
+    // Binary compare data.
+    int compare(RecordId other) const {
+        // Normal case.
+        const int mySize = size();
+        const int otherSize = other.size();
+        if (mySize == sizeof(uint64_t) && otherSize == sizeof(uint64_t)) {
+            return repr() == other.repr() ? 0 : repr() < other.repr() ? -1 : 1;
+        }
+
+        // Binary data case.
+
+        const int min = std::min(mySize, otherSize);
+        const int cmp = memcmp(_data.c_str(), other.data().c_str(), min);
+        if (cmp) {
+            return cmp < 0 ? -1 : 1;
+        }
+
+        return (mySize == otherSize) ? 0 : mySize < otherSize ? -1 : 1;
     }
 
     /**
@@ -168,34 +203,43 @@ private:
 };
 
 inline bool operator==(RecordId lhs, RecordId rhs) {
-    return lhs.repr() == rhs.repr();
+    return lhs.compare(rhs) == 0;
 }
 inline bool operator!=(RecordId lhs, RecordId rhs) {
-    return lhs.repr() != rhs.repr();
+    return lhs.compare(rhs) != 0;
 }
 inline bool operator<(RecordId lhs, RecordId rhs) {
-    return lhs.repr() < rhs.repr();
+    return lhs.compare(rhs) < 0;
 }
 inline bool operator<=(RecordId lhs, RecordId rhs) {
-    return lhs.repr() <= rhs.repr();
+    return lhs.compare(rhs) <= 0;
 }
 inline bool operator>(RecordId lhs, RecordId rhs) {
-    return lhs.repr() > rhs.repr();
+    return lhs.compare(rhs) > 0;
 }
 inline bool operator>=(RecordId lhs, RecordId rhs) {
-    return lhs.repr() >= rhs.repr();
+    return lhs.compare(rhs) >= 0;
 }
 
 inline StringBuilder& operator<<(StringBuilder& stream, const RecordId& id) {
-    return stream << "RecordId(" << id.repr() << ')';
+    if (id.size() == sizeof(uint64_t)) {
+        return stream << "RecordId(" << id.repr() << ')';
+    }
+    return stream << "RecordId(" << id.data() << ')';
 }
 
 inline std::ostream& operator<<(std::ostream& stream, const RecordId& id) {
-    return stream << "RecordId(" << id.repr() << ')';
+    if (id.size() == sizeof(uint64_t)) {
+        return stream << "RecordId(" << id.repr() << ')';
+    }
+    return stream << "RecordId(" << id.data() << ')';
 }
 
 inline std::ostream& operator<<(std::ostream& stream, const boost::optional<RecordId>& id) {
-    return stream << "RecordId(" << (id ? id.get().repr() : 0) << ')';
+    if (id) {
+        return stream << *id;
+    }
+    return stream << "RecordId(0)";
 }
 
 inline logger::LogstreamBuilder& operator<<(logger::LogstreamBuilder& stream, const RecordId& id) {

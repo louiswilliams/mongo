@@ -610,6 +610,8 @@ StatusWith<std::string> WiredTigerRecordStore::generateCreateString(
     // for correct behavior of the server.
     if (prefixed) {
         ss << "key_format=qq";
+    } else if (options.clusteredIdIndex) {
+        ss << "key_format=u";
     } else {
         ss << "key_format=q";
     }
@@ -727,8 +729,10 @@ void WiredTigerRecordStore::postConstructorInit(OperationContext* opCtx) {
         _sizeStorer ? _sizeStorer->load(_uri) : std::make_shared<WiredTigerSizeStorer::SizeInfo>();
 
     if (auto record = cursor->next()) {
-        int64_t max = record->id.repr();
-        _nextIdNum.store(1 + max);
+        if (!_isClustered) {
+            int64_t max = record->id.repr();
+            _nextIdNum.store(1 + max);
+        }
 
         if (!_sizeStorer) {
             LOG(1) << "Doing scan of collection " << ns() << " to get size and count info";
@@ -1310,7 +1314,8 @@ Status WiredTigerRecordStore::_insertRecords(OperationContext* opCtx,
         } else {
             record.id = _nextId();
         }
-        dassert(record.id > highestId);
+        // Clustered record stores do not required RecordIds to be inserted in order.
+        dassert(_isClustered || record.id > highestId);
         highestId = record.id;
     }
 
@@ -2032,13 +2037,23 @@ StandardWiredTigerRecordStore::StandardWiredTigerRecordStore(WiredTigerKVEngine*
     : WiredTigerRecordStore(kvEngine, opCtx, params) {}
 
 RecordId StandardWiredTigerRecordStore::getKey(WT_CURSOR* cursor) const {
+    if (_isClustered) {
+        WT_ITEM item;
+        invariantWTOK(cursor->get_key(cursor, &item));
+        return RecordId((const char*)item.data, item.size);
+    }
     std::int64_t recordId;
     invariantWTOK(cursor->get_key(cursor, &recordId));
     return RecordId(recordId);
 }
 
 void StandardWiredTigerRecordStore::setKey(WT_CURSOR* cursor, RecordId id) const {
-    cursor->set_key(cursor, id.repr());
+    if (_isClustered) {
+        WiredTigerItem item(id.data());
+        cursor->set_key(cursor, &item);
+    } else {
+        cursor->set_key(cursor, id.repr());
+    }
 }
 
 std::unique_ptr<SeekableRecordCursor> StandardWiredTigerRecordStore::getCursor(
@@ -2067,18 +2082,33 @@ WiredTigerRecordStoreStandardCursor::WiredTigerRecordStoreStandardCursor(
     : WiredTigerRecordStoreCursorBase(opCtx, rs, forward) {}
 
 void WiredTigerRecordStoreStandardCursor::setKey(WT_CURSOR* cursor, RecordId id) const {
-    cursor->set_key(cursor, id.repr());
+    if (_rs.isClustered()) {
+        WiredTigerItem item(id.data());
+        cursor->set_key(cursor, &item);
+    } else {
+        cursor->set_key(cursor, id.repr());
+    }
 }
 
 RecordId WiredTigerRecordStoreStandardCursor::getKey(WT_CURSOR* cursor) const {
+    if (_rs.isClustered()) {
+        WT_ITEM item;
+        invariantWTOK(cursor->get_key(cursor, &item));
+        return RecordId((const char*)item.data, item.size);
+    }
     std::int64_t recordId;
     invariantWTOK(cursor->get_key(cursor, &recordId));
-
     return RecordId(recordId);
 }
 
 bool WiredTigerRecordStoreStandardCursor::hasWrongPrefix(WT_CURSOR* cursor,
                                                          RecordId* recordId) const {
+    if (_rs.isClustered()) {
+        WT_ITEM item;
+        invariantWTOK(cursor->get_key(cursor, &item));
+        *recordId = RecordId((const char*)item.data, item.size);
+        return false;
+    }
     std::int64_t key;
     invariantWTOK(cursor->get_key(cursor, &key));
     *recordId = RecordId(key);

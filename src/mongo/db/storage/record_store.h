@@ -189,6 +189,9 @@ public:
      */
     virtual boost::optional<Record> seekExact(const RecordId& id) = 0;
 
+    virtual boost::optional<Record> seek(const RecordId& id) {
+        return boost::none;
+    }
     /**
      * Prepares for state changes in underlying data without necessarily saving the current
      * state.

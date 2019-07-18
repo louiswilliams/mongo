@@ -1938,6 +1938,42 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::seekExact(const RecordI
     return {{id, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
 }
 
+boost::optional<Record> WiredTigerRecordStoreCursorBase::seek(const RecordId& id) {
+    invariant(_hasRestored);
+    invariant(!_oplogVisibleTs);
+
+    _skipNextAdvance = false;
+    WT_CURSOR* c = _cursor->get();
+    setKey(c, id);
+    // Nothing after the next line can throw WCEs.
+    int cmp;
+    int seekRet = wiredTigerPrepareConflictRetry(_opCtx, [&] { return c->search_near(c, &cmp); });
+    if (seekRet == WT_NOTFOUND) {
+        _eof = true;
+        return {};
+    }
+    invariantWTOK(seekRet);
+
+    // If seek landed on an adjacent record, advance if behind when forward, or ahead when reverse.
+    if (_forward ? cmp < 0 : cmp > 0) {
+        int ret = wiredTigerPrepareConflictRetry(
+            _opCtx, [&] { return _forward ? c->next(c) : c->prev(c); });
+        if (ret == WT_NOTFOUND) {
+            _eof = true;
+            return {};
+        }
+        invariantWTOK(ret);
+    }
+
+    RecordId result = getKey(c);
+
+    WT_ITEM value;
+    invariantWTOK(c->get_value(c, &value));
+
+    _lastReturnedId = result;
+    _eof = false;
+    return {{result, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
+}
 
 void WiredTigerRecordStoreCursorBase::save() {
     try {

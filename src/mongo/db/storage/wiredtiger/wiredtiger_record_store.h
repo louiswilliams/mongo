@@ -424,6 +424,8 @@ public:
 
     boost::optional<Record> seekExact(const RecordId& id);
 
+    boost::optional<Record> seek(const RecordId& id);
+
     void save();
 
     void saveUnpositioned();

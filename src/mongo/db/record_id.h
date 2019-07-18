@@ -108,7 +108,7 @@ public:
 
     int64_t repr() const {
         invariant(_data.length() == sizeof(int64_t));
-        return *static_cast<int64_t*>((void*)_data.c_str());
+        return *reinterpret_cast<int64_t*>((void*)_data.c_str());
     }
 
     const std::string& data() const {
@@ -148,14 +148,8 @@ public:
 
     // Binary compare data.
     int compare(RecordId other) const {
-        // Normal case.
         const int mySize = size();
         const int otherSize = other.size();
-        if (mySize == sizeof(uint64_t) && otherSize == sizeof(uint64_t)) {
-            return repr() == other.repr() ? 0 : repr() < other.repr() ? -1 : 1;
-        }
-
-        // Binary data case.
 
         const int min = std::min(mySize, otherSize);
         const int cmp = memcmp(_data.c_str(), other.data().c_str(), min);
@@ -225,14 +219,14 @@ inline StringBuilder& operator<<(StringBuilder& stream, const RecordId& id) {
     if (id.size() == sizeof(uint64_t)) {
         return stream << "RecordId(" << id.repr() << ')';
     }
-    return stream << "RecordId(" << id.data() << ')';
+    return stream << "RecordId( binary data length  = " << id.size() << ')';
 }
 
 inline std::ostream& operator<<(std::ostream& stream, const RecordId& id) {
     if (id.size() == sizeof(uint64_t)) {
         return stream << "RecordId(" << id.repr() << ')';
     }
-    return stream << "RecordId(" << id.data() << ')';
+    return stream << "RecordId( binary data length  = " << id.size() << ')';
 }
 
 inline std::ostream& operator<<(std::ostream& stream, const boost::optional<RecordId>& id) {

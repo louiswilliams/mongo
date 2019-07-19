@@ -9,8 +9,8 @@
     assert.commandWorked(db.runCommand({create: collA.getName(), clusteredIdIndex: false}));
     assert.commandWorked(db.runCommand({create: collB.getName(), clusteredIdIndex: true}));
 
-    const targetDataSize = 1.5 * 1024 * 1024 * 1024;
-    const docSize = 1024;
+    const targetDataSize = 100 * 1024 * 1024;
+    const docSize = 100;
 
     const nDocs = targetDataSize / docSize;
     print("Inserting " + nDocs + " documents");
@@ -53,7 +53,7 @@
                   op: "find",
                   ns: coll.getFullName(),
                   query: {_id: {$gte: {"#RAND_INT": [1, nDocs]}}},
-                  limit: 1000
+                  limit: 10000
                 },
             ],
             seconds: 30,

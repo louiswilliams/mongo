@@ -592,7 +592,7 @@ Status MultiIndexBlock::dumpInsertsFromBulk(OperationContext* opCtx,
         // If 'dupRecords' is provided, it will be used to store all records that would result in
         // duplicate key errors. Only pass 'dupKeysInserted', which stores inserted duplicate keys,
         // when 'dupRecords' is not used because these two vectors are mutually incompatible.
-        std::vector<BSONObj> dupKeysInserted;
+        std::vector<KeyString::Value> dupKeysInserted;
 
         // When dupRecords is passed, 'dupsAllowed' should be passed to reflect whether or not the
         // index is unique.

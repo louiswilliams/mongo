@@ -58,25 +58,20 @@ void DuplicateKeyTracker::deleteTemporaryTable(OperationContext* opCtx) {
     _keyConstraintsTable->deleteTemporaryTable(opCtx);
 }
 
-Status DuplicateKeyTracker::recordKeys(OperationContext* opCtx, const std::vector<BSONObj>& keys) {
+Status DuplicateKeyTracker::recordKeys(OperationContext* opCtx, const std::vector<KeyString::Value>& keys) {
     if (keys.size() == 0)
         return Status::OK();
 
-    std::vector<BSONObj> toInsert;
+    std::vector<KeyString::Value> toInsert;
     toInsert.reserve(keys.size());
     for (auto&& key : keys) {
-        BSONObjBuilder builder;
-        builder.append(kKeyField, key);
-
-        BSONObj obj = builder.obj();
-
-        toInsert.emplace_back(std::move(obj));
+        toInsert.emplace_back(key);
     }
 
     std::vector<Record> records;
     records.reserve(keys.size());
     for (auto&& obj : toInsert) {
-        records.emplace_back(Record{RecordId(), RecordData(obj.objdata(), obj.objsize())});
+        records.emplace_back(Record{RecordId(), RecordData(obj.getBuffer(), obj.getSize())});
     }
 
     LOG(1) << "recording " << records.size() << " duplicate key conflicts on unique index: "

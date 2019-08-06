@@ -1225,8 +1225,8 @@ const IndexDescriptor* IndexCatalogImpl::refreshEntry(OperationContext* opCtx,
 
 Status IndexCatalogImpl::_indexKeys(OperationContext* opCtx,
                                     IndexCatalogEntry* index,
-                                    const std::vector<BSONObj>& keys,
-                                    const BSONObjSet& multikeyMetadataKeys,
+                                    const std::vector<KeyString::Value>& keys,
+                                    const KeyStringSet& multikeyMetadataKeys,
                                     const MultikeyPaths& multikeyPaths,
                                     const BSONObj& obj,
                                     RecordId loc,
@@ -1289,12 +1289,16 @@ Status IndexCatalogImpl::_indexFilteredRecords(OperationContext* opCtx,
                 return status;
         }
 
-        BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
-        BSONObjSet multikeyMetadataKeys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
+        KeyStringSet keys;
+        KeyStringSet multikeyMetadataKeys;
         MultikeyPaths multikeyPaths;
 
-        index->accessMethod()->getKeys(
-            *bsonRecord.docPtr, options.getKeysMode, &keys, &multikeyMetadataKeys, &multikeyPaths);
+        index->accessMethod()->getKeys(*bsonRecord.docPtr,
+                                       options.getKeysMode,
+                                       &keys,
+                                       &multikeyMetadataKeys,
+                                       &multikeyPaths,
+                                       bsonRecord.id);
 
         Status status = _indexKeys(opCtx,
                                    index,
@@ -1378,7 +1382,7 @@ Status IndexCatalogImpl::_updateRecord(OperationContext* const opCtx,
 
 void IndexCatalogImpl::_unindexKeys(OperationContext* opCtx,
                                     IndexCatalogEntry* index,
-                                    const std::vector<BSONObj>& keys,
+                                    const std::vector<KeyString::Value>& keys,
                                     const BSONObj& obj,
                                     RecordId loc,
                                     bool logIfError,
@@ -1401,13 +1405,7 @@ void IndexCatalogImpl::_unindexKeys(OperationContext* opCtx,
         int64_t removed;
         fassert(31155,
                 index->indexBuildInterceptor()->sideWrite(
-                    opCtx,
-                    keys,
-                    SimpleBSONObjComparator::kInstance.makeBSONObjSet(),
-                    {},
-                    loc,
-                    IndexBuildInterceptor::Op::kDelete,
-                    &removed));
+                    opCtx, keys, {}, {}, loc, IndexBuildInterceptor::Op::kDelete, &removed));
         if (keysDeletedOut) {
             *keysDeletedOut += removed;
         }
@@ -1446,10 +1444,14 @@ void IndexCatalogImpl::_unindexRecord(OperationContext* opCtx,
     // There's no need to compute the prefixes of the indexed fields that cause the index to be
     // multikey when removing a document since the index metadata isn't updated when keys are
     // deleted.
-    BSONObjSet keys = SimpleBSONObjComparator::kInstance.makeBSONObjSet();
+    KeyStringSet keys;
 
-    entry->accessMethod()->getKeys(
-        obj, IndexAccessMethod::GetKeysMode::kRelaxConstraintsUnfiltered, &keys, nullptr, nullptr);
+    entry->accessMethod()->getKeys(obj,
+                                   IndexAccessMethod::GetKeysMode::kRelaxConstraintsUnfiltered,
+                                   &keys,
+                                   nullptr,
+                                   nullptr,
+                                   loc);
 
     _unindexKeys(opCtx, entry, {keys.begin(), keys.end()}, obj, loc, logIfError, keysDeletedOut);
 }

@@ -69,8 +69,8 @@ public:
      * On success, `numKeysOut` if non-null will contain the number of keys added or removed.
      */
     Status sideWrite(OperationContext* opCtx,
-                     const std::vector<BSONObj>& keys,
-                     const BSONObjSet& multikeyMetadataKeys,
+                     const std::vector<KeyString::Value>& keys,
+                     const KeyStringSet& multikeyMetadataKeys,
                      const MultikeyPaths& multikeyPaths,
                      RecordId loc,
                      Op op,
@@ -80,7 +80,7 @@ public:
      * Given a set of duplicate keys, record the keys for later verification by a call to
      * checkDuplicateKeyConstraints();
      */
-    Status recordDuplicateKeys(OperationContext* opCtx, const std::vector<BSONObj>& keys);
+    Status recordDuplicateKeys(OperationContext* opCtx, const std::vector<KeyString::Value>& keys);
 
     /**
      * Returns Status::OK if all previously recorded duplicate key constraint violations have been

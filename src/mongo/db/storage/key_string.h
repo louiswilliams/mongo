@@ -76,7 +76,7 @@ public:
         _buf.appendBuf(tb._buf.buf(), tb._buf.len());
     }
 
-    TypeBits& operator=(const TypeBits& tb) = delete;
+    TypeBits& operator=(const TypeBits& tb);
     TypeBits(TypeBits&&) = default;
     TypeBits& operator=(TypeBits&&) = default;
 
@@ -290,13 +290,28 @@ private:
 class Value {
 
 public:
+
+    Value() : _typeBits(Version::kLatestVersion) {
+        _version = Version::kLatestVersion;
+    }
+
     Value(Version version, TypeBits typeBits, size_t size, ConstSharedBuffer buffer)
         : _version(version), _typeBits(typeBits), _size(size), _buffer(std::move(buffer)) {}
 
-    int compare(const Value& other) const;
+    Value& operator=(const Value& other);
+
+    template <class T>
+    int compare(const T& other) const;
+
+    template <class T>
+    int compareWithoutRecordId(const T& other) const;
 
     size_t getSize() const {
         return _size;
+    }
+
+    bool isEmpty() const {
+        return _size == 0;
     }
 
     const char* getBuffer() const {
@@ -307,36 +322,43 @@ public:
         return _typeBits;
     }
 
+    /**
+     * Returns a hex encoding of this key.
+     */
+    std::string toString() const;
+
+    /// members for Sorter
+    struct SorterDeserializeSettings {};
+
+    void serializeForSorter(BufBuilder& buf) const {
+        invariant(_size < std::numeric_limits<unsigned int>::max());
+        buf.appendNum(static_cast<unsigned int>(_size)); // Serialize size of Keystring
+        buf.appendBuf(_buffer.get(), _size); // Serialize Keystring
+        buf.appendBuf(_typeBits.getBuffer(), _typeBits.getSize()); // Serialize Typebits
+    }
+
+    static Value deserializeForSorter(BufReader& buf, const SorterDeserializeSettings& sorter) {
+        const size_t sizeOfKeystring = buf.read<LittleEndian<unsigned int>>();
+        const void* keystringPtr = buf.skip(sizeOfKeystring);
+
+        BufBuilder newBuf;
+        newBuf.appendBuf(keystringPtr, sizeOfKeystring);
+
+        auto typeBits = TypeBits::fromBuffer(Version::kLatestVersion, &buf); // advances the buf
+
+        return {Version::kLatestVersion, typeBits, sizeOfKeystring, newBuf.release()};
+    }
+
+    int memUsageForSorter() const {
+        return sizeof(Value) + _size + _typeBits.getSize();
+    }
+
 private:
-    const Version _version;
+    Version _version;
     TypeBits _typeBits;
-    size_t _size;
+    size_t _size = 0;
     ConstSharedBuffer _buffer;
 };
-
-inline bool operator<(const Value& lhs, const Value& rhs) {
-    return lhs.compare(rhs) < 0;
-}
-
-inline bool operator<=(const Value& lhs, const Value& rhs) {
-    return lhs.compare(rhs) <= 0;
-}
-
-inline bool operator==(const Value& lhs, const Value& rhs) {
-    return lhs.compare(rhs) == 0;
-}
-
-inline bool operator>(const Value& lhs, const Value& rhs) {
-    return lhs.compare(rhs) > 0;
-}
-
-inline bool operator>=(const Value& lhs, const Value& rhs) {
-    return lhs.compare(rhs) >= 0;
-}
-
-inline bool operator!=(const Value& lhs, const Value& rhs) {
-    return !(lhs == rhs);
-}
 
 enum class Discriminator {
     kInclusive,  // Anything to be stored in an index must use this.
@@ -478,8 +500,11 @@ public:
         return _typeBits;
     }
 
-    int compare(const BuilderBase& other) const;
-    int compareWithoutRecordId(const BuilderBase& other) const;
+    template <class T>
+    int compare(const T& other) const;
+
+    template <class T>
+    int compareWithoutRecordId(const T& other) const;
 
     /**
      * @return a hex encoding of this key
@@ -598,38 +623,58 @@ private:
 using Builder = BuilderBase<StackBufBuilder>;
 using HeapBuilder = BuilderBase<BufBuilder>;
 
+/*
+ * The isKeyString struct allows the operators below to only be enabled if the types being operated
+ * on are KeyStrings.
+ */
+template <class T>
+struct isKeyString : public std::false_type {};
+
 template <class BufferT>
-inline bool operator<(const BuilderBase<BufferT>& lhs, const BuilderBase<BufferT>& rhs) {
+struct isKeyString<BuilderBase<BufferT>> : public std::true_type {};
+
+template <>
+struct isKeyString<Value> : public std::true_type {};
+
+template <class T>
+inline typename std::enable_if<isKeyString<T>::value, bool>::type operator<(const T& lhs,
+                                                                            const T& rhs) {
     return lhs.compare(rhs) < 0;
 }
 
-template <class BufferT>
-inline bool operator<=(const BuilderBase<BufferT>& lhs, const BuilderBase<BufferT>& rhs) {
+template <class T>
+inline typename std::enable_if<isKeyString<T>::value, bool>::type operator<=(const T& lhs,
+                                                                             const T& rhs) {
     return lhs.compare(rhs) <= 0;
 }
 
-template <class BufferT>
-inline bool operator==(const BuilderBase<BufferT>& lhs, const BuilderBase<BufferT>& rhs) {
+template <class T>
+inline typename std::enable_if<isKeyString<T>::value, bool>::type operator==(const T& lhs,
+                                                                             const T& rhs) {
     return lhs.compare(rhs) == 0;
 }
 
-template <class BufferT>
-inline bool operator>(const BuilderBase<BufferT>& lhs, const BuilderBase<BufferT>& rhs) {
+template <class T>
+inline typename std::enable_if<isKeyString<T>::value, bool>::type operator>(const T& lhs,
+                                                                            const T& rhs) {
     return lhs.compare(rhs) > 0;
 }
 
-template <class BufferT>
-inline bool operator>=(const BuilderBase<BufferT>& lhs, const BuilderBase<BufferT>& rhs) {
+template <class T>
+inline typename std::enable_if<isKeyString<T>::value, bool>::type operator>=(const T& lhs,
+                                                                             const T& rhs) {
     return lhs.compare(rhs) >= 0;
 }
 
-template <class BufferT>
-inline bool operator!=(const BuilderBase<BufferT>& lhs, const BuilderBase<BufferT>& rhs) {
+template <class T>
+inline typename std::enable_if<isKeyString<T>::value, bool>::type operator!=(const T& lhs,
+                                                                             const T& rhs) {
     return !(lhs == rhs);
 }
 
-template <class BufferT>
-inline std::ostream& operator<<(std::ostream& stream, const BuilderBase<BufferT>& value) {
+template <class T>
+inline typename std::enable_if<isKeyString<T>::value, std::ostream&>::type operator<<(
+    std::ostream& stream, const T& value) {
     return stream << value.toString();
 }
 
@@ -646,6 +691,11 @@ BSONObj toBson(StringData data, Ordering ord, const TypeBits& types);
 BSONObj toBson(const char* buffer, size_t len, Ordering ord, const TypeBits& types) noexcept;
 BSONObj toBsonSafe(const char* buffer, size_t len, Ordering ord, const TypeBits& types);
 
+template <class T>
+BSONObj toBson(const T& keyString, Ordering ord) noexcept {
+    return toBson(keyString.getBuffer(), keyString.getSize(), ord, keyString.getTypeBits());
+}
+
 /**
  * Decodes a RecordId from the end of a buffer.
  */
@@ -661,6 +711,40 @@ size_t sizeWithoutRecordIdAtEnd(const void* bufferRaw, size_t bufSize);
  */
 RecordId decodeRecordId(BufReader* reader);
 
+int compare(const char* leftBuf, const char* rightBuf, size_t leftSize, size_t rightSize);
+
+template <class BufferT>
+template <class T>
+int BuilderBase<BufferT>::compare(const T& other) const {
+    return KeyString::compare(getBuffer(), other.getBuffer(), getSize(), other.getSize());
+}
+
+template <class BufferT>
+template <class T>
+int BuilderBase<BufferT>::compareWithoutRecordId(const T& other) const {
+    return KeyString::compare(
+        getBuffer(),
+        other.getBuffer(),
+        !isEmpty() ? sizeWithoutRecordIdAtEnd(getBuffer(), getSize()) : 0,
+        !other.isEmpty() ? sizeWithoutRecordIdAtEnd(other.getBuffer(), other.getSize()) : 0);
+}
+
+template <class T>
+int Value::compare(const T& other) const {
+    return KeyString::compare(getBuffer(), other.getBuffer(), getSize(), other.getSize());
+}
+
+template <class T>
+int Value::compareWithoutRecordId(const T& other) const {
+    return KeyString::compare(
+        getBuffer(),
+        other.getBuffer(),
+        !isEmpty() ? sizeWithoutRecordIdAtEnd(getBuffer(), getSize()) : 0,
+        !other.isEmpty() ? sizeWithoutRecordIdAtEnd(other.getBuffer(), other.getSize()) : 0);
+}
+
 }  // namespace KeyString
+
+using KeyStringSet = std::set<KeyString::Value>;
 
 }  // namespace mongo

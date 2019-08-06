@@ -290,7 +290,6 @@ private:
 class Value {
 
 public:
-
     Value() : _typeBits(Version::kLatestVersion) {
         _version = Version::kLatestVersion;
     }
@@ -298,7 +297,7 @@ public:
     Value(Version version, TypeBits typeBits, size_t size, ConstSharedBuffer buffer)
         : _version(version), _typeBits(typeBits), _size(size), _buffer(std::move(buffer)) {}
 
-    Value& operator=(const Value& other);
+    // Value& operator=(const Value& other);
 
     template <class T>
     int compare(const T& other) const;
@@ -332,9 +331,9 @@ public:
 
     void serializeForSorter(BufBuilder& buf) const {
         invariant(_size < std::numeric_limits<unsigned int>::max());
-        buf.appendNum(static_cast<unsigned int>(_size)); // Serialize size of Keystring
-        buf.appendBuf(_buffer.get(), _size); // Serialize Keystring
-        buf.appendBuf(_typeBits.getBuffer(), _typeBits.getSize()); // Serialize Typebits
+        buf.appendNum(static_cast<unsigned int>(_size));            // Serialize size of Keystring
+        buf.appendBuf(_buffer.get(), _size);                        // Serialize Keystring
+        buf.appendBuf(_typeBits.getBuffer(), _typeBits.getSize());  // Serialize Typebits
     }
 
     static Value deserializeForSorter(BufReader& buf, const SorterDeserializeSettings& sorter) {
@@ -344,7 +343,7 @@ public:
         BufBuilder newBuf;
         newBuf.appendBuf(keystringPtr, sizeOfKeystring);
 
-        auto typeBits = TypeBits::fromBuffer(Version::kLatestVersion, &buf); // advances the buf
+        auto typeBits = TypeBits::fromBuffer(Version::kLatestVersion, &buf);  // advances the buf
 
         return {Version::kLatestVersion, typeBits, sizeOfKeystring, newBuf.release()};
     }

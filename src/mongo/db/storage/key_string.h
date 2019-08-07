@@ -280,7 +280,7 @@ private:
      * the TypeBits size is in long encoding range(>127), all the bytes are used for the long
      * encoding format (first byte + 4 size bytes + data bytes).
      */
-    StackBufBuilder _buf;
+    BasicBufBuilder<StackAllocator> _buf{8};
 };
 
 
@@ -290,14 +290,22 @@ private:
 class Value {
 
 public:
-    Value() : _typeBits(Version::kLatestVersion) {
+    Value() {
         _version = Version::kLatestVersion;
     }
 
-    Value(Version version, TypeBits typeBits, size_t size, ConstSharedBuffer buffer)
-        : _version(version), _typeBits(typeBits), _size(size), _buffer(std::move(buffer)) {}
+    Value(Value&& other)
+        : _version(other._version),
+          _ksSize(other._ksSize),
+          _bufSize(other._bufSize),
+          _buffer(std::move(other._buffer)) {}
 
-    // Value& operator=(const Value& other);
+    Value(const Value&) = default;
+    Value& operator=(const Value& other) = default;
+
+    Value(Version version, uint32_t ksSize, uint32_t bufSize, ConstSharedBuffer buffer)
+        : _version(version), _ksSize(ksSize), _bufSize(bufSize), _buffer(std::move(buffer)) {}
+
 
     template <class T>
     int compare(const T& other) const;
@@ -306,19 +314,21 @@ public:
     int compareWithoutRecordId(const T& other) const;
 
     size_t getSize() const {
-        return _size;
+        return _ksSize;
     }
 
     bool isEmpty() const {
-        return _size == 0;
+        return _ksSize == 0;
     }
 
     const char* getBuffer() const {
         return _buffer.get();
     }
 
-    const TypeBits& getTypeBits() const {
-        return _typeBits;
+    TypeBits getTypeBits() const {
+        const char* buf = _buffer.get() + _ksSize;
+        BufReader reader(buf, _bufSize - _ksSize);
+        return TypeBits::fromBuffer(_version, &reader);
     }
 
     /**
@@ -330,32 +340,40 @@ public:
     struct SorterDeserializeSettings {};
 
     void serializeForSorter(BufBuilder& buf) const {
-        invariant(_size < std::numeric_limits<unsigned int>::max());
-        buf.appendNum(static_cast<unsigned int>(_size));            // Serialize size of Keystring
-        buf.appendBuf(_buffer.get(), _size);                        // Serialize Keystring
-        buf.appendBuf(_typeBits.getBuffer(), _typeBits.getSize());  // Serialize Typebits
+        invariant(_bufSize < std::numeric_limits<unsigned int>::max());
+        buf.appendNum(static_cast<unsigned int>(_ksSize));           // Serialize size of Keystring
+        buf.appendBuf(_buffer.get(), _ksSize);                       // Serialize Keystring
+        buf.appendBuf(_buffer.get() + _ksSize, _bufSize - _ksSize);  // Serialize TypeBits
     }
 
     static Value deserializeForSorter(BufReader& buf, const SorterDeserializeSettings& sorter) {
-        const size_t sizeOfKeystring = buf.read<LittleEndian<unsigned int>>();
+        const uint32_t sizeOfKeystring = buf.read<LittleEndian<unsigned int>>();
         const void* keystringPtr = buf.skip(sizeOfKeystring);
 
         BufBuilder newBuf;
         newBuf.appendBuf(keystringPtr, sizeOfKeystring);
-
         auto typeBits = TypeBits::fromBuffer(Version::kLatestVersion, &buf);  // advances the buf
 
-        return {Version::kLatestVersion, typeBits, sizeOfKeystring, newBuf.release()};
+        if (typeBits.isAllZeros()) {
+            newBuf.appendChar(0);
+        } else {
+            newBuf.appendBuf(typeBits.getBuffer(), typeBits.getSize());
+        }
+
+        return {Version::kLatestVersion,
+                sizeOfKeystring,
+                static_cast<uint32_t>(newBuf.getSize()),
+                newBuf.release()};
     }
 
     int memUsageForSorter() const {
-        return sizeof(Value) + _size + _typeBits.getSize();
+        return sizeof(Value) + _bufSize;
     }
 
 private:
     Version _version;
-    TypeBits _typeBits;
-    size_t _size = 0;
+    uint32_t _ksSize = 0;
+    uint32_t _bufSize = 0;
     ConstSharedBuffer _buffer;
 };
 
@@ -430,7 +448,8 @@ public:
     typename std::enable_if<std::is_same<T, BufBuilder>::value, Value>::type release() {
         _prepareForRelease();
         _transition(BuildState::kReleased);
-        return {version, _typeBits, static_cast<size_t>(_buffer.len()), _buffer.release()};
+        return getValueCopy();
+        // return {version, _typeBits, static_cast<size_t>(_buffer.len()), _buffer.release()};
     }
 
     /**
@@ -439,11 +458,20 @@ public:
      */
     Value getValueCopy() {
         _prepareForRelease();
-        invariant(_state == BuildState::kEndAdded || _state == BuildState::kAppendedRecordID ||
+        invariant(_state == BuildState::kReleased || _state == BuildState::kEndAdded ||
+                  _state == BuildState::kAppendedRecordID ||
                   _state == BuildState::kAppendedTypeBits);
-        BufBuilder newBuf;
+        BufBuilder newBuf(_buffer.len());
         newBuf.appendBuf(_buffer.buf(), _buffer.len());
-        return {version, _typeBits, static_cast<size_t>(newBuf.len()), newBuf.release()};
+        if (_typeBits.isAllZeros()) {
+            newBuf.appendChar(0);
+        } else {
+            newBuf.appendBuf(_typeBits.getBuffer(), _typeBits.getSize());
+        }
+        return {version,
+                static_cast<uint32_t>(_buffer.len()),
+                static_cast<uint32_t>(newBuf.len()),
+                newBuf.release()};
     }
 
     void appendRecordId(RecordId loc);

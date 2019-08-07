@@ -90,7 +90,7 @@ class BtreeExternalSortComparison {
 public:
     BtreeExternalSortComparison() {}
 
-    typedef std::pair<KeyString::Value, RecordId> Data;
+    typedef std::pair<KeyString::Value, NullValue> Data;
 
     int operator()(const Data& l, const Data& r) const {
         return l.first.compare(r.first);
@@ -499,12 +499,11 @@ std::unique_ptr<IndexAccessMethod::BulkBuilder> AbstractIndexAccessMethod::initi
 AbstractIndexAccessMethod::BulkBuilderImpl::BulkBuilderImpl(const IndexAccessMethod* index,
                                                             const IndexDescriptor* descriptor,
                                                             size_t maxMemoryUsageBytes)
-    : _sorter(Sorter::make(
-          SortOptions()
-              .TempDir(storageGlobalParams.dbpath + "/_tmp")
-              .ExtSortAllowed()
-              .MaxMemoryUsageBytes(maxMemoryUsageBytes),
-          BtreeExternalSortComparison())),
+    : _sorter(Sorter::make(SortOptions()
+                               .TempDir(storageGlobalParams.dbpath + "/_tmp")
+                               .ExtSortAllowed()
+                               .MaxMemoryUsageBytes(maxMemoryUsageBytes),
+                           BtreeExternalSortComparison())),
       _real(index) {}
 
 Status AbstractIndexAccessMethod::BulkBuilderImpl::insert(OperationContext* opCtx,
@@ -533,7 +532,7 @@ Status AbstractIndexAccessMethod::BulkBuilderImpl::insert(OperationContext* opCt
     }
 
     for (const auto& keyString : keys) {
-        _sorter->add(keyString, loc);
+        _sorter->add(keyString, {});
         ++_keysInserted;
     }
 
@@ -557,7 +556,7 @@ bool AbstractIndexAccessMethod::BulkBuilderImpl::isMultikey() const {
 IndexAccessMethod::BulkBuilder::Sorter::Iterator*
 AbstractIndexAccessMethod::BulkBuilderImpl::done() {
     for (const auto& keyString : _multikeyMetadataKeys) {
-        _sorter->add(keyString, kMultikeyMetadataKeyId);
+        _sorter->add(keyString, {});
         ++_keysInserted;
     }
     return _sorter->done();
@@ -592,7 +591,7 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
         _newInterface->getBulkBuilder(opCtx, dupsAllowed));
 
     KeyString::Value previousKey = KeyString::Value();
-    //const Ordering ordering = Ordering::make(_descriptor->keyPattern());
+    // const Ordering ordering = Ordering::make(_descriptor->keyPattern());
     while (it->more()) {
         opCtx->checkForInterrupt();
 
@@ -611,13 +610,15 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
             fassertFailedNoTrace(31171);
         }
 
+        RecordId id = KeyString::decodeRecordIdAtEnd(data.first.getBuffer(), data.first.getSize());
+
         // Before attempting to insert, perform a duplicate key check.
         bool isDup = false;
         if (_descriptor->unique()) {
             isDup = cmpData == 0;
             if (isDup && !dupsAllowed) {
                 if (dupRecords) {
-                    dupRecords->insert(data.second);
+                    dupRecords->insert(id);
                     continue;
                 }
                 /*
@@ -626,11 +627,12 @@ Status AbstractIndexAccessMethod::commitBulk(OperationContext* opCtx,
                                               _descriptor->indexName(),
                                               _descriptor->keyPattern());
                                               */
-                return Status(ErrorCodes::DuplicateKeyValue, "Duplicate Key found in Commit Bulk Step.");
+                return Status(ErrorCodes::DuplicateKeyValue,
+                              "Duplicate Key found in Commit Bulk Step.");
             }
         }
 
-        Status status = builder->addKey(data.first, data.second);
+        Status status = builder->addKey(data.first, id);
 
         if (!status.isOK()) {
             // Duplicates are checked before inserting.
@@ -751,19 +753,5 @@ std::string nextFileName() {
 }  // namespace mongo
 
 #include "mongo/db/sorter/sorter.cpp"
-MONGO_CREATE_SORTER(mongo::KeyString::Value, mongo::RecordId, mongo::BtreeExternalSortComparison);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+MONGO_CREATE_SORTER(mongo::KeyString::Value, mongo::NullValue, mongo::BtreeExternalSortComparison);
 

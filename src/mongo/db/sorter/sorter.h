@@ -130,6 +130,24 @@ struct SortOptions {
     }
 };
 
+class NullValue {
+public:
+    /// members for Sorter
+    struct SorterDeserializeSettings {};  // unused
+    void serializeForSorter(BufBuilder& buf) const {
+        return;
+    }
+    static NullValue deserializeForSorter(BufReader& buf, const SorterDeserializeSettings&) {
+        return {};
+    }
+    int memUsageForSorter() const {
+        return 0;
+    }
+    NullValue getOwned() const {
+        return {};
+    }
+};
+
 /**
  * This is the sorted output iterator from the sorting framework.
  */

@@ -301,7 +301,19 @@ public:
           _buffer(std::move(other._buffer)) {}
 
     Value(const Value&) = default;
-    Value& operator=(const Value& other) = default;
+    Value& operator=(Value otherCopy) noexcept {
+        this->swap(otherCopy);
+        return *this;
+    }
+    void swap(Value& other) noexcept {
+        using std::swap;
+        swap(_version, other._version);
+        swap(_ksSize, other._ksSize);
+        swap(_bufSize, other._bufSize);
+        swap(_buffer, other._buffer);
+    }
+
+    // Value& operator=(const Value& other) = default;
 
     Value(Version version, uint32_t ksSize, uint32_t bufSize, ConstSharedBuffer buffer)
         : _version(version), _ksSize(ksSize), _bufSize(bufSize), _buffer(std::move(buffer)) {}

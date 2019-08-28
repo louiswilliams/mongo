@@ -48,9 +48,15 @@ WiredTigerCursor::WiredTigerCursor(const std::string& uri,
         (_ru->getTimestampReadSource() == WiredTigerRecoveryUnit::ReadSource::kCheckpoint);
 
     str::stream builder;
-    builder << ((allowOverwrite) ? "" : "overwrite=false,");
-    builder << ((_readOnce) ? "read_once=true," : "");
-    builder << ((_isCheckpoint) ? "checkpoint=WiredTigerCheckpoint," : "");
+    if (!allowOverwrite) {
+        builder << "overwrite=false,";
+    }
+    if (_readOnce) {
+        builder << "read_once=true,";
+    }
+    if (_isCheckpoint) {
+        builder << "checkpoint=WiredTigerCheckpoint,";
+    }
 
     const std::string config = builder;
     if (_readOnce || _isCheckpoint) {

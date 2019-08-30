@@ -47,6 +47,16 @@ WiredTigerCursor::WiredTigerCursor(const std::string& uri,
     _isCheckpoint =
         (_ru->getTimestampReadSource() == WiredTigerRecoveryUnit::ReadSource::kCheckpoint);
 
+    // Check the cache before building a configuration string. ReadOnce and checkpoint cursors will
+    // never take cursors from the cache.
+    if (!_readOnce && !_isCheckpoint) {
+        _cursor = _session->getCachedCursor(uri, tableID);
+        // If a cursor isn't found in the cache, a new one will need to be opened.
+        if (_cursor) {
+            return;
+        }
+    }
+
     str::stream builder;
     if (!allowOverwrite) {
         builder << "overwrite=false,";
@@ -59,11 +69,7 @@ WiredTigerCursor::WiredTigerCursor(const std::string& uri,
     }
 
     const std::string config = builder;
-    if (_readOnce || _isCheckpoint) {
-        _cursor = _session->getNewCursor(uri, config.c_str());
-    } else {
-        _cursor = _session->getCachedCursor(uri, tableID, config.c_str());
-    }
+    _cursor = _session->getNewCursor(uri, config.c_str());
 }
 
 WiredTigerCursor::~WiredTigerCursor() {

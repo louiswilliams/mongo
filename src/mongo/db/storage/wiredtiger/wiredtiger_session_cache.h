@@ -101,7 +101,7 @@ public:
      * This may return a cursor from the cursor cache and these cursors should *always* be released
      * into the cache by calling releaseCursor().
      */
-    WT_CURSOR* getCachedCursor(const std::string& uri, uint64_t id, const char* config);
+    WT_CURSOR* getCachedCursor(const std::string& uri, uint64_t id);
 
 
     /**

@@ -132,8 +132,11 @@ StatusWith<std::string> WiredTigerUtil::getMetadata(OperationContext* opCtx, Str
     invariant(opCtx);
 
     auto session = WiredTigerRecoveryUnit::get(opCtx)->getSessionNoTxn();
-    WT_CURSOR* cursor = session->getCachedCursor(
-        "metadata:create", WiredTigerSession::kMetadataTableId, "overwrite=false");
+    WT_CURSOR* cursor =
+        session->getCachedCursor("metadata:create", WiredTigerSession::kMetadataTableId);
+    if (!cursor) {
+        cursor = session->getNewCursor("metadata:create", "overwrite=false");
+    }
     invariant(cursor);
     auto releaser =
         makeGuard([&] { session->releaseCursor(WiredTigerSession::kMetadataTableId, cursor); });

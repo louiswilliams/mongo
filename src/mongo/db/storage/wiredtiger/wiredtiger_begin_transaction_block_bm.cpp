@@ -71,6 +71,9 @@ private:
     WT_CONNECTION* _conn;
 };
 
+const std::string kTableUri = "table:mytable";
+const int kTableId = 1;
+
 class WiredTigerTestHelper {
 public:
     WiredTigerTestHelper()
@@ -79,8 +82,9 @@ public:
           _sessionCache(_connection.getConnection(), &_clockSource) {
         _opCtx.reset(newOperationContext());
         auto ru = WiredTigerRecoveryUnit::get(_opCtx.get());
-        _wtSession = ru->getSession()->getSession();
-        invariant(wtRCToStatus(_wtSession->create(_wtSession, "table:mytable", nullptr)).isOK());
+        _session = ru->getSession();
+        auto wtSession = _session->getSession();
+        invariant(wtRCToStatus(wtSession->create(wtSession, kTableUri.c_str(), nullptr)).isOK());
         ru->abandonSnapshot();
     }
 
@@ -92,8 +96,12 @@ public:
         return &_oplogManager;
     }
 
+    WiredTigerSession* session() const {
+        return _session;
+    }
+
     WT_SESSION* wtSession() const {
-        return _wtSession;
+        return _session->getSession();
     }
 
     OperationContext* newOperationContext() {
@@ -112,7 +120,7 @@ private:
     WiredTigerSessionCache _sessionCache;
     WiredTigerOplogManager _oplogManager;
     std::unique_ptr<OperationContext> _opCtx;
-    WT_SESSION* _wtSession;
+    WiredTigerSession* _session;
 };
 
 void BM_WiredTigerBeginTxnBlock(benchmark::State& state) {
@@ -141,6 +149,15 @@ void BM_setTimestamp(benchmark::State& state) {
     }
 }
 
+template <bool allowOverwrite, bool readOnce>
+void BM_openCursor(benchmark::State& state) {
+    WiredTigerTestHelper helper;
+    helper.getOperationContext()->recoveryUnit()->setReadOnce(readOnce);
+    for (auto _ : state) {
+        WiredTigerCursor cursor(kTableUri, kTableId, allowOverwrite, helper.getOperationContext());
+    }
+}
+
 BENCHMARK(BM_WiredTigerBeginTxnBlock);
 BENCHMARK_TEMPLATE(BM_WiredTigerBeginTxnBlockWithArgs,
                    PrepareConflictBehavior::kEnforce,
@@ -162,6 +179,10 @@ BENCHMARK_TEMPLATE(BM_WiredTigerBeginTxnBlockWithArgs,
                    RoundUpPreparedTimestamps::kRound);
 
 BENCHMARK(BM_setTimestamp);
+BENCHMARK_TEMPLATE(BM_openCursor, true, true);
+BENCHMARK_TEMPLATE(BM_openCursor, true, false);
+BENCHMARK_TEMPLATE(BM_openCursor, false, true);
+BENCHMARK_TEMPLATE(BM_openCursor, false, false);
 
 }  // namespace
 }  // namespace mongo

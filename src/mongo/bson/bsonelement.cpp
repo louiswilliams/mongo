@@ -33,6 +33,7 @@
 
 #include <boost/functional/hash.hpp>
 #include <cmath>
+#include <fmt/format.h>
 
 #include "mongo/base/compare_numbers.h"
 #include "mongo/base/data_cursor.h"
@@ -45,6 +46,7 @@
 #include "mongo/util/hex.h"
 #include "mongo/util/log.h"
 #include "mongo/util/scopeguard.h"
+#include "mongo/util/stacktrace.h"
 #include "mongo/util/str.h"
 #include "mongo/util/string_map.h"
 #include "mongo/util/uuid.h"
@@ -701,8 +703,18 @@ BSONElement BSONElement::operator[](StringData field) const {
 }
 
 namespace {
-MONGO_COMPILER_NOINLINE void msgAssertedBadType [[noreturn]] (int8_t type) {
-    msgasserted(10320, str::stream() << "BSONElement: bad type " << (int)type);
+MONGO_COMPILER_NOINLINE void msgAssertedBadType [[noreturn]] (const char* data) {
+    str::stream output;
+    output << fmt::format(
+        "BSONElement: bad type {0:d} @ {1:p} data (first 64 bytes): ", *data, data);
+    for (int i = 0; i < 64; i++) {
+        output << fmt::format("{0:x} ", data[i]);
+    }
+    if (kDebugBuild) {
+        warning() << "Bad BSON object: " << std::string(output);
+        printStackTrace();
+    }
+    msgasserted(10320, output);
 }
 }  // namespace
 
@@ -751,7 +763,7 @@ int BSONElement::computeSize() const {
     int8_t type = *data;
     if (MONGO_unlikely(type < 0 || type > JSTypeMax)) {
         if (MONGO_unlikely(type != MinKey && type != MaxKey)) {
-            msgAssertedBadType(type);
+            msgAssertedBadType(data);
         }
 
         // MinKey and MaxKey should be treated the same as Null

@@ -130,6 +130,8 @@ StatusWith<InsertGroup::ConstIterator> InsertGroup::groupAndApplyInserts(ConstIt
                 batchCount > kInsertGroupMaxBatchCount;  // Limit number of ops in a single group.
         });
 
+    log() << "grouping inserts: " << batchCount;
+
     // See if we were able to create a group that contains more than a single op.
     if (std::distance(it, endOfGroupableOpsIterator) == 1) {
         return Status(ErrorCodes::NoSuchKey,

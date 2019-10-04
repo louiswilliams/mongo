@@ -6520,7 +6520,7 @@ tasks:
   - func: "do setup"
   - func: "run tests"
     vars:
-      resmoke_args: --suites=concurrency_replication --storageEngine=wiredTiger
+      resmoke_args: --suites=concurrency_replication --storageEngine=wiredTiger --repeat=100
       resmoke_jobs_max: 1
 
 - <<: *task_template
@@ -6530,7 +6530,7 @@ tasks:
   - func: "do setup"
   - func: "run tests"
     vars:
-      resmoke_args: --suites=concurrency_replication_causal_consistency --storageEngine=wiredTiger
+      resmoke_args: --suites=concurrency_replication --storageEngine=wiredTiger --repeat=100
       resmoke_jobs_max: 1
 
 - <<: *task_template
@@ -6551,7 +6551,7 @@ tasks:
   - func: "do setup"
   - func: "run tests"
     vars:
-      resmoke_args: --suites=concurrency_replication_ubsan --storageEngine=wiredTiger
+      resmoke_args: --suites=concurrency_replication --storageEngine=wiredTiger --repeat=100
       resmoke_jobs_max: 1
 
 - <<: *task_template
@@ -6561,7 +6561,7 @@ tasks:
   - func: "do setup"
   - func: "run tests"
     vars:
-      resmoke_args: --suites=concurrency_replication_causal_consistency_ubsan --storageEngine=wiredTiger
+      resmoke_args: --suites=concurrency_replication --storageEngine=wiredTiger --repeat=100
       resmoke_jobs_max: 1
 
 - <<: *task_template

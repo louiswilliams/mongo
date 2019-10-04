@@ -42,6 +42,7 @@ var $config = (function() {
             var count = db[collName].aggregate([]).itcount();
             assertWhenOwnColl.eq(count, this.numDocs);
         }
+        remove: function remove(db, collName) {}
     };
 
     var transitions = {query: {query: 1}};

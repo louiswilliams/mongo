@@ -1285,6 +1285,10 @@ Status WiredTigerRecordStore::_insertRecords(OperationContext* opCtx,
 
     for (size_t i = 0; i < nRecords; i++) {
         auto& record = records[i];
+        auto validStatus =
+            validateBSON(record.data.data(), record.data.size(), BSONVersion::kLatest);
+        invariant(validStatus.isOK(), str::stream() << "validate failed: " << validStatus);
+
         Timestamp ts;
         if (timestamps[i].isNull() && _isOplog) {
             // If the timestamp is 0, that probably means someone inserted a document directly

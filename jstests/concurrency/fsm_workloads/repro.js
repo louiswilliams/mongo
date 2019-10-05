@@ -12,7 +12,7 @@ var $config = (function() {
         // Use 12KB documents by default. This number is useful because 12,000 documents each of
         // size 12KB take up more than 100MB in total, and 100MB is the in-memory limit for $sort
         // and $group.
-        docSize: 1 * 1000
+        docSize: 16 * 1000
     };
 
     var getStringOfLength = (function() {
@@ -93,7 +93,7 @@ var $config = (function() {
         // Using few threads and iterations because each iteration is fairly expensive compared to
         // other workloads' iterations. (Each does a collection scan over a few thousand documents
         // rather than a few dozen documents.)
-        threadCount: 5,
+        threadCount: 10,
         iterations: 20,
         states: states,
         transitions: transitions,

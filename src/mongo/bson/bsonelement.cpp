@@ -701,10 +701,11 @@ NOINLINE_DECL void msgAssertedBadType [[noreturn]] (const char* data) {
     for (int i = 0; i < 64; i++) {
         output << fmt::format("{0:x} ", data[i]);
     }
+    warning() << "Bad BSON object: " << std::string(output);
     if (kDebugBuild) {
-        warning() << "Bad BSON object: " << std::string(output);
         printStackTrace();
     }
+    std::terminate();
     msgasserted(10320, output);
 }
 }  // namespace

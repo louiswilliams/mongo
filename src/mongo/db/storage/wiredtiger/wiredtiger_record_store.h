@@ -419,6 +419,7 @@ public:
     WiredTigerRecordStoreCursorBase(OperationContext* opCtx,
                                     const WiredTigerRecordStore& rs,
                                     bool forward);
+    ~WiredTigerRecordStoreCursorBase();
 
     boost::optional<Record> next();
 

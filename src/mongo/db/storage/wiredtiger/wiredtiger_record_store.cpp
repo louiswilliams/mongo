@@ -74,6 +74,38 @@ using namespace fmt::literals;
 using std::string;
 using std::unique_ptr;
 
+
+namespace {
+std::recursive_mutex _cmutex;
+std::map<WT_CURSOR*, std::pair<char*, int>> _cursorToAddress;
+
+void _cursorInvalidated(WT_CURSOR* wtCursor) {
+    std::lock_guard<std::recursive_mutex> lk(_cmutex);
+    auto it = _cursorToAddress.find(wtCursor);
+    if (it == _cursorToAddress.end()) {
+        return;
+    }
+
+    char* address = it->second.first;
+    int size = it->second.second;
+    memset(address, 0xAA, size);
+    _cursorToAddress.erase(it);
+    delete[](address);
+}
+
+char* _cursorPositioned(WT_CURSOR* wtCursor, const void* address, int size) {
+    std::lock_guard<std::recursive_mutex> lk(_cmutex);
+    _cursorInvalidated(wtCursor);
+
+    char* ret = new char[size];
+    memcpy(ret, address, size);
+    // _cursorToAddress[wtCursor] = std::pair<char*, int>(ret, size);
+    _cursorToAddress[wtCursor] = {ret, size};
+
+    return ret;
+}
+}  // namespace
+
 namespace {
 
 static const int kMinimumRecordStoreVersion = 1;
@@ -512,12 +544,14 @@ public:
         WT_ITEM value;
         invariantWTOK(_cursor->get_value(_cursor, &value));
 
-        return {{id, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
+        char* ret = _cursorPositioned(_cursor, value.data, value.size);
+        return {{id, {static_cast<const char*>(ret), static_cast<int>(value.size)}}};
     }
 
     void save() final {
         if (_cursor && !wt_keeptxnopen()) {
             try {
+                _cursorInvalidated(_cursor);
                 _cursor->reset(_cursor);
             } catch (const WriteConflictException&) {
                 // Ignore since this is only called when we are about to kill our transaction
@@ -992,6 +1026,7 @@ void WiredTigerRecordStore::_positionAtFirstRecordId(OperationContext* opCtx,
             invariant(cmp >= 0);
         }
     } else {
+        _cursorInvalidated(cursor);
         invariantWTOK(WT_READ_CHECK(cursor->reset(cursor)));
         int ret = wiredTigerPrepareConflictRetry(opCtx, [&] { return cursor->next(cursor); });
         invariantWTOK(ret);
@@ -1064,10 +1099,12 @@ int64_t WiredTigerRecordStore::_cappedDeleteAsNeeded_inlock(OperationContext* op
                 break;
 
             if (_cappedCallback) {
+                _cursorPositioned(truncateEnd, old_value.data, old_value.size);
                 uassertStatusOK(_cappedCallback->aboutToDeleteCapped(
                     opCtx,
                     newestIdToDelete,
                     RecordData(static_cast<const char*>(old_value.data), old_value.size)));
+                _cursorInvalidated(truncateEnd);
             }
         }
 
@@ -1870,6 +1907,12 @@ WiredTigerRecordStoreCursorBase::WiredTigerRecordStoreCursorBase(OperationContex
     _cursor.emplace(rs.getURI(), rs.tableId(), true, opCtx);
 }
 
+WiredTigerRecordStoreCursorBase::~WiredTigerRecordStoreCursorBase() {
+    if (_cursor) {
+        _cursorInvalidated(_cursor->get());
+    }
+}
+
 boost::optional<Record> WiredTigerRecordStoreCursorBase::next() {
     if (_eof)
         return {};
@@ -1881,6 +1924,7 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::next() {
         // Nothing after the next line can throw WCEs.
         // Note that an unpositioned (or eof) WT_CURSOR returns the first/last entry in the
         // table when you call next/prev.
+        _cursorInvalidated(c);
         int advanceRet = wiredTigerPrepareConflictRetry(
             _opCtx, [&] { return _forward ? c->next(c) : c->prev(c); });
         if (advanceRet == WT_NOTFOUND) {
@@ -1919,9 +1963,10 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::next() {
 
     WT_ITEM value;
     invariantWTOK(c->get_value(c, &value));
+    char* ret = _cursorPositioned(c, value.data, value.size);
 
     _lastReturnedId = id;
-    return {{id, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
+    return {{id, {static_cast<const char*>(ret), static_cast<int>(value.size)}}};
 }
 
 boost::optional<Record> WiredTigerRecordStoreCursorBase::seekExact(const RecordId& id) {
@@ -1932,6 +1977,7 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::seekExact(const RecordI
 
     _skipNextAdvance = false;
     WT_CURSOR* c = _cursor->get();
+    _cursorInvalidated(c);
     setKey(c, id);
     // Nothing after the next line can throw WCEs.
     int seekRet = wiredTigerPrepareConflictRetry(_opCtx, [&] { return c->search(c); });
@@ -1944,17 +1990,20 @@ boost::optional<Record> WiredTigerRecordStoreCursorBase::seekExact(const RecordI
 
     WT_ITEM value;
     invariantWTOK(c->get_value(c, &value));
+    char* ret = _cursorPositioned(c, value.data, value.size);
 
     _lastReturnedId = id;
     _eof = false;
-    return {{id, {static_cast<const char*>(value.data), static_cast<int>(value.size)}}};
+    return {{id, {static_cast<const char*>(ret), static_cast<int>(value.size)}}};
 }
 
 
 void WiredTigerRecordStoreCursorBase::save() {
     try {
-        if (_cursor)
+        if (_cursor) {
+            _cursorInvalidated(_cursor.get().get());
             _cursor->reset();
+        }
         _oplogVisibleTs = boost::none;
     } catch (const WriteConflictException&) {
         // Ignore since this is only called when we are about to kill our transaction
@@ -2006,8 +2055,9 @@ bool WiredTigerRecordStoreCursorBase::restore() {
         return !_rs._isCapped;
     }
 
-    if (cmp == 0)
+    if (cmp == 0) {
         return true;  // Landed right where we left off.
+    }
 
     if (_rs._isCapped) {
         // Doc was deleted either by _cappedDeleteAsNeeded() or cappedTruncateAfter().

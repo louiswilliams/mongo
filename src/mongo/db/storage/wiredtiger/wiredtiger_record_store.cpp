@@ -90,7 +90,7 @@ void _cursorInvalidated(WT_CURSOR* wtCursor) {
     int size = it->second.second;
     memset(address, 0xAA, size);
     _cursorToAddress.erase(it);
-    delete (address);
+    delete[](address);
 }
 
 char* _cursorPositioned(WT_CURSOR* wtCursor, const void* address, int size) {

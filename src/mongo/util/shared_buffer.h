@@ -135,6 +135,8 @@ private:
             if (h->_refCount.subtractAndFetch(1) == 0) {
                 // We placement new'ed a Holder in takeOwnership above,
                 // so we must destroy the object here.
+                // Overwrite memory before destroying.
+                memset((reinterpret_cast<char*>(h)) + sizeof(Holder), 0xBB, h->_capacity);
                 h->~Holder();
                 free(h);
             }

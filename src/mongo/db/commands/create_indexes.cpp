@@ -79,6 +79,7 @@ MONGO_FAIL_POINT_DEFINE(createIndexesWriteConflict);
 // collection is created.
 MONGO_FAIL_POINT_DEFINE(hangBeforeCreateIndexesCollectionCreate);
 MONGO_FAIL_POINT_DEFINE(hangBeforeIndexBuildAbortOnInterrupt);
+MONGO_FAIL_POINT_DEFINE(hangAfterIndexBuildAbortOnInterrupt);
 
 constexpr auto kIndexesFieldName = "indexes"_sd;
 constexpr auto kCommandName = "createIndexes"_sd;
@@ -467,6 +468,23 @@ BSONObj runCreateIndexesOnNewCollection(OperationContext* opCtx,
     return createResult.obj();
 }
 
+/**
+ * Returns true if index specs include any unique indexes. Due to uniqueness constraints set up
+ * at the start of the index build, we are not able to support failing over a two phase index
+ * build on a unique index to a new primary on stepdown.
+ */
+namespace {
+// TODO(SERVER-44654): remove when unique indexes support failover
+bool containsUniqueIndexes(const std::vector<BSONObj>& specs) {
+    for (const auto& spec : specs) {
+        if (spec["unique"].trueValue()) {
+            return true;
+        }
+    }
+    return false;
+}
+}  // namespace
+
 bool runCreateIndexesWithCoordinator(OperationContext* opCtx,
                                      const std::string& dbname,
                                      const BSONObj& cmdObj,
@@ -556,7 +574,8 @@ bool runCreateIndexesWithCoordinator(OperationContext* opCtx,
 
     auto indexBuildsCoord = IndexBuildsCoordinator::get(opCtx);
     auto buildUUID = UUID::gen();
-    auto protocol = IndexBuildsCoordinator::supportsTwoPhaseIndexBuild()
+    auto protocol =
+        IndexBuildsCoordinator::supportsTwoPhaseIndexBuild() && !containsUniqueIndexes(specs)
         ? IndexBuildProtocol::kTwoPhase
         : IndexBuildProtocol::kSinglePhase;
     LOGV2(20438, "Registering index build: {buildUUID}", "buildUUID"_attr = buildUUID);
@@ -624,12 +643,9 @@ bool runCreateIndexesWithCoordinator(OperationContext* opCtx,
             // independently of this command invocation. We'll defensively abort the index build
             // with the assumption that if the index build was already in the midst of tearing down,
             // this be a no-op.
-            // Use a null abort timestamp because the index build will generate its own timestamp
-            // on cleanup.
-            indexBuildsCoord->abortIndexBuildByBuildUUIDNoWait(
+            indexBuildsCoord->abortIndexBuildByBuildUUID(
                 opCtx,
                 buildUUID,
-                Timestamp(),
                 str::stream() << "Index build interrupted: " << buildUUID << ": "
                               << interruptionEx.toString());
             LOGV2(20443, "Index build aborted: {buildUUID}", "buildUUID"_attr = buildUUID);
@@ -651,12 +667,9 @@ bool runCreateIndexesWithCoordinator(OperationContext* opCtx,
                 throw;
             }
 
-            // Use a null abort timestamp because the index build will generate a ghost timestamp
-            // for the single-phase build on cleanup.
-            indexBuildsCoord->abortIndexBuildByBuildUUIDNoWait(
+            indexBuildsCoord->abortIndexBuildByBuildUUID(
                 opCtx,
                 buildUUID,
-                Timestamp(),
                 str::stream() << "Index build interrupted due to change in replication state: "
                               << buildUUID << ": " << ex.toString());
             LOGV2(20446,
@@ -748,6 +761,7 @@ public:
             try {
                 return runCreateIndexesWithCoordinator(opCtx, dbname, cmdObj, errmsg, result);
             } catch (const DBException& ex) {
+                hangAfterIndexBuildAbortOnInterrupt.pauseWhileSet();
                 // We can only wait for an existing index build to finish if we are able to release
                 // our locks, in order to allow the existing index build to proceed. We cannot
                 // release locks in transactions, so we bypass the below logic in transactions.

@@ -52,7 +52,7 @@ namespace {
 /**
  * Returns basic info on index builders.
  */
-std::string toSummary(const std::map<UUID, std::shared_ptr<MultiIndexBlock>>& builders) {
+std::string toSummary(const std::map<UUID, std::unique_ptr<MultiIndexBlock>>& builders) {
     str::stream ss;
     ss << "Number of builders: " << builders.size() << ": [";
     bool first = true;
@@ -266,7 +266,7 @@ Status IndexBuildsManager::commitIndexBuild(OperationContext* opCtx,
         });
 }
 
-bool IndexBuildsManager::abortIndexBuild(const UUID& buildUUID, const std::string& reason) {
+bool IndexBuildsManager::signalAbortIndex(const UUID& buildUUID, const std::string& reason) {
     stdx::unique_lock<Latch> lk(_mutex);
 
     auto builderIt = _builders.find(buildUUID);
@@ -274,7 +274,7 @@ bool IndexBuildsManager::abortIndexBuild(const UUID& buildUUID, const std::strin
         return false;
     }
 
-    std::shared_ptr<MultiIndexBlock> builder = builderIt->second;
+    auto builder = builderIt->second.get();
 
     lk.unlock();
     builder->abort(reason);
@@ -302,10 +302,10 @@ bool IndexBuildsManager::abortIndexBuildWithoutCleanup(OperationContext* opCtx,
     return true;
 }
 
-void IndexBuildsManager::tearDownIndexBuild(OperationContext* opCtx,
-                                            Collection* collection,
-                                            const UUID& buildUUID,
-                                            OnCleanUpFn onCleanUpFn) {
+void IndexBuildsManager::cleanUpIndexBuildAfterFailure(OperationContext* opCtx,
+                                                       Collection* collection,
+                                                       const UUID& buildUUID,
+                                                       OnCleanUpFn onCleanUpFn) {
     auto builder = _getBuilder(buildUUID);
     if (!builder.isOK()) {
         return;
@@ -327,8 +327,8 @@ void IndexBuildsManager::verifyNoIndexBuilds_forTestOnly() {
 void IndexBuildsManager::_registerIndexBuild(UUID buildUUID) {
     stdx::unique_lock<Latch> lk(_mutex);
 
-    std::shared_ptr<MultiIndexBlock> mib = std::make_shared<MultiIndexBlock>();
-    invariant(_builders.insert(std::make_pair(buildUUID, mib)).second);
+    invariant(
+        _builders.insert(std::make_pair(buildUUID, std::make_unique<MultiIndexBlock>())).second);
 }
 
 void IndexBuildsManager::_unregisterIndexBuild(const UUID& buildUUID) {
@@ -341,14 +341,13 @@ void IndexBuildsManager::_unregisterIndexBuild(const UUID& buildUUID) {
     _builders.erase(builderIt);
 }
 
-StatusWith<std::shared_ptr<MultiIndexBlock>> IndexBuildsManager::_getBuilder(
-    const UUID& buildUUID) {
+StatusWith<MultiIndexBlock*> IndexBuildsManager::_getBuilder(const UUID& buildUUID) {
     stdx::unique_lock<Latch> lk(_mutex);
     auto builderIt = _builders.find(buildUUID);
     if (builderIt == _builders.end()) {
         return {ErrorCodes::NoSuchKey, str::stream() << "No index build with UUID: " << buildUUID};
     }
-    return builderIt->second;
+    return builderIt->second.get();
 }
 
 }  // namespace mongo

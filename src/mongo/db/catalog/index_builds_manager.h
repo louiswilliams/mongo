@@ -139,11 +139,8 @@ public:
 
     /**
      * Signals the index build to be aborted and returns without waiting for completion.
-     *
-     * Returns true if a build existed to be signaled, as opposed to having already finished and
-     * been cleared away, or not having yet started..
      */
-    bool abortIndexBuild(const UUID& buildUUID, const std::string& reason);
+    bool signalAbortIndex(const UUID& buildUUID, const std::string& reason);
 
     /**
      * Signals the index build to be aborted without being cleaned up and returns without waiting
@@ -158,13 +155,14 @@ public:
                                        const std::string& reason);
 
     /**
-     * Cleans up the index build state and unregisters it from the manager.
+     * Cleans up the index build state and unregisters it from the manager. This is only required
+     * when abortIndexBuildWithoutCleanUp or commitIndexBuild have not already been called.
      */
     using OnCleanUpFn = MultiIndexBlock::OnCleanUpFn;
-    void tearDownIndexBuild(OperationContext* opCtx,
-                            Collection* collection,
-                            const UUID& buildUUID,
-                            OnCleanUpFn onCleanUpFn);
+    void cleanUpIndexBuildAfterFailure(OperationContext* opCtx,
+                                       Collection* collection,
+                                       const UUID& buildUUID,
+                                       OnCleanUpFn onCleanUpFn);
 
     /**
      * Returns true if the index build supports background writes while building an index. This is
@@ -188,17 +186,18 @@ private:
      */
     void _unregisterIndexBuild(const UUID& buildUUID);
 
+
     /**
-     * Returns a shared pointer to the builder. Returns a bad status if the builder does not exist.
+     * Returns a pointer to the builder. Returns a bad status if the builder does not exist.
      */
-    StatusWith<std::shared_ptr<MultiIndexBlock>> _getBuilder(const UUID& buildUUID);
+    StatusWith<MultiIndexBlock*> _getBuilder(const UUID& buildUUID);
 
     // Protects the map data structures below.
     mutable Mutex _mutex = MONGO_MAKE_LATCH("IndexBuildsManager::_mutex");
 
     // Map of index builders by build UUID. Allows access to the builders so that actions can be
     // taken on and information passed to and from index builds.
-    std::map<UUID, std::shared_ptr<MultiIndexBlock>> _builders;
+    std::map<UUID, std::unique_ptr<MultiIndexBlock>> _builders;
 };
 
 }  // namespace mongo

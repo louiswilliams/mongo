@@ -242,17 +242,7 @@ public:
      */
     void abortIndexBuildByBuildUUID(OperationContext* opCtx,
                                     const UUID& buildUUID,
-                                    Timestamp abortTimestamp,
                                     const std::string& reason);
-
-    /**
-     * Aborts an index build by index build UUID. Does not wait for the index build thread to
-     * exit. Returns true if an index build was aborted.
-     */
-    bool abortIndexBuildByBuildUUIDNoWait(OperationContext* opCtx,
-                                          const UUID& buildUUID,
-                                          Timestamp abortTimestamp,
-                                          const std::string& reason);
 
     /**
      * Aborts an index build by its index name(s). This will only abort in-progress index builds if
@@ -549,6 +539,38 @@ protected:
     void _runIndexBuildInner(OperationContext* opCtx,
                              std::shared_ptr<ReplIndexBuildState> replState,
                              const IndexBuildOptions& indexBuildOptions);
+
+    /**
+     * Returns true if we were able to successfully flag the index build as aborted, and no other
+     * thread was doing the same concurrently. Returns false if another operation already signaled
+     * the index build to abort and we should not continue.
+     */
+    bool _signalAbortIndex(OperationContext* opCtx,
+                           std::shared_ptr<ReplIndexBuildState> replState,
+                           const std::string& reason);
+    /**
+     * WaitBehavior indicates whether an abort operation should wait for the builder thread to
+     * exit. The index build thread itself may use kNoWait so it avoid waiting on itself.
+     */
+    enum class WaitBehavior { kWait, kNoWait };
+
+    /**
+     * Abort a two-phase index build.
+     */
+    void _abortIndexBuildTwoPhase(OperationContext* opCtx,
+                                  std::shared_ptr<ReplIndexBuildState> replState,
+                                  WaitBehavior wait,
+                                  const std::string& reason);
+
+    /**
+     * Abort a two-phase index build without performing any storage engine writes. This leaves the
+     * index build in an inconsistent state, and is only supported for operations that expect to
+     * clean it up the inconsistent state later on (i.e. shutdown and rollback).
+     */
+    void _abortIndexBuildTwoPhaseWithoutCleanup(OperationContext* opCtx,
+                                                std::shared_ptr<ReplIndexBuildState> replState,
+                                                WaitBehavior wait,
+                                                const std::string& reason);
 
     /**
      * Cleans up a single-phase index build after a failure.

@@ -135,7 +135,6 @@ struct ReplIndexBuildState {
     // index builder does not yet exist. Since a signal cannot be set on the index builder at that
     // time, it must be saved here.
     bool aborted = false;
-    Timestamp abortTimestamp;
     std::string abortReason = "";
 
     // The coordinator for the index build will wait upon this when awaiting an external signal,

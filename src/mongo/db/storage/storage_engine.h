@@ -361,8 +361,7 @@ public:
      * Recover as much data as possible from a potentially corrupt RecordStore.
      * This only recovers the record data, not indexes or anything else.
      *
-     * Generally, this method should not be called directly except by the repairDatabase()
-     * free function.
+     * This invalidates the Collection object for this namespace.
      */
     virtual Status repairRecordStore(OperationContext* opCtx,
                                      RecordId catalogId,

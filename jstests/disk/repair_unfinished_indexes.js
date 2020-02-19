@@ -45,6 +45,18 @@ IndexBuildTest.waitForIndexBuildToStart(secondaryDB);
 const secondaryCollUri = getUriForColl(secondaryDB[collName]);
 replSet.stop(secondary);
 
+// Confirm that the secondary node leaves the index as unfinished.
+(function startAsStandalone() {
+    jsTestLog("Starting secondary as standalone");
+    const mongod = startMongodOnExistingPath(secondaryDbpath);
+    IndexBuildTest.assertIndexes(mongod.getDB(dbName).getCollection(collName),
+                                 2,
+                                 ["_id_"],
+                                 ["a_1"],
+                                 {includeBuildUUIDs: true});
+    MongoRunner.stopMongod(mongod);
+})();
+
 const exitCode = createIdx({checkExitSuccess: false});
 assert.neq(0, exitCode, 'expected shell to exit abnormally due to shutdown');
 
@@ -54,26 +66,30 @@ corruptFile(secondaryCollFile);
 assertRepairSucceeds(secondaryDbpath, secondaryPort);
 
 // Importantly, confirm that the secondary node dropped the unfinished index.
-jsTestLog("Starting secondary as standalone");
-const mongod = startMongodOnExistingPath(secondaryDbpath);
-IndexBuildTest.assertIndexes(
-    mongod.getDB(dbName).getCollection(collName), 1, ["_id_"], [], {includeBuildUUIDs: true});
-MongoRunner.stopMongod(mongod);
+(function startAsStandaloneAfterRepair() {
+    jsTestLog("Starting secondary as standalone after repair");
+    const mongod = startMongodOnExistingPath(secondaryDbpath);
+    IndexBuildTest.assertIndexes(
+        mongod.getDB(dbName).getCollection(collName), 1, ["_id_"], [], {includeBuildUUIDs: true});
+    MongoRunner.stopMongod(mongod);
+})();
 
 // The secondary may not be reintroduced because data was modified.
 assertErrorOnStartupWhenStartingAsReplSet(
     secondaryDbpath, secondaryPort, replSet.getReplSetConfig()._id);
 
-jsTestLog("Wiping dbpath and re-syncing secondary");
-const newSecondary = assertStartInReplSet(
-    replSet, secondary, true /* cleanData */, true /* expectResync */, function(node) {});
+(function reSyncSecondary() {
+    jsTestLog("Wiping dbpath and re-syncing secondary");
+    const newSecondary = assertStartInReplSet(
+        replSet, secondary, true /* cleanData */, true /* expectResync */, function(node) {});
 
-IndexBuildTest.resumeIndexBuilds(primary);
-IndexBuildTest.waitForIndexBuildToStop(primaryDB);
-IndexBuildTest.waitForIndexBuildToStop(newSecondary.getDB(dbName));
-IndexBuildTest.assertIndexes(primaryColl, 2, ["_id_", "a_1"]);
-IndexBuildTest.assertIndexes(
-    newSecondary.getDB(dbName).getCollection(collName), 2, ["_id_", "a_1"]);
+    IndexBuildTest.resumeIndexBuilds(primary);
+    IndexBuildTest.waitForIndexBuildToStop(primaryDB);
+    IndexBuildTest.waitForIndexBuildToStop(newSecondary.getDB(dbName));
+    IndexBuildTest.assertIndexes(primaryColl, 2, ["_id_", "a_1"]);
+    IndexBuildTest.assertIndexes(
+        newSecondary.getDB(dbName).getCollection(collName), 2, ["_id_", "a_1"]);
+})();
 
 replSet.stopSet();
 })();

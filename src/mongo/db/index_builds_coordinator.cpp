@@ -1960,9 +1960,9 @@ Timestamp IndexBuildsCoordinator::_waitForCommitOrAbort(
                               << replState->commitTimestamp.toString()));
         } else if (replState->aborted) {
             LOGV2(20670,
-                  "Aborting index build: {replState_buildUUID}, timestamp: "
-                  "{replState_abortTimestamp}, reason: {replState_abortReason}, collection UUID: "
-                  "{replState_collectionUUID}, local index error (if any): {preAbortStatus}",
+                  "Aborting index build: {replState_buildUUID}, reason: {replState_abortReason}, "
+                  "collection UUID: {replState_collectionUUID}, local index error (if any): "
+                  "{preAbortStatus}",
                   "replState_buildUUID"_attr = replState->buildUUID,
                   "replState_abortReason"_attr = replState->abortReason,
                   "replState_collectionUUID"_attr = replState->collectionUUID,

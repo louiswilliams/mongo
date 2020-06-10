@@ -225,8 +225,6 @@ not need to be checked.
 See
 [SkippedRecordTracker](https://github.com/mongodb/mongo/blob/r4.5.0/src/mongo/db/index/skipped_record_tracker.h#L45).
 
-## Multikey Indexes
-
 ## Replica Set Index Builds
 
 Also referred to as "simultaneous index builds" and "two-phase index builds".
@@ -266,6 +264,27 @@ block replication until their index build is complete.
 
 See
 [IndexBuildsCoordinator::_waitForNextIndexBuildActionAndCommit](https://github.com/mongodb/mongo/blob/r4.4.0-rc9/src/mongo/db/index_builds_coordinator_mongod.cpp#L632).
+
+# Multikey Indexes
+
+An index is considered "mulikey" if there are multiple keys that map to the same record. That is,
+there are indexed fields with array values. For example, with an index on `{a: 1}`, the document
+`{a: [1, 2, 3]}` automatically makes the index multikey. The multikey state informs high-level query
+operations about the capabilities of the index.
+
+When the first multikey document is inserted into an index, a `multikey: true` flag is set on the
+index in the durable
+catalog entry for the collection. Since this catalog entry is a document shared for
+across the entire collection, allowing any writer to modify the catalog entry would result in excessive
+WriteConflictExceptions for other writers.
+
+To solve this problem, the multikey state is tracked in memory, and only persisted  when it changes
+to `true`. Once `true`, an index is always multikey.
+
+See
+[MultiKeyPaths](https://github.com/mongodb/mongo/blob/r4.4.0-rc9/src/mongo/db/index/multikey_paths.h#L57),
+[IndexCatalogEntryImpl::setMultikey](https://github.com/mongodb/mongo/blob/r4.4.0-rc9/src/mongo/db/catalog/index_catalog_entry_impl.cpp#L184),
+and [Multikey Indexes - MongoDB Manual](https://docs.mongodb.com/manual/core/index-multikey/).
 
 # KeyString
 describe how KeyString values are used for comparing and indexing BSON elements

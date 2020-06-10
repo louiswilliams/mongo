@@ -116,13 +116,47 @@ i.e., don't hold a lock across journal flushing
 
 ### FCV Lock Usage
 
-# Index Builds
-How do indexs work?
+# Indexes
 
-Read collection table, sort in-memory, write to index table.
+An index is a storage engine data structure that provides efficient lookup on fields in a
+collection's data set. Indexes map document fields, keys, to documents such that a full collection
+scan is not required when querying on a specific field.
+
+All collections have a unique index on the `_id` field, which is required.
+
+Also see [MongoDB Manual - Indexes](https://docs.mongodb.com/manual/indexes/).
+
+### Unique indexes
+
+A unique index maintains a constraint such that duplicate values are not allowed on the indexed
+field(s).
+
+# Index Builds
+
+Indexes are built by performing a full scan of collection data. To be considered consistent, an
+index must correctly map keys to all eligible documents.
 
 ## Hybrid Index Build
-KeyString has its own section below. Index builds discussion may need to reference it
+
+Hybrid index builds refer to the default procedure introduced in 4.2 that produces efficient index
+data structures without blocking reads or writes for extended periods of time. This is acheived by
+performing a full collection scan while concurrently accepting new writes into a temporary storage
+engine table. 
+
+Index builds have the follow procedure:
+* Scan all documents on the collection to be indexed
+  * Generate [KeyString](#keystring) keys for the indexed fields for each document
+* Insert the generated keys into the [external sorter](#the-external-sorter)
+* Read the sorted keys from the external sorter and
+    [bulk load](http://source.wiredtiger.com/3.2.1/tune_bulk_load.html) into the storage engine index.
+    Bulk-loading requires keys to be inserted in sorted order, but builds a B-tree structure that is
+    more efficiently filled than with random insertion.
+
+These intercepted writes are reapplied in three phases:
+* While holding a collection IX lock to allow concurrent reads and writes
+* While holding a collection S lock to block concurrent writes, but not reads
+* While holding a collection X lock to block all reads and writes
+
 
 ### Temporary Side Table For New Writes
 

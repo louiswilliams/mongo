@@ -139,7 +139,7 @@ index must correctly map keys to all eligible documents.
 At a high level, omitting details that will be elaborated upon in further sections, index builds
 have the follow procedure:
 * While holding a collection X lock, make an initial `ready: false` write to the durable catalog
-  entry for the collection. 
+  entry for the collection.
 * Downgrade to a collection IX lock.
 * Scan all documents on the collection to be indexed
   * Generate [KeyString](#keystring) keys for the indexed fields for each document
@@ -149,14 +149,14 @@ have the follow procedure:
     load](http://source.wiredtiger.com/3.2.1/tune_bulk_load.html) into the storage engine index.
     Bulk-loading requires keys to be inserted in sorted order, but builds a B-tree structure that is
     more efficiently filled than with random insertion.
-* While holding a collection X lock, make a final `ready: true` write to the durable catalog. 
+* While holding a collection X lock, make a final `ready: true` write to the durable catalog.
 
 ## Hybrid Index Builds
 
 Hybrid index builds refer to the default procedure introduced in 4.2 that produces efficient index
 data structures without blocking reads or writes for extended periods of time. This is acheived by
 performing a full collection scan and bulk-loading keys (described above) while concurrently
-accepting new writes into a temporary storage engine table. 
+accepting new writes into a temporary storage engine table.
 
 ### Temporary Side Table For New Writes
 
@@ -171,7 +171,7 @@ Once the collection scan and bulk-load phases of the index build are complete, t
 keys are applied directly to the index in three phases:
 * While holding a collection IX lock to allow concurrent reads and writes
     * Because writes are still accepted, new keys may appear at the end of the _side-writes_ table.
-      They will be applied in subsequent steps. 
+      They will be applied in subsequent steps.
 * While holding a collection S lock to block concurrent writes, but not reads
 * While holding a collection X lock to block all reads and writes
 
@@ -196,7 +196,7 @@ If there are still constraint violations, an error is thrown.
 See
 [DuplicateKeyTracker](https://github.com/mongodb/mongo/blob/r4.5.0/src/mongo/db/index/duplicate_key_tracker.h#L48).
 
-### Temporary Table For Key Generation Errors 
+### Temporary Table For Key Generation Errors
 
 In addition to uniqueness constraints, indexes may have per-key constraints. For example, a compound
 index may not be built on documents with parallel arrays. An index build on `{a: 1, b: 1}` will fail
@@ -238,7 +238,7 @@ primary is done with its indexing, it will decide to replicate either an `abortI
 `commitIndexBuild` oplog entry.
 
 Simultaneous index builds are resilient to state transitions. The node that starts an index build
-does not need to be the same node that decides to commit it. 
+does not need to be the same node that decides to commit it.
 
 See [Index Builds in Replicated Environments - MongoDB
 Manual](https://docs.mongodb.com/master/core/index-creation/#index-builds-in-replicated-environments).
@@ -259,7 +259,7 @@ collection and performed the first drain of side-writes. Voting is implemented b
 While waiting for a commit decision, primaries and secondaries continue receiving and applying new
 side writes. When a quorum is reached, the current primary, under a collection X lock, will check
 all index constraints. If there are errors, it will replicate an `abortIndexBuild` oplog entry. If
-the index build is successful, it will replicate a `commitIndexBuild` oplog entry. 
+the index build is successful, it will replicate a `commitIndexBuild` oplog entry.
 
 Secondaries that were not included in the quorum and recieve a `commitIndexBuild` oplog entry will
 block replication until their index build is complete.

@@ -126,7 +126,8 @@ Maybe include a discussion of how MongoDB read concerns translate into particula
 ## MongoDB Point-in-Time Read
 
 # Read Operations
-How does a read work?
+
+Collection reads act directly on a [RecordStore](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/record_store.h#L202) or RecordCursor.
 
 ## Collection Read
 how it works, what tables

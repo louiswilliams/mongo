@@ -127,15 +127,35 @@ Maybe include a discussion of how MongoDB read concerns translate into particula
 
 # Read Operations
 
-Collection reads act directly on a [RecordStore](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/record_store.h#L202) or RecordCursor.
+Storage engines that provide document-level concurrency require all operations to hold at least a
+collection IS lock. With WiredTiger, MongoDB implicitly creates a WT_SESSION and starts a
+transaction for every read operation. These read-only transactions are rolled back automatically
+when the last GlobalLock is released or explicitly by abandonSnapshot during query yielding.
+
+See
+[WiredTigerCursor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/wiredtiger/wiredtiger_cursor.cpp#L48),
+[WiredTigerRecoveryUnit::getSession](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/wiredtiger/wiredtiger_recovery_unit.cpp#L303-L305),
+[GlobalLock dtor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/concurrency/d_concurrency.h#L228-L239),
+and
+[PlanYieldPolicy::_yieldAllLocks](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/query/plan_yield_policy.cpp#L182)
 
 ## Collection Read
-how it works, what tables
+
+Collection reads act directly on a
+[RecordStore](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/record_store.h#L202)
+or
+[RecordCursor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/record_store.h#L102).
+The Collection object also provides
+[higher-level accessors](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/catalog/collection.h#L279)
+to the RecordStore.
 
 ## Index Read
-_could pull out index reads and writes into its own section, if preferable_
 
-how it works, goes from index table to collection table -- two lookups
+Index reads act directly on a
+[SortedDataInterface::Cursor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/sorted_data_interface.h#L214).
+Most readers create cursors and interact with indexes through the [IndexAccessMethod](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/index/index_access_method.h#L142).
+
+## AutoGetCollectionForRead 
 
 # Write Operations
 an overview of how writes (insert, update, delete) are processed

@@ -157,8 +157,8 @@ Most readers create cursors rather than interacting with indexes through the
 The
 [AutoGetCollectionForRead](https://github.com/mongodb/mongo/blob/58283ca178782c4d1c4a4d2acd4313f6f6f86fd5/src/mongo/db/db_raii.cpp#L89)
 (AGCFR) RAII type is used by most client read operations. In addition to acquiring all necessary
-locks in the hierarchy, it ensures that operations reading at points in time are respecting
-the visibility rules of collection data and metadata.
+locks in the hierarchy, it ensures that operations reading at points in time are respecting the
+visibility rules of collection data and metadata.
 
 AGCFR ensures that operations reading at a timestamp do not read at times later than metadata
 changes on the collection (see
@@ -184,7 +184,6 @@ and switching the ReadSource of [eligible
 readers](https://github.com/mongodb/mongo/blob/58283ca178782c4d1c4a4d2acd4313f6f6f86fd5/src/mongo/db/storage/snapshot_helper.cpp#L106)
 to read at
 [kLastApplied](https://github.com/mongodb/mongo/blob/58283ca178782c4d1c4a4d2acd4313f6f6f86fd5/src/mongo/db/storage/recovery_unit.h#L411).
-
 
 # Write Operations
 an overview of how writes (insert, update, delete) are processed

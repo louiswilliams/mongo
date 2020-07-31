@@ -121,16 +121,17 @@ Maybe include a discussion of how MongoDB read concerns translate into particula
 
 # Read Operations
 
-All read operations that act on collections or indexes are required to take collection locks.
-Storage engines that provide document-level concurrency require all operations to hold at least a
-collection IS lock. With WiredTiger, MongoDB implicitly creates a WT_SESSION and starts a
-transaction for every read operation. These read-only transactions are rolled back automatically
-when the last GlobalLock is released or explicitly during query yielding. 
+All read operations on collections and indexes are required to take collection locks. Storage
+engines that provide document-level concurrency require all operations to hold at least a collection
+IS lock. With the WiredTiger storage engine, MongoDB implicitly creates a WT_SESSION and starts a
+storage transaction at the start of every read operation. These read-only transactions are rolled
+back automatically when the last GlobalLock is released or explicitly during query yielding. 
 
 See
 [WiredTigerCursor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/wiredtiger/wiredtiger_cursor.cpp#L48),
 [WiredTigerRecoveryUnit::getSession](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/wiredtiger/wiredtiger_recovery_unit.cpp#L303-L305),
-[GlobalLock dtor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/concurrency/d_concurrency.h#L228-L239),
+[GlobalLock
+dtor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/concurrency/d_concurrency.h#L228-L239),
 and
 [PlanYieldPolicy::_yieldAllLocks](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/query/plan_yield_policy.cpp#L182).
 
@@ -140,15 +141,16 @@ Collection reads act directly on a
 [RecordStore](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/record_store.h#L202)
 or
 [RecordCursor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/record_store.h#L102).
-The Collection object also provides
-[higher-level accessors](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/catalog/collection.h#L279)
+The Collection object also provides [higher-level
+accessors](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/catalog/collection.h#L279)
 to the RecordStore.
 
 ## Index Reads
 
 Index reads act directly on a
 [SortedDataInterface::Cursor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/sorted_data_interface.h#L214).
-Most readers create cursors rather than interacting with indexes through the [IndexAccessMethod](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/index/index_access_method.h#L142).
+Most readers create cursors rather than interacting with indexes through the
+[IndexAccessMethod](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/index/index_access_method.h#L142).
 
 ## AutoGetCollectionForRead 
 
@@ -156,7 +158,7 @@ The
 [AutoGetCollectionForRead](https://github.com/mongodb/mongo/blob/58283ca178782c4d1c4a4d2acd4313f6f6f86fd5/src/mongo/db/db_raii.cpp#L89)
 (AGCFR) RAII type is used by most client read operations. In addition to acquiring all necessary
 locks in the hierarchy, it ensures that operations reading at points in time are respecting
-visibility rules of collection data and metadata.
+the visibility rules of collection data and metadata.
 
 AGCFR ensures that operations reading at a timestamp do not read at times later than metadata
 changes on the collection (see
@@ -169,8 +171,8 @@ exposes readers to the possibility of seeing inconsistent states of data. To sol
 oplog applier takes the ParallelBatchWriterMode (PBWM) lock in X mode, and readers are expected to
 take the PBWM lock in IS mode to avoid observing inconsistent data mid-batch. 
 
-As of MongoDB 4.0, reads on secondaries are able to opt-out of taking the PBWM lock and read at the
-[lastApplied](../repl/README.md#replication-timestamp-glossary) optime instead (see
+As of MongoDB 4.0, reads on secondaries are able to opt-out of taking the PBWM lock and read at
+replication's [lastApplied](../repl/README.md#replication-timestamp-glossary) optime instead (see
 [SERVER-34192](https://jira.mongodb.org/browse/SERVER-34192)). LastApplied is used because on
 secondaries it is only updated after each oplog batch, which is a known consistent state of data.
 This allows operations to avoid taking the PBWM lock, and thus not conflict with oplog application.

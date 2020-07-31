@@ -1,4 +1,10 @@
 # Execution Internals
+The storage execution layer provides an interface for higher level MongoDB components, including
+query, replication and sharding, to all storage engines compatible with MongoDB. It maintains a
+catalog, in-memory and on-disk, of collections and indexes. It also implements an additional (to
+whatever a storage engine implements) concurrency control layer to safely modify the catalog while
+sustaining correct and consistent collection and index data formatting.
+
 Execution faciliates reads and writes to the storage engine with various persistence guarantees,
 builds indexes, supports replication rollback, manages oplog visibility, repairs data corruption
 and inconsistencies, and much more.
@@ -123,17 +129,17 @@ Maybe include a discussion of how MongoDB read concerns translate into particula
 
 All read operations on collections and indexes are required to take collection locks. Storage
 engines that provide document-level concurrency require all operations to hold at least a collection
-IS lock. With the WiredTiger storage engine, MongoDB implicitly creates a WT_SESSION and starts a
-storage transaction at the start of every read operation. These read-only transactions are rolled
-back automatically when the last GlobalLock is released or explicitly during query yielding. 
+IS lock. With the WiredTiger storage engine, the MongoDB integration layer implicitly starts a
+storage transaction on the first attempt to read from a collection or index. Unless a read operation
+is part of a larger write operation, the transaction is rolled-back automatically when the last
+GlobalLock is released, explicitly during query yielding, or from a call to abandonSnapshot();
 
 See
 [WiredTigerCursor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/wiredtiger/wiredtiger_cursor.cpp#L48),
 [WiredTigerRecoveryUnit::getSession](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/wiredtiger/wiredtiger_recovery_unit.cpp#L303-L305),
-[GlobalLock
-dtor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/concurrency/d_concurrency.h#L228-L239),
-and
-[PlanYieldPolicy::_yieldAllLocks](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/query/plan_yield_policy.cpp#L182).
+[GlobalLock dtor](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/concurrency/d_concurrency.h#L228-L239),
+[PlanYieldPolicy::_yieldAllLocks](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/query/plan_yield_policy.cpp#L182),
+[ReocveryUnit::abandonSnapstho](https://github.com/mongodb/mongo/blob/r4.4.0-rc13/src/mongo/db/storage/recovery_unit.h#L217).
 
 ## Collection Reads
 
@@ -167,12 +173,13 @@ changes on the collection (see
 ## Secondary Reads
 
 The oplog applier applies entries out-of-order to provide parallelism for data replication. This
-exposes readers to the possibility of seeing inconsistent states of data. To solve this problem, the
-oplog applier takes the ParallelBatchWriterMode (PBWM) lock in X mode, and readers are expected to
-take the PBWM lock in IS mode to avoid observing inconsistent data mid-batch. 
+exposes readers with no set read timetsamp to the possibility of seeing inconsistent states of data.
+To solve this problem, the oplog applier takes the ParallelBatchWriterMode (PBWM) lock in X mode,
+and readers using no read timestamp are expected to take the PBWM lock in IS mode to avoid observing
+inconsistent data mid-batch.
 
-As of MongoDB 4.0, reads on secondaries are able to opt-out of taking the PBWM lock and read at
-replication's [lastApplied](../repl/README.md#replication-timestamp-glossary) optime instead (see
+Reads on secondaries are able to opt-out of taking the PBWM lock and read at replication's
+[lastApplied](../repl/README.md#replication-timestamp-glossary) optime instead (see
 [SERVER-34192](https://jira.mongodb.org/browse/SERVER-34192)). LastApplied is used because on
 secondaries it is only updated after each oplog batch, which is a known consistent state of data.
 This allows operations to avoid taking the PBWM lock, and thus not conflict with oplog application.

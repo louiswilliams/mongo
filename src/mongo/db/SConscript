@@ -1010,6 +1010,7 @@ env.Library(
     ],
     LIBDEPS_PRIVATE=[
        "concurrency/write_conflict_exception",
+       "stats/resource_consumption_metrics",
     ],
 )
 

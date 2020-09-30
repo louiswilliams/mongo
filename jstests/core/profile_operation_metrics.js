@@ -3,7 +3,9 @@
  *
  *  @tags: [
  *    does_not_support_stepdowns,
+ *    requires_fcv_47,
  *    requires_getmore,
+ *    requires_non_retryable_writes,
  *    requires_profiling,
  *    sbe_incompatible,
  *  ]
@@ -125,18 +127,18 @@ const operations = [
         profileFilter: {op: 'command', 'command.explain.find': collName}
     },
     {
-        name: 'listCollections',
-        command: (db) => {
-            assert.eq(db.getCollectionInfos().length, 2);
-        },
-        profileFilter: {op: 'command', 'command.listCollections': 1}
-    },
-    {
         name: 'listIndexes',
         command: (db) => {
-            assert.eq(db[collName].listIndexes().itcount(), 2);
+            assert.eq(db[collName].getIndexes().length, 2);
         },
         profileFilter: {op: 'command', 'command.listIndexes': collName}
+    },
+    {
+        name: 'dropIndex',
+        command: (db) => {
+            assert.commandWorked(db[collName].dropIndex({a: 1}));
+        },
+        profileFilter: {op: 'command', 'command.dropIndexes': collName}
     },
     // Clear the profile collection so we can easily identify new operations with similar filters as
     // past operations.
@@ -159,7 +161,14 @@ const operations = [
             assert.commandWorked(db[collName].remove({_id: 1}));
         },
         profileFilter: {op: 'remove', 'command.q': {_id: 1}}
-    }
+    },
+    {
+        name: 'dropCollection',
+        command: (db) => {
+            assert(db[collName].drop());
+        },
+        profileFilter: {op: 'command', 'command.drop': collName}
+    },
 ];
 
 let profileColl = testDB.system.profile;

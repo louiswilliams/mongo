@@ -163,6 +163,7 @@ env.Library(
     LIBDEPS_PRIVATE=[
         'auth/auth',
         'prepare_conflict_tracker',
+        'stats/resource_consumption_metrics',
     ],
 )
 

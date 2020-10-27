@@ -56,6 +56,8 @@ public:
      */
     IndexBuildsCoordinatorMongod();
 
+    void startup() override;
+
     /**
      * Shuts down the thread pool, signals interrupt to all index builds, then waits for all of the
      * threads to finish.

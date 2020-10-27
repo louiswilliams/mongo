@@ -274,6 +274,9 @@ public:
         virtual Sorter::PersistedState persistDataForShutdown() = 0;
     };
 
+    virtual std::unique_ptr<BulkBuilder::Sorter::Iterator> makeMergedIterator(
+        std::vector<BulkBuilder*> builders, size_t maxMemoryUsageBytes) const = 0;
+
     /**
      * Starts a bulk operation.
      * You work on the returned BulkBuilder and then call commitBulk.
@@ -283,9 +286,8 @@ public:
      * build.
      *
      * maxMemoryUsageBytes: amount of memory consumed before the external sorter starts spilling to
-     *                      disk
-     * stateInfo: the information to use to resume the index build, or boost::none if starting a
-     * new index build.
+     * disk stateInfo: the information to use to resume the index build, or boost::none if starting
+     * a new index build.
      */
     virtual std::unique_ptr<BulkBuilder> initiateBulk(
         size_t maxMemoryUsageBytes, const boost::optional<IndexStateInfo>& stateInfo) = 0;
@@ -546,6 +548,9 @@ public:
 
     std::unique_ptr<BulkBuilder> initiateBulk(
         size_t maxMemoryUsageBytes, const boost::optional<IndexStateInfo>& stateInfo) final;
+
+    std::unique_ptr<BulkBuilder::Sorter::Iterator> makeMergedIterator(
+        std::vector<BulkBuilder*> builders, size_t maxMemoryUsageBytes) const final;
 
     Status commitBulk(OperationContext* opCtx,
                       BulkBuilder* bulk,

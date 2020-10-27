@@ -604,6 +604,8 @@ ExitCode _initAndListen(ServiceContext* serviceContext, int listenPort) {
     invariant(storageEngine);
     BackupCursorHooks::initialize(serviceContext, storageEngine);
 
+    IndexBuildsCoordinator::get(serviceContext)->startup();
+
     // Perform replication recovery for queryable backup mode if needed.
     if (storageGlobalParams.readOnly) {
         uassert(ErrorCodes::BadValue,

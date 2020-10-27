@@ -87,8 +87,11 @@ public:
      */
     struct IndexBuildOptions {
         boost::optional<CommitQuorumOptions> commitQuorum;
+        int parallel = 0;
         ApplicationMode applicationMode = ApplicationMode::kNormal;
     };
+
+    virtual void startup() = 0;
 
     /**
      * Invariants that there are no index builds in-progress.

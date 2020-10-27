@@ -42,10 +42,9 @@
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/catalog/collection_options.h"
 #include "mongo/db/catalog/index_build_block.h"
+#include "mongo/db/catalog/index_builder_interface.h"
 #include "mongo/db/catalog/index_catalog.h"
 #include "mongo/db/catalog_raii.h"
-#include "mongo/db/index/index_access_method.h"
-#include "mongo/db/index/index_build_interceptor.h"
 #include "mongo/db/record_id.h"
 #include "mongo/db/resumable_index_builds_gen.h"
 #include "mongo/platform/mutex.h"
@@ -54,12 +53,6 @@
 namespace mongo {
 
 extern FailPoint leaveIndexBuildUnfinishedForShutdown;
-
-class Collection;
-class CollectionPtr;
-class MatchExpression;
-class NamespaceString;
-class OperationContext;
 
 /**
  * Builds one or more indexes.
@@ -72,7 +65,7 @@ class OperationContext;
  * destructed from inside of a WriteUnitOfWork as any cleanup needed should never be rolled back
  * (as it is itself essentially a form of rollback, you don't want to "rollback the rollback").
  */
-class MultiIndexBlock {
+class MultiIndexBlock : public IndexBuilderInterface {
     MultiIndexBlock(const MultiIndexBlock&) = delete;
     MultiIndexBlock& operator=(const MultiIndexBlock&) = delete;
 
@@ -88,13 +81,13 @@ public:
      * If this is called, any 'dupRecords' set passed to dumpInsertsFromBulk() will never be
      * filled.
      */
-    void ignoreUniqueConstraint();
+    void ignoreUniqueConstraint() override;
 
     /**
      * Sets an index build UUID associated with the indexes for this builder. This call is required
      * for two-phase index builds.
      */
-    void setTwoPhaseBuildUUID(UUID indexBuildUUID) {
+    void setTwoPhaseBuildUUID(UUID indexBuildUUID) override {
         _buildUUID = indexBuildUUID;
     }
 
@@ -110,21 +103,16 @@ public:
      *
      * Requires holding an exclusive lock on the collection.
      */
-    using OnInitFn = std::function<Status(std::vector<BSONObj>& specs)>;
     StatusWith<std::vector<BSONObj>> init(
         OperationContext* opCtx,
         CollectionWriter& collection,
         const std::vector<BSONObj>& specs,
         OnInitFn onInit,
-        const boost::optional<ResumeIndexInfo>& resumeInfo = boost::none);
+        const boost::optional<ResumeIndexInfo>& resumeInfo = boost::none) override;
     StatusWith<std::vector<BSONObj>> init(OperationContext* opCtx,
                                           CollectionWriter& collection,
                                           const BSONObj& spec,
-                                          OnInitFn onInit);
-    StatusWith<std::vector<BSONObj>> initForResume(OperationContext* opCtx,
-                                                   const CollectionPtr& collection,
-                                                   const std::vector<BSONObj>& specs,
-                                                   const ResumeIndexInfo& resumeInfo);
+                                          OnInitFn onInit) override;
 
     /**
      * Not all index initializations need an OnInitFn, in particular index builds that do not need
@@ -155,7 +143,7 @@ public:
     Status insertAllDocumentsInCollection(
         OperationContext* opCtx,
         const CollectionPtr& collection,
-        boost::optional<RecordId> resumeAfterRecordId = boost::none);
+        boost::optional<RecordId> resumeAfterRecordId = boost::none) override;
 
     /**
      * Call this after init() for each document in the collection.
@@ -166,7 +154,7 @@ public:
      */
     Status insertSingleDocumentForInitialSyncOrRecovery(OperationContext* opCtx,
                                                         const BSONObj& wholeDocument,
-                                                        const RecordId& loc);
+                                                        const RecordId& loc) override;
 
     /**
      * Call this after the last insertSingleDocumentForInitialSyncOrRecovery(). This gives the index
@@ -179,10 +167,11 @@ public:
      *
      * Should not be called inside of a WriteUnitOfWork.
      */
-    Status dumpInsertsFromBulk(OperationContext* opCtx, const CollectionPtr& collection);
-    Status dumpInsertsFromBulk(OperationContext* opCtx,
-                               const CollectionPtr& collection,
-                               const IndexAccessMethod::RecordIdHandlerFn& onDuplicateRecord);
+    Status dumpInsertsFromBulk(OperationContext* opCtx, const CollectionPtr& collection) override;
+    Status dumpInsertsFromBulk(
+        OperationContext* opCtx,
+        const CollectionPtr& collection,
+        const IndexAccessMethod::RecordIdHandlerFn& onDuplicateRecord) override;
     /**
      * For background indexes using an IndexBuildInterceptor to capture inserts during a build,
      * drain these writes into the index. If intent locks are held on the collection, more writes
@@ -197,7 +186,7 @@ public:
      */
     Status drainBackgroundWrites(OperationContext* opCtx,
                                  RecoveryUnit::ReadSource readSource,
-                                 IndexBuildInterceptor::DrainYieldPolicy drainYieldPolicy);
+                                 IndexBuildInterceptor::DrainYieldPolicy drainYieldPolicy) override;
 
 
     /**
@@ -210,7 +199,7 @@ public:
      * of an index build, so it must ensure that before it finishes, it has indexed all documents in
      * a collection, requiring a call to this function upon completion.
      */
-    Status retrySkippedRecords(OperationContext* opCtx, const CollectionPtr& collection);
+    Status retrySkippedRecords(OperationContext* opCtx, const CollectionPtr& collection) override;
 
     /**
      * Check any constraits that may have been temporarily violated during the index build for
@@ -219,7 +208,7 @@ public:
      *
      * Must not be in a WriteUnitOfWork.
      */
-    Status checkConstraints(OperationContext* opCtx, const CollectionPtr& collection);
+    Status checkConstraints(OperationContext* opCtx, const CollectionPtr& collection) override;
 
     /**
      * Marks the index ready for use. Should only be called as the last method after
@@ -233,12 +222,10 @@ public:
      *
      * Requires holding an exclusive lock on the collection.
      */
-    using OnCommitFn = std::function<void()>;
-    using OnCreateEachFn = std::function<void(const BSONObj& spec)>;
     Status commit(OperationContext* opCtx,
                   Collection* collection,
                   OnCreateEachFn onCreateEach,
-                  OnCommitFn onCommit);
+                  OnCommitFn onCommit) override;
 
     /**
      * Not all index commits need these functions, in particular index builds that do not need
@@ -258,10 +245,9 @@ public:
      *
      * `onCleanUp` will be called after all indexes have been removed from the catalog.
      */
-    using OnCleanUpFn = std::function<void()>;
     void abortIndexBuild(OperationContext* opCtx,
                          CollectionWriter& collection,
-                         OnCleanUpFn onCleanUp) noexcept;
+                         OnCleanUpFn onCleanUp) noexcept override;
 
     /**
      * Not all index aborts need this function, in particular index builds that do not need
@@ -279,15 +265,15 @@ public:
      */
     void abortWithoutCleanup(OperationContext* opCtx,
                              const CollectionPtr& collection,
-                             bool isResumable);
+                             bool isResumable) override;
 
     /**
      * Returns true if this build block supports background writes while building an index. This is
      * true for the kHybrid method.
      */
-    bool isBackgroundBuilding() const;
+    bool isBackgroundBuilding() const override;
 
-    void setIndexBuildMethod(IndexBuildMethod indexBuildMethod);
+    void setIndexBuildMethod(IndexBuildMethod indexBuildMethod) override;
 
 private:
     struct IndexToBuild {

@@ -88,11 +88,13 @@ ThreadPool::Options makeDefaultThreadPoolOptions() {
 }  // namespace
 
 IndexBuildsCoordinatorMongod::IndexBuildsCoordinatorMongod()
-    : _threadPool(makeDefaultThreadPoolOptions()) {
+    : _threadPool(makeDefaultThreadPoolOptions()) {}
+
+void IndexBuildsCoordinatorMongod::startup() {
     _threadPool.startup();
 
-    // Change the 'setOnUpdate' function for the server parameter to signal the condition variable
-    // when the value changes.
+    // Change the 'setOnUpdate' function for the server parameter to signal the condition
+    // variable when the value changes.
     ServerParameter* serverParam =
         ServerParameterSet::getGlobal()->get(kMaxNumActiveUserIndexBuildsServerParameterName);
     static_cast<
@@ -102,6 +104,8 @@ IndexBuildsCoordinatorMongod::IndexBuildsCoordinatorMongod()
             _indexBuildFinished.notify_all();
             return Status::OK();
         });
+
+    _indexBuildsManager.startup();
 }
 
 void IndexBuildsCoordinatorMongod::shutdown(OperationContext* opCtx) {
@@ -158,17 +162,17 @@ IndexBuildsCoordinatorMongod::_startIndexBuild(OperationContext* opCtx,
     const NamespaceStringOrUUID nssOrUuid{dbName, collectionUUID};
 
     {
-        // Only operations originating from user connections need to wait while there are more than
-        // 'maxNumActiveUserIndexBuilds' index builds currently running.
+        // Only operations originating from user connections need to wait while there are more
+        // than 'maxNumActiveUserIndexBuilds' index builds currently running.
         if (opCtx->getClient()->isFromUserConnection()) {
             {
                 // The global lock acquires the RSTL lock which we use to assert that we're the
                 // primary node when running user operations. Additionally, releasing this lock
-                // allows the node to step down after we have checked the replication state. If this
-                // node steps down after this check, similar assertions will cause the index build
-                // to fail later on when locks are reacquired. Therefore, this assertion is not
-                // required for correctness, but only intended to rate limit index builds started on
-                // primaries.
+                // allows the node to step down after we have checked the replication state. If
+                // this node steps down after this check, similar assertions will cause the
+                // index build to fail later on when locks are reacquired. Therefore, this
+                // assertion is not required for correctness, but only intended to rate limit
+                // index builds started on primaries.
                 ShouldNotConflictWithSecondaryBatchApplicationBlock shouldNotConflictBlock(
                     opCtx->lockState());
                 Lock::GlobalLock globalLk(opCtx, MODE_IX);
@@ -211,8 +215,8 @@ IndexBuildsCoordinatorMongod::_startIndexBuild(OperationContext* opCtx,
     });
 
     if (indexBuildOptions.applicationMode == ApplicationMode::kStartupRepair) {
-        // Two phase index build recovery goes though a different set-up procedure because we will
-        // either resume the index build or the original index will be dropped first.
+        // Two phase index build recovery goes though a different set-up procedure because we
+        // will either resume the index build or the original index will be dropped first.
         invariant(protocol == IndexBuildProtocol::kTwoPhase);
         auto status = Status::OK();
         if (resumeInfo) {
@@ -248,8 +252,8 @@ IndexBuildsCoordinatorMongod::_startIndexBuild(OperationContext* opCtx,
     const auto shardVersion = oss.getShardVersion(nss);
     const auto dbVersion = oss.getDbVersion(dbName);
 
-    // Task in thread pool should have similar CurOp representation to the caller so that it can be
-    // identified as a createIndexes operation.
+    // Task in thread pool should have similar CurOp representation to the caller so that it can
+    // be identified as a createIndexes operation.
     LogicalOp logicalOp = LogicalOp::opInvalid;
     BSONObj opDesc;
     {
@@ -263,16 +267,16 @@ IndexBuildsCoordinatorMongod::_startIndexBuild(OperationContext* opCtx,
     // timestamp that must be copied over to timestamp the write to initialize the index build.
     const auto startTimestamp = opCtx->recoveryUnit()->getCommitTimestamp();
 
-    // Use a promise-future pair to wait until the index build has been started. This future will
-    // only return when the index build thread has started and the initial catalog write has been
-    // written, or an error has been encountered otherwise.
+    // Use a promise-future pair to wait until the index build has been started. This future
+    // will only return when the index build thread has started and the initial catalog write
+    // has been written, or an error has been encountered otherwise.
     auto [startPromise, startFuture] = makePromiseFuture<void>();
 
 
     auto replState = invariant(_getIndexBuild(buildUUID));
 
-    // The thread pool task will be responsible for signalling the condition variable when the index
-    // build thread is done running.
+    // The thread pool task will be responsible for signalling the condition variable when the
+    // index build thread is done running.
     onScopeExitGuard.dismiss();
     _threadPool.schedule([
         this,
@@ -335,16 +339,16 @@ IndexBuildsCoordinatorMongod::_startIndexBuild(OperationContext* opCtx,
         // Signal that the index build started successfully.
         startPromise.setWith([] {});
 
-        // Runs the remainder of the index build. Sets the promise result and cleans up the index
-        // build.
+        // Runs the remainder of the index build. Sets the promise result and cleans up the
+        // index build.
         _runIndexBuild(opCtx.get(), buildUUID, indexBuildOptions, resumeInfo);
 
         // Do not exit with an incomplete future.
         invariant(replState->sharedPromise.getFuture().isReady());
 
         try {
-            // Logs the index build statistics if it took longer than the server parameter `slowMs`
-            // to complete.
+            // Logs the index build statistics if it took longer than the server parameter
+            // `slowMs` to complete.
             CurOp::get(opCtx.get())
                 ->completeAndLogOperation(opCtx.get(), MONGO_LOGV2_DEFAULT_COMPONENT);
         } catch (const DBException& e) {
@@ -354,8 +358,8 @@ IndexBuildsCoordinatorMongod::_startIndexBuild(OperationContext* opCtx,
 
     // Waits until the index build has either been started or failed to start.
     // Ignore any interruption state in 'opCtx'.
-    // If 'opCtx' is interrupted, the caller will be notified after startIndexBuild() returns when
-    // it checks the future associated with 'sharedPromise'.
+    // If 'opCtx' is interrupted, the caller will be notified after startIndexBuild() returns
+    // when it checks the future associated with 'sharedPromise'.
     auto status = startFuture.getNoThrow(Interruptible::notInterruptible());
     if (!status.isOK()) {
         return status;
@@ -387,10 +391,10 @@ Status IndexBuildsCoordinatorMongod::voteCommitIndexBuild(OperationContext* opCt
         }
     }
 
-    // Our current contract is that commit quorum can't be disabled for an active index build with
-    // commit quorum on (i.e., commit value set as non-zero or a valid tag) and vice-versa. So,
-    // after this point, it's not possible for the index build's commit quorum value to get updated
-    // to CommitQuorumOptions::kDisabled.
+    // Our current contract is that commit quorum can't be disabled for an active index build
+    // with commit quorum on (i.e., commit value set as non-zero or a valid tag) and vice-versa.
+    // So, after this point, it's not possible for the index build's commit quorum value to get
+    // updated to CommitQuorumOptions::kDisabled.
     Status persistStatus = Status::OK();
 
     IndexBuildEntry indexbuildEntry(
@@ -460,8 +464,8 @@ bool IndexBuildsCoordinatorMongod::_signalIfCommitQuorumNotEnabled(
     repl::ReplicationStateTransitionLockGuard rstl(opCtx, MODE_IX);
 
     // Secondaries should always try to vote even if the commit quorum is disabled. Secondaries
-    // must not read the on-disk commit quorum value as it may not be present at all times, such as
-    // during initial sync.
+    // must not read the on-disk commit quorum value as it may not be present at all times, such
+    // as during initial sync.
     if (!replCoord->canAcceptWritesFor(opCtx, dbAndUUID)) {
         return false;
     }
@@ -524,9 +528,9 @@ void IndexBuildsCoordinatorMongod::_signalPrimaryForCommitReadiness(
 
     auto needToVote = [replState]() -> bool { return !replState->getNextActionNoWait(); };
 
-    // Retry 'voteCommitIndexBuild' command on error until we have been signaled either with commit
-    // or abort. This way, we can make sure majority of nodes will never stop voting and wait for
-    // commit or abort signal until they have received commit or abort signal.
+    // Retry 'voteCommitIndexBuild' command on error until we have been signaled either with
+    // commit or abort. This way, we can make sure majority of nodes will never stop voting and
+    // wait for commit or abort signal until they have received commit or abort signal.
     while (needToVote()) {
         // Check for any interrupts, including shutdown-related ones, before starting the voting
         // process.
@@ -535,14 +539,14 @@ void IndexBuildsCoordinatorMongod::_signalPrimaryForCommitReadiness(
         // Don't hammer the network.
         sleepFor(exponentialBackoff.nextSleep());
         // When index build started during startup recovery can try to get it's address when
-        // rsConfig is uninitialized. So, retry till it gets initialized. Also, it's important, when
-        // we retry, we check if we have received commit or abort signal to ensure liveness. For
-        // e.g., consider a case where  index build gets restarted on startup recovery and
-        // indexBuildsCoordinator thread waits for valid address w/o checking commit or abort
-        // signal. Now, things can go wrong if we try to replay commitIndexBuild oplog entry for
-        // that index build on startup recovery. Oplog applier would get stuck waiting on the
-        // indexBuildsCoordinator thread. As a result, we won't be able to transition to secondary
-        // state, get stuck on startup state.
+        // rsConfig is uninitialized. So, retry till it gets initialized. Also, it's important,
+        // when we retry, we check if we have received commit or abort signal to ensure
+        // liveness. For e.g., consider a case where  index build gets restarted on startup
+        // recovery and indexBuildsCoordinator thread waits for valid address w/o checking
+        // commit or abort signal. Now, things can go wrong if we try to replay commitIndexBuild
+        // oplog entry for that index build on startup recovery. Oplog applier would get stuck
+        // waiting on the indexBuildsCoordinator thread. As a result, we won't be able to
+        // transition to secondary state, get stuck on startup state.
         auto myAddress = replCoord->getMyHostAndPort();
         if (myAddress.empty()) {
             continue;
@@ -559,11 +563,11 @@ void IndexBuildsCoordinatorMongod::_signalPrimaryForCommitReadiness(
                 opCtx, "admin", voteCmdRequest, onRemoteCmdScheduled, onRemoteCmdComplete);
         } catch (DBException& ex) {
             // All errors, including CallbackCanceled and network errors, should be retried.
-            // If ErrorCodes::CallbackCanceled is due to shutdown, then checkForInterrupt() at the
-            // beginning of this loop will catch it and throw an error to the caller. Or, if we
-            // received the CallbackCanceled error because the index build was signaled with abort
-            // or commit signal, then needToVote() would return false and we don't retry the voting
-            // process.
+            // If ErrorCodes::CallbackCanceled is due to shutdown, then checkForInterrupt() at
+            // the beginning of this loop will catch it and throw an error to the caller. Or, if
+            // we received the CallbackCanceled error because the index build was signaled with
+            // abort or commit signal, then needToVote() would return false and we don't retry
+            // the voting process.
             LOGV2_DEBUG(4666400,
                         1,
                         "Failed to run 'voteCommitIndexBuild' command.",
@@ -607,9 +611,9 @@ IndexBuildAction IndexBuildsCoordinatorMongod::_drainSideWritesUntilNextActionIs
         return true;
     };
 
-    // Continuously drain incoming writes until the future is ready. This is an optimization that
-    // allows the critical section of committing, which must drain the remainder of the side writes,
-    // to be as short as possible.
+    // Continuously drain incoming writes until the future is ready. This is an optimization
+    // that allows the critical section of committing, which must drain the remainder of the
+    // side writes, to be as short as possible.
     while (!waitUntilNextActionIsReady()) {
         _insertKeysFromSideTablesWithoutBlockingWrites(opCtx, replState);
     }
@@ -638,8 +642,8 @@ void IndexBuildsCoordinatorMongod::_waitForNextIndexBuildActionAndCommit(
               "action"_attr = indexBuildActionToString(nextAction));
 
         // If the index build was aborted, this serves as a final interruption point. Since the
-        // index builder thread is interrupted before the action is set, this must fail if the build
-        // was aborted.
+        // index builder thread is interrupted before the action is set, this must fail if the
+        // build was aborted.
         opCtx->checkForInterrupt();
 
         bool needsToRetryWait = false;
@@ -672,7 +676,8 @@ void IndexBuildsCoordinatorMongod::_waitForNextIndexBuildActionAndCommit(
             case IndexBuildAction::kRollbackAbort:
             case IndexBuildAction::kInitialSyncAbort:
             case IndexBuildAction::kPrimaryAbort:
-                // The calling thread should have interrupted us before signaling an abort action.
+                // The calling thread should have interrupted us before signaling an abort
+                // action.
                 LOGV2_FATAL(4698901, "Index build abort should have interrupted this operation");
             case IndexBuildAction::kNoAction:
                 return;
@@ -686,7 +691,8 @@ void IndexBuildsCoordinatorMongod::_waitForNextIndexBuildActionAndCommit(
                 // Reset the promise as the node has stepped down. Wait for the new primary to
                 // coordinate the index build and send the new signal/action.
                 LOGV2(3856207,
-                      "No longer primary while attempting to commit. Waiting again for next action "
+                      "No longer primary while attempting to commit. Waiting again for next "
+                      "action "
                       "before completing final phase",
                       "buildUUID"_attr = replState->buildUUID);
                 replState->resetNextActionPromise();

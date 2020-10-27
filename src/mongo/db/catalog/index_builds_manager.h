@@ -34,7 +34,8 @@
 #include <string>
 #include <vector>
 
-#include "mongo/db/catalog/multi_index_block.h"
+#include "mongo/db/catalog/index_builder_interface.h"
+#include "mongo/db/catalog/parallel_index_builder.h"
 #include "mongo/db/catalog_raii.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/rebuild_indexes.h"
@@ -72,15 +73,18 @@ public:
         SetupOptions();
         IndexConstraints indexConstraints = IndexConstraints::kEnforce;
         IndexBuildProtocol protocol = IndexBuildProtocol::kSinglePhase;
+        int parallelism = 0;
     };
 
     IndexBuildsManager() = default;
     ~IndexBuildsManager();
 
+    void startup();
+
     /**
      * Sets up the index build state and registers it in the manager.
      */
-    using OnInitFn = MultiIndexBlock::OnInitFn;
+    using OnInitFn = IndexBuilderInterface::OnInitFn;
     Status setUpIndexBuild(OperationContext* opCtx,
                            CollectionWriter& collection,
                            const std::vector<BSONObj>& specs,
@@ -146,8 +150,8 @@ public:
      * Persists information in the index catalog entry that the index is ready for use, as well as
      * updating the in-memory index catalog entry for this index to ready.
      */
-    using OnCreateEachFn = MultiIndexBlock::OnCreateEachFn;
-    using OnCommitFn = MultiIndexBlock::OnCommitFn;
+    using OnCreateEachFn = IndexBuilderInterface::OnCreateEachFn;
+    using OnCommitFn = IndexBuilderInterface::OnCommitFn;
     Status commitIndexBuild(OperationContext* opCtx,
                             CollectionWriter& collection,
                             const NamespaceString& nss,
@@ -158,7 +162,7 @@ public:
     /**
      * Deletes the index entry from the durable catalog.
      */
-    using OnCleanUpFn = MultiIndexBlock::OnCleanUpFn;
+    using OnCleanUpFn = IndexBuilderInterface::OnCleanUpFn;
     bool abortIndexBuild(OperationContext* opCtx,
                          CollectionWriter& collection,
                          const UUID& buildUUID,
@@ -196,17 +200,19 @@ private:
      */
     void _registerIndexBuild(UUID buildUUID);
 
+    void _registerParallelIndexBuild(UUID buildUUID, int parallelism);
+
     /**
      * Returns a pointer to the builder. Returns a bad status if the builder does not exist.
      */
-    StatusWith<MultiIndexBlock*> _getBuilder(const UUID& buildUUID);
+    StatusWith<IndexBuilderInterface*> _getBuilder(const UUID& buildUUID);
 
     // Protects the map data structures below.
     mutable Mutex _mutex = MONGO_MAKE_LATCH("IndexBuildsManager::_mutex");
 
     // Map of index builders by build UUID. Allows access to the builders so that actions can be
     // taken on and information passed to and from index builds.
-    std::map<UUID, std::unique_ptr<MultiIndexBlock>> _builders;
+    std::map<UUID, std::unique_ptr<IndexBuilderInterface>> _builders;
 
     /**
      * Deletes record containing duplicate keys and insert it into a local lost and found collection
@@ -217,6 +223,8 @@ private:
                                               const NamespaceString& ns,
                                               const NamespaceString& lostAndFoundNss,
                                               RecordId dupRecord);
+
+    ParallelIndexExecutorHolder _executorHolder;
 };
 
 }  // namespace mongo

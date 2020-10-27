@@ -37,6 +37,7 @@
 #include "mongo/db/catalog/commit_quorum_options.h"
 #include "mongo/db/catalog/database_holder.h"
 #include "mongo/db/catalog/index_build_entry_gen.h"
+#include "mongo/db/catalog/multi_index_block.h"
 #include "mongo/db/catalog/uncommitted_collections.h"
 #include "mongo/db/catalog_raii.h"
 #include "mongo/db/concurrency/locker.h"
@@ -1957,6 +1958,9 @@ IndexBuildsCoordinator::PostSetupAction IndexBuildsCoordinator::_setUpIndexBuild
         ? IndexBuildsManager::IndexConstraints::kRelax
         : IndexBuildsManager::IndexConstraints::kEnforce;
     options.protocol = replState->protocol;
+    options.parallelism = indexBuildOptions.parallel;
+
+    LOGV2(0, "doing parallel build", "parallelism"_attr = options.parallelism);
 
     try {
         if (!replSetAndNotPrimary) {

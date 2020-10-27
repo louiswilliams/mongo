@@ -87,6 +87,7 @@ MONGO_FAIL_POINT_DEFINE(hangCreateIndexesBeforeStartingIndexBuild);
 constexpr auto kIndexesFieldName = "indexes"_sd;
 constexpr auto kCommandName = "createIndexes"_sd;
 constexpr auto kCommitQuorumFieldName = "commitQuorum"_sd;
+constexpr auto kParallelFieldName = "parallel"_sd;
 constexpr auto kIgnoreUnknownIndexOptionsName = "ignoreUnknownIndexOptions"_sd;
 constexpr auto kCreateCollectionAutomaticallyFieldName = "createdCollectionAutomatically"_sd;
 constexpr auto kNumIndexesBeforeFieldName = "numIndexesBefore"_sd;
@@ -176,7 +177,7 @@ StatusWith<std::vector<BSONObj>> parseAndValidateIndexSpecs(
             hasIndexesField = true;
         } else if (kCommandName == cmdElemFieldName || kCommitQuorumFieldName == cmdElemFieldName ||
                    kIgnoreUnknownIndexOptionsName == cmdElemFieldName ||
-                   isGenericArgument(cmdElemFieldName)) {
+                   kParallelFieldName == cmdElemFieldName || isGenericArgument(cmdElemFieldName)) {
             continue;
         } else {
             return {ErrorCodes::BadValue,
@@ -501,6 +502,7 @@ bool runCreateIndexesWithCoordinator(OperationContext* opCtx,
     auto protocol = !replCoord->isOplogDisabledFor(opCtx, ns) ? IndexBuildProtocol::kTwoPhase
                                                               : IndexBuildProtocol::kSinglePhase;
     auto commitQuorum = parseAndGetCommitQuorum(opCtx, protocol, cmdObj);
+    int parallel = cmdObj[kParallelFieldName].numberInt();
 
     Status validateTTL = validateTTLOptions(opCtx, cmdObj);
     uassertStatusOK(validateTTL);
@@ -574,7 +576,7 @@ bool runCreateIndexesWithCoordinator(OperationContext* opCtx,
 
     auto buildUUID = UUID::gen();
     ReplIndexBuildState::IndexCatalogStats stats;
-    IndexBuildsCoordinator::IndexBuildOptions indexBuildOptions = {commitQuorum};
+    IndexBuildsCoordinator::IndexBuildOptions indexBuildOptions = {commitQuorum, parallel};
 
     LOGV2(20438,
           "Index build: registering",

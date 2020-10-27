@@ -36,6 +36,7 @@
 #include "mongo/db/catalog/collection.h"
 #include "mongo/db/catalog/collection_catalog.h"
 #include "mongo/db/catalog/index_catalog.h"
+#include "mongo/db/catalog/multi_index_block.h"
 #include "mongo/db/catalog/uncommitted_collections.h"
 #include "mongo/db/catalog_raii.h"
 #include "mongo/db/concurrency/write_conflict_exception.h"
@@ -55,7 +56,7 @@ namespace {
 /**
  * Returns basic info on index builders.
  */
-std::string toSummary(const std::map<UUID, std::unique_ptr<MultiIndexBlock>>& builders) {
+std::string toSummary(const std::map<UUID, std::unique_ptr<IndexBuilderInterface>>& builders) {
     str::stream ss;
     ss << "Number of builders: " << builders.size() << ": [";
     bool first = true;
@@ -74,6 +75,10 @@ std::string toSummary(const std::map<UUID, std::unique_ptr<MultiIndexBlock>>& bu
 
 IndexBuildsManager::SetupOptions::SetupOptions() = default;
 
+void IndexBuildsManager::startup() {
+    _executorHolder.startup();
+}
+
 IndexBuildsManager::~IndexBuildsManager() {
     invariant(_builders.empty(),
               str::stream() << "Index builds still active: " << toSummary(_builders));
@@ -86,7 +91,11 @@ Status IndexBuildsManager::setUpIndexBuild(OperationContext* opCtx,
                                            OnInitFn onInit,
                                            SetupOptions options,
                                            const boost::optional<ResumeIndexInfo>& resumeInfo) {
-    _registerIndexBuild(buildUUID);
+    if (options.parallelism > 0) {
+        _registerParallelIndexBuild(buildUUID, options.parallelism);
+    } else {
+        _registerIndexBuild(buildUUID);
+    }
 
     const auto& nss = collection->ns();
     invariant(opCtx->lockState()->isCollectionLockedForMode(nss, MODE_X),
@@ -295,8 +304,8 @@ Status IndexBuildsManager::commitIndexBuild(OperationContext* opCtx,
                                             CollectionWriter& collection,
                                             const NamespaceString& nss,
                                             const UUID& buildUUID,
-                                            MultiIndexBlock::OnCreateEachFn onCreateEachFn,
-                                            MultiIndexBlock::OnCommitFn onCommitFn) {
+                                            IndexBuilderInterface::OnCreateEachFn onCreateEachFn,
+                                            IndexBuilderInterface::OnCommitFn onCommitFn) {
     auto builder = invariant(_getBuilder(buildUUID));
 
     return writeConflictRetry(
@@ -365,6 +374,13 @@ void IndexBuildsManager::_registerIndexBuild(UUID buildUUID) {
     invariant(_builders.insert(std::make_pair(buildUUID, std::move(mib))).second);
 }
 
+void IndexBuildsManager::_registerParallelIndexBuild(UUID buildUUID, int parallelism) {
+    stdx::unique_lock<Latch> lk(_mutex);
+
+    auto builder = std::make_unique<ParallelIndexBuilder>(_executorHolder.get(), parallelism);
+    invariant(_builders.insert(std::make_pair(buildUUID, std::move(builder))).second);
+}
+
 void IndexBuildsManager::unregisterIndexBuild(const UUID& buildUUID) {
     stdx::unique_lock<Latch> lk(_mutex);
 
@@ -375,7 +391,7 @@ void IndexBuildsManager::unregisterIndexBuild(const UUID& buildUUID) {
     _builders.erase(builderIt);
 }
 
-StatusWith<MultiIndexBlock*> IndexBuildsManager::_getBuilder(const UUID& buildUUID) {
+StatusWith<IndexBuilderInterface*> IndexBuildsManager::_getBuilder(const UUID& buildUUID) {
     stdx::unique_lock<Latch> lk(_mutex);
     auto builderIt = _builders.find(buildUUID);
     if (builderIt == _builders.end()) {

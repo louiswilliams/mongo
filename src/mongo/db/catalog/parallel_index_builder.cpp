@@ -272,6 +272,12 @@ Status ParallelIndexBuilder::_scheduleBatchesBySampling(OperationContext* opCtx,
         return record->id;
     }();
 
+    //  If there's only 1 document schedule it in its own batch.
+    if (firstId == lastId) {
+        _scheduleBatch(opCtx, nssOrUUID, Range{firstId, lastId});
+        return Status::OK();
+    }
+
     auto numRecords = collection->getRecordStore()->numRecords(opCtx);
     size_t numBatches = numRecords / _maxBatchSize;
 

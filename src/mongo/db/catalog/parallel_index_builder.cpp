@@ -63,7 +63,7 @@ StatusWith<std::vector<BSONObj>> ParallelIndexBuilder::init(OperationContext* op
     try {
         WriteUnitOfWork wunit(opCtx);
 
-        _maxMemoryUsageBytes = 400 * 1024 * 1024;
+        _maxMemoryUsageBytes = 1024 * 1024 * 1024;
 
         // Initializing individual index build blocks below performs un-timestamped writes to the
         // durable catalog. It's possible for the onInit function to set multiple timestamps
@@ -98,11 +98,11 @@ StatusWith<std::vector<BSONObj>> ParallelIndexBuilder::init(OperationContext* op
         LOGV2(0, "building index with parallelism", "parallelism"_attr = _parallelism);
 
         // Create as many partial states up to the maximum.
-        for (auto i = 0; i < _parallelism; i++) {
+        for (auto i = 0; i < abs(_parallelism); i++) {
             PartialState state;
             state.accessMethod = accessMethod;
             state.bulkBuilder =
-                accessMethod->initiateBulk(_maxMemoryUsageBytes / _parallelism, boost::none);
+                accessMethod->initiateBulk(_maxMemoryUsageBytes / abs(_parallelism), boost::none);
             _partialStates.push_back(std::move(state));
         }
 
@@ -115,8 +115,6 @@ StatusWith<std::vector<BSONObj>> ParallelIndexBuilder::init(OperationContext* op
         _options.getKeysMode = IndexAccessMethod::GetKeysMode::kRelaxConstraints;
         _options.dupsAllowed = true;
         _options.fromIndexBuilder = true;
-
-        _bulkLoader = accessMethod->makeBulkBuilder(opCtx, _options.dupsAllowed);
 
         LOGV2(99999,
               "Index build: starting",
@@ -180,41 +178,18 @@ void generateKeysForRange(OperationContext* opCtx,
 }
 }  // namespace
 
-void ParallelIndexBuilder::_scheduleBatch(OperationContext* opCtx,
-                                          NamespaceStringOrUUID nssOrUUID,
-                                          Range range) {
-    PartialState state = [&] {
-        stdx::unique_lock<Latch> lk(_partialStateMutex);
-        if (_partialStates.empty()) {
-            LOGV2(0, "Waiting for more partial states");
-            opCtx->waitForConditionOrInterrupt(
-                _statesEmptyCond, lk, [&] { return !_partialStates.empty(); });
-        }
-        auto p = std::move(_partialStates.front());
-        _partialStates.pop_front();
-        return p;
-    }();
-
+template <typename Func>
+void ParallelIndexBuilder::_scheduleTask(OperationContext* opCtx, Func&& task) {
     {
         stdx::unique_lock<Latch> lk(_outstandingTasksMutex);
         _outstandingTasks++;
     };
 
-    _threadPool->schedule([this, nssOrUUID, options = _options, state = std::move(state), range](
-                              auto status) mutable {
+    _threadPool->schedule([this, task = std::move(task)](auto status) mutable {
         auto uniqueOpCtx = Client::getCurrent()->makeOperationContext();
         auto opCtx = uniqueOpCtx.get();
 
-        // Can't throw
-        generateKeysForRange(opCtx, nssOrUUID, options, &state, range);
-
-        LOGV2(0, "Completed range", "min"_attr = range.min, "max"_attr = range.max);
-
-        {
-            stdx::unique_lock<Latch> lk(_partialStateMutex);
-            _partialStates.push_back(std::move(state));
-            _statesEmptyCond.notify_all();
-        }
+        task(opCtx);
 
         {
             stdx::unique_lock<Latch> lk(_outstandingTasksMutex);
@@ -224,6 +199,49 @@ void ParallelIndexBuilder::_scheduleBatch(OperationContext* opCtx,
             }
         };
     });
+}
+
+void ParallelIndexBuilder::_waitForIdle(OperationContext* opCtx) {
+    // Don't hold on to a snapshot while waiting.
+    opCtx->recoveryUnit()->abandonSnapshot();
+    {
+        stdx::unique_lock<Latch> lk(_outstandingTasksMutex);
+        opCtx->waitForConditionOrInterrupt(
+            _noOutstandingTasksCond, lk, [&] { return _outstandingTasks == 0; });
+    }
+}
+
+ParallelIndexBuilder::PartialState ParallelIndexBuilder::_popState(OperationContext* opCtx) {
+    stdx::unique_lock<Latch> lk(_partialStateMutex);
+    if (_partialStates.empty()) {
+        LOGV2(0, "Waiting for more partial states");
+        opCtx->waitForConditionOrInterrupt(
+            _statesEmptyCond, lk, [&] { return !_partialStates.empty(); });
+    }
+    auto p = std::move(_partialStates.front());
+    _partialStates.pop_front();
+    return p;
+}
+
+void ParallelIndexBuilder::_pushState(PartialState state) {
+    stdx::unique_lock<Latch> lk(_partialStateMutex);
+    _partialStates.push_back(std::move(state));
+    _statesEmptyCond.notify_all();
+}
+
+
+void ParallelIndexBuilder::_scheduleBatch(OperationContext* opCtx,
+                                          NamespaceStringOrUUID nssOrUUID,
+                                          Range range) {
+    auto state = _popState(opCtx);
+    _scheduleTask(
+        opCtx,
+        [this, nssOrUUID, options = _options, state = std::move(state), range](auto opCtx) mutable {
+            // Can't throw
+            generateKeysForRange(opCtx, nssOrUUID, options, &state, range);
+
+            _pushState(std::move(state));
+        });
 };
 
 Status ParallelIndexBuilder::_scheduleBatchesByScanning(OperationContext* opCtx,
@@ -328,7 +346,7 @@ Status ParallelIndexBuilder::_scheduleBatchesBySampling(OperationContext* opCtx,
         // Ensure there is no overlapping of ranges. The min range must exist, but the max does not.
         auto max = RecordId(sample.repr() - 1);
 
-        LOGV2(0, "scheduling batch", "min"_attr = prevId, "max"_attr = max);
+        // LOGV2(0, "scheduling batch", "min"_attr = prevId, "max"_attr = max);
         _scheduleBatch(opCtx, nssOrUUID, Range{prevId, max});
         prevId = sample;
     }
@@ -347,7 +365,7 @@ Status ParallelIndexBuilder::insertAllDocumentsInCollection(
 
 
     Timer t;
-    bool sample = true;
+    bool sample = _parallelism < 0;
     try {
 
         auto status = [&] {
@@ -361,32 +379,39 @@ Status ParallelIndexBuilder::insertAllDocumentsInCollection(
             return status;
         }
 
-        // Don't hold on to a snapshot while waiting.
-        opCtx->recoveryUnit()->abandonSnapshot();
-        {
-            stdx::unique_lock<Latch> lk(_outstandingTasksMutex);
-            LOGV2(0, "Waiting for all batches to finish");
-            opCtx->waitForConditionOrInterrupt(
-                _noOutstandingTasksCond, lk, [&] { return _outstandingTasks == 0; });
+        LOGV2(0, "Waiting for batches to finish");
+        _waitForIdle(opCtx);
+
+        // Spill iterators on worker threads.
+        for (auto& partial : _partialStates) {
+            _scheduleTask(opCtx, [&partial](auto opCtx) {
+                partial.iterator.reset(partial.bulkBuilder->done());
+            });
+        }
+
+        std::vector<std::shared_ptr<IndexAccessMethod::BulkBuilder::Sorter::Iterator>> iterators;
+        iterators.reserve(_partialStates.size());
+
+        LOGV2(0, "Waiting for iterators");
+        _waitForIdle(opCtx);
+
+        for (auto& partial : _partialStates) {
+            iterators.push_back(std::move(partial.iterator));
         }
 
         // Finish sorting.
-        std::vector<IndexAccessMethod::BulkBuilder*> builders;
-        builders.reserve(_partialStates.size());
-        for (auto& partial : _partialStates) {
-            builders.emplace_back(partial.bulkBuilder.get());
-        }
-
         LOGV2(0, "Merging results");
 
+        auto bulkLoader = _accessMethod->makeBulkBuilder(opCtx, _options.dupsAllowed);
+
         // Merge
-        auto mergeIterator = _accessMethod->makeMergedIterator(builders, _maxMemoryUsageBytes);
+        auto mergeIterator = _accessMethod->makeMergedIterator(iterators, _maxMemoryUsageBytes);
         while (mergeIterator->more()) {
             // TODO: Is WUOW necessary?
             WriteUnitOfWork wunit(opCtx);
 
             auto data = mergeIterator->next();
-            auto status = _bulkLoader->addKey(data.first);
+            auto status = bulkLoader->addKey(data.first);
             if (!status.isOK()) {
                 return status;
             }
@@ -394,9 +419,14 @@ Status ParallelIndexBuilder::insertAllDocumentsInCollection(
         }
 
         WriteUnitOfWork wunit(opCtx);
-        _bulkLoader->commit(true);
+        bulkLoader->commit(true);
         wunit.commit();
 
+        LOGV2(0, "Cleaning up");
+        // Clean up partial states on worker threads.
+        for (auto& partial : _partialStates) {
+            _scheduleTask(opCtx, [&partial](auto opCtx) { partial = {}; });
+        }
     } catch (DBException& ex) {
         auto readSource = opCtx->recoveryUnit()->getTimestampReadSource();
         LOGV2(4984704,
@@ -407,6 +437,7 @@ Status ParallelIndexBuilder::insertAllDocumentsInCollection(
               "error"_attr = ex);
         return ex.toStatus();
     }
+    LOGV2(0, "Parallel index build complete");
     return Status::OK();
 }
 

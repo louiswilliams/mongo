@@ -672,13 +672,9 @@ AbstractIndexAccessMethod::BulkBuilderImpl::_makeSorter(
 }
 
 std::unique_ptr<IndexAccessMethod::BulkBuilder::Sorter::Iterator>
-AbstractIndexAccessMethod::makeMergedIterator(std::vector<IndexAccessMethod::BulkBuilder*> builders,
-                                              size_t maxMemoryUsageBytes) const {
-    std::vector<std::shared_ptr<IndexAccessMethod::BulkBuilder::Sorter::Iterator>> iterators;
-    iterators.reserve(builders.size());
-    for (auto& builder : builders) {
-        iterators.emplace_back(builder->done());
-    }
+AbstractIndexAccessMethod::makeMergedIterator(
+    std::vector<std::shared_ptr<BulkBuilder::Sorter::Iterator>> iterators,
+    size_t maxMemoryUsageBytes) const {
 
     return std::unique_ptr<BulkBuilder::Sorter::Iterator>(BulkBuilder::Sorter::Iterator::merge(
         iterators, makeSortOptions(maxMemoryUsageBytes), BtreeExternalSortComparison()));

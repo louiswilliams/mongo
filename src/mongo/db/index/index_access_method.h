@@ -275,7 +275,8 @@ public:
     };
 
     virtual std::unique_ptr<BulkBuilder::Sorter::Iterator> makeMergedIterator(
-        std::vector<BulkBuilder*> builders, size_t maxMemoryUsageBytes) const = 0;
+        std::vector<std::shared_ptr<BulkBuilder::Sorter::Iterator>> iterators,
+        size_t maxMemoryUsageBytes) const = 0;
 
     /**
      * Starts a bulk operation.
@@ -550,7 +551,8 @@ public:
         size_t maxMemoryUsageBytes, const boost::optional<IndexStateInfo>& stateInfo) final;
 
     std::unique_ptr<BulkBuilder::Sorter::Iterator> makeMergedIterator(
-        std::vector<BulkBuilder*> builders, size_t maxMemoryUsageBytes) const final;
+        std::vector<std::shared_ptr<BulkBuilder::Sorter::Iterator>> iterators,
+        size_t maxMemoryUsageBytes) const final;
 
     Status commitBulk(OperationContext* opCtx,
                       BulkBuilder* bulk,

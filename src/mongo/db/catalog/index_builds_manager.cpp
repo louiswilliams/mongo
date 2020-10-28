@@ -91,7 +91,7 @@ Status IndexBuildsManager::setUpIndexBuild(OperationContext* opCtx,
                                            OnInitFn onInit,
                                            SetupOptions options,
                                            const boost::optional<ResumeIndexInfo>& resumeInfo) {
-    if (options.parallelism > 0) {
+    if (options.parallelism != 0) {
         _registerParallelIndexBuild(buildUUID, options.parallelism);
     } else {
         _registerIndexBuild(buildUUID);

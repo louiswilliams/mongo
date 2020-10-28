@@ -69,6 +69,8 @@ public:
 
         // Sorter
         std::unique_ptr<IndexAccessMethod::BulkBuilder> bulkBuilder;
+        // Completed iterator
+        std::unique_ptr<IndexAccessMethod::BulkBuilder::Sorter::Iterator> iterator;
     };
 
     void ignoreUniqueConstraint() override {}
@@ -139,7 +141,14 @@ public:
     void setIndexBuildMethod(IndexBuildMethod indexBuildMethod) override {}
 
 private:
+    template <typename Func>
+    void _scheduleTask(OperationContext* opCtx, Func&& task);
     void _scheduleBatch(OperationContext* opCtx, NamespaceStringOrUUID nssOrUUID, Range range);
+
+    void _waitForIdle(OperationContext* opCtx);
+
+    PartialState _popState(OperationContext* opCtx);
+    void _pushState(PartialState state);
 
     // Returns the highest RecordID on the collection.
     Status _scheduleBatchesByScanning(OperationContext* opCtx, const CollectionPtr& collection);
@@ -153,7 +162,6 @@ private:
     InsertDeleteOptions _options;
     IndexAccessMethod* _accessMethod;
     std::unique_ptr<IndexBuildBlock> _buildBlock;
-    std::unique_ptr<SortedDataBuilderInterface> _bulkLoader;
 
     ThreadPool* _threadPool;
     int _parallelism;

@@ -103,7 +103,7 @@ StatusWith<std::vector<BSONObj>> ParallelIndexBuilder::init(OperationContext* op
             state.accessMethod = accessMethod;
             state.bulkBuilder =
                 accessMethod->initiateBulk(_maxMemoryUsageBytes / abs(_parallelism), boost::none);
-            _partialStates.push_back(std::move(state));
+            _pushState(std::move(state));
         }
 
         const IndexDescriptor* descriptor = indexCatalogEntry->descriptor();
@@ -162,12 +162,14 @@ StatusWith<std::vector<BSONObj>> ParallelIndexBuilder::init(
 }
 
 namespace {
-void generateKeysForRange(OperationContext* opCtx,
-                          NamespaceStringOrUUID nssOrUUID,
-                          InsertDeleteOptions options,
-                          ParallelIndexBuilder::PartialState* state,
-                          ParallelIndexBuilder::Range range) {
+void insertBulkForRange(OperationContext* opCtx,
+                        NamespaceStringOrUUID nssOrUUID,
+                        InsertDeleteOptions options,
+                        ParallelIndexBuilder::PartialState* state,
+                        ParallelIndexBuilder::Range range) {
     AutoGetCollection coll(opCtx, nssOrUUID, MODE_IX);
+    opCtx->recoveryUnit()->setReadOnce(true);
+
     auto cursor = coll.getCollection()->getRecordStore()->getCursor(opCtx);
     auto record = cursor->seekExact(range.min);
     while (record && record->id <= range.max) {
@@ -233,64 +235,17 @@ void ParallelIndexBuilder::_pushState(PartialState state) {
 void ParallelIndexBuilder::_scheduleBatch(OperationContext* opCtx,
                                           NamespaceStringOrUUID nssOrUUID,
                                           Range range) {
+    LOGV2(0, "scheduling batch", "min"_attr = range.min, "max"_attr = range.max);
     auto state = _popState(opCtx);
     _scheduleTask(
         opCtx,
         [this, nssOrUUID, options = _options, state = std::move(state), range](auto opCtx) mutable {
             // Can't throw
-            generateKeysForRange(opCtx, nssOrUUID, options, &state, range);
+            insertBulkForRange(opCtx, nssOrUUID, options, &state, range);
 
             _pushState(std::move(state));
         });
 };
-
-Status ParallelIndexBuilder::_scheduleBatchesByScanning(OperationContext* opCtx,
-                                                        const CollectionPtr& collection) {
-
-    NamespaceStringOrUUID nssOrUUID(collection->ns().db().toString(), collection->uuid());
-
-    PlanYieldPolicy::YieldPolicy yieldPolicy = PlanYieldPolicy::YieldPolicy::YIELD_AUTO;
-    auto exec = collection->makePlanExecutor(
-        opCtx, collection, yieldPolicy, Collection::ScanDirection::kForward);
-
-    unsigned long long n = 0;
-
-    RecordId batchMin;
-    int currentBatchSize = 0;
-
-    BSONObj objToIndex;
-    RecordId loc;
-    PlanExecutor::ExecState state;
-    while (PlanExecutor::ADVANCED == (state = exec->getNext(&objToIndex, &loc))) {
-        opCtx->checkForInterrupt();
-
-        if (batchMin.isNull()) {
-            batchMin = loc;
-        }
-
-        currentBatchSize++;
-        n++;
-        if (currentBatchSize < _maxBatchSize) {
-            continue;
-        }
-
-        _scheduleBatch(opCtx, nssOrUUID, Range{batchMin, loc});
-
-        batchMin = RecordId();
-        currentBatchSize = 0;
-    }
-
-    // Apply final, non-full batch.
-    if (!batchMin.isNull() && batchMin != loc) {
-        _scheduleBatch(opCtx, nssOrUUID, Range{batchMin, loc});
-    }
-
-    LOGV2(0,
-          "Index build: done generating batches by scanning",
-          "buildUUID"_attr = _buildUUID,
-          "records"_attr = n);
-    return Status::OK();
-}
 
 Status ParallelIndexBuilder::_scheduleBatchesBySampling(OperationContext* opCtx,
                                                         const CollectionPtr& collection) {
@@ -335,6 +290,8 @@ Status ParallelIndexBuilder::_scheduleBatchesBySampling(OperationContext* opCtx,
         samples.push_back(record->id);
     }
 
+    opCtx->recoveryUnit()->abandonSnapshot();
+
     std::sort(samples.begin(), samples.end());
     RecordId prevId;
     for (auto& sample : samples) {
@@ -346,7 +303,6 @@ Status ParallelIndexBuilder::_scheduleBatchesBySampling(OperationContext* opCtx,
         // Ensure there is no overlapping of ranges. The min range must exist, but the max does not.
         auto max = RecordId(sample.repr() - 1);
 
-        // LOGV2(0, "scheduling batch", "min"_attr = prevId, "max"_attr = max);
         _scheduleBatch(opCtx, nssOrUUID, Range{prevId, max});
         prevId = sample;
     }
@@ -361,20 +317,9 @@ Status ParallelIndexBuilder::insertAllDocumentsInCollection(
     invariant(isBackgroundBuilding());
 
     // Hint to the storage engine that this collection scan should not keep data in the cache.
-    // opCtx->recoveryUnit()->setReadOnce(true);
-
-
     Timer t;
-    bool sample = _parallelism < 0;
     try {
-
-        auto status = [&] {
-            if (sample) {
-                return _scheduleBatchesBySampling(opCtx, collection);
-            } else {
-                return _scheduleBatchesByScanning(opCtx, collection);
-            }
-        }();
+        auto status = [&] { return _scheduleBatchesBySampling(opCtx, collection); }();
         if (!status.isOK()) {
             return status;
         }
@@ -405,15 +350,17 @@ Status ParallelIndexBuilder::insertAllDocumentsInCollection(
         auto bulkLoader = _accessMethod->makeBulkBuilder(opCtx, _options.dupsAllowed);
 
         // Merge
-        auto mergeIterator = _accessMethod->makeMergedIterator(iterators, _maxMemoryUsageBytes);
-        while (mergeIterator->more()) {
-            // TODO: Is WUOW necessary?
+        {
             WriteUnitOfWork wunit(opCtx);
+            auto mergeIterator = _accessMethod->makeMergedIterator(iterators, _maxMemoryUsageBytes);
+            while (mergeIterator->more()) {
+                // TODO: Is WUOW necessary?
 
-            auto data = mergeIterator->next();
-            auto status = bulkLoader->addKey(data.first);
-            if (!status.isOK()) {
-                return status;
+                auto data = mergeIterator->next();
+                auto status = bulkLoader->addKey(data.first);
+                if (!status.isOK()) {
+                    return status;
+                }
             }
             wunit.commit();
         }

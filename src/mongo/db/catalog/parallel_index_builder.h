@@ -61,7 +61,6 @@ public:
     struct Range {
         RecordId min;
         RecordId max;
-        bool maxInclusive = false;
     };
 
     struct PartialState {
@@ -151,13 +150,11 @@ private:
     void _pushState(PartialState state);
 
     // Returns the highest RecordID on the collection.
-    Status _scheduleBatchesByScanning(OperationContext* opCtx, const CollectionPtr& collection);
     Status _scheduleBatchesBySampling(OperationContext* opCtx, const CollectionPtr& collection);
 
     boost::optional<UUID> _buildUUID;
     std::size_t _maxMemoryUsageBytes = 0;
     int _maxBatchSize = 1000;
-
 
     InsertDeleteOptions _options;
     IndexAccessMethod* _accessMethod;

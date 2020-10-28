@@ -1958,7 +1958,7 @@ IndexBuildsCoordinator::PostSetupAction IndexBuildsCoordinator::_setUpIndexBuild
         ? IndexBuildsManager::IndexConstraints::kRelax
         : IndexBuildsManager::IndexConstraints::kEnforce;
     options.protocol = replState->protocol;
-    options.parallelism = indexBuildOptions.parallel;
+    options.parallelism = 4;
 
     LOGV2(0, "doing parallel build", "parallelism"_attr = options.parallelism);
 

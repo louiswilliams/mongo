@@ -542,11 +542,15 @@ public:
     BSONObj codeWScopeObject() const;
 
     /** Get raw binary data.  Element must be of type BinData. Doesn't handle type 2 specially */
-    const char* binData(int& len) const {
+    const char* binData() const {
         // BinData: <int len> <byte subtype> <byte[len] data>
         verify(type() == BinData);
-        len = valuestrsize();
         return value() + 5;
+    }
+    const char* binData(int& len) const {
+        auto data = binData();
+        len = valuestrsize();
+        return data;
     }
     /** Get binary data.  Element must be of type BinData. Handles type 2 */
     const char* binDataClean(int& len) const {

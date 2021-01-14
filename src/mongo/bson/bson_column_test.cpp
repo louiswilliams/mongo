@@ -55,9 +55,9 @@ public:
 
 protected:
     // This example encodes a typical column of metrics, which looks as follows:
-    // { 0: 72.0, 1: 72.0, ..., 102: 72.0,                       (Repeating values)
-    //   103: 72.5, 104: 72.5, 105: 72.5, 106: 73.0, 107: 73.5,  (Applying delta)
-    //   110: 73.5, 111: 73.5 }                                  (Skipping values)
+    // { 0: 72.0, 1: 72.0, ..., 100: 72.0,  (Repeating values)
+    //   101: 72.5, 102: 73.0, 103: 73.5,   (Applying delta)
+    //   106: 73.5 }                        (Skipping values)
     unsigned char exampleData[18] = {0x01,  // Number Double 72.0
                                      0x00,
                                      0x00,
@@ -113,11 +113,11 @@ TEST_F(BSONColumnExampleTest, SimpleLookup) {
     ASSERT_EQ(elem.type(), BSONType::NumberDouble);
     ASSERT_EQ(elem.numberDouble(), 72.0);
 
-    elem = exampleCol[103];
+    elem = exampleCol[100];
     ASSERT_EQ(elem.type(), BSONType::NumberDouble);
-    ASSERT_EQ(elem.numberDouble(), 72.0);
+    ASSERT_EQ(elem.numberDouble(), 72.5);
 
-    elem = exampleCol[108];  // Missing field
+    elem = exampleCol[105];  // Missing field
     ASSERT_EQ(elem.type(), BSONType::EOO);
 }
 

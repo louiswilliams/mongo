@@ -165,17 +165,16 @@ public:
 
         /** pre-increment */
         iterator& operator++() {
+            while (!_count)
+                _nextInsn();
             ++_index;
 
             if (_count > 0)
                 --_count;  // Copy
-            else if (++_count <= 0)
+            else {
+                ++_count;
                 _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);  // Delta
-            else
-                do {
-                    _nextInsn();    // _count was zero (now one), so process next instruction
-                } while (!_count);  // Skip instructions leave count set to zero, so repeat.
-
+            }
             return *this;
         }
 
@@ -245,7 +244,8 @@ public:
                     insn.countArg = -insn.countArg;
                     // Fall through.
                 case Instruction::Copy:
-                    _count = insn.countArg;
+                    invariant(insn.countArg || insn.kind() == Instruction::Skip);
+                    _count = insn.countArg - 1;
                     break;
                 case Instruction::SetNegDelta:
                     insn.deltaArg = -insn.deltaArg;
@@ -253,11 +253,12 @@ public:
                 case Instruction::SetDelta:
                     _delta = insn.deltaArg;
                     _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);
+                    _count = 1;
                     break;
                 default:
                     MONGO_UNREACHABLE;
             }
-            invariant(_count || insn.kind() == Instruction::Skip);
+            // invariant(_count || insn.kind() == Instruction::Skip);
         }
 
         BSONElement _cur;          // Defaults to EOO, reference to last full BSONElement or _base

@@ -58,7 +58,7 @@ protected:
     // { 0: 72.0, 1: 72.0, ..., 102: 72.0,                       (Repeating values)
     //   103: 72.5, 104: 72.5, 105: 72.5, 106: 73.0, 107: 73.5,  (Applying delta)
     //   110: 73.5, 111: 73.5 }                                  (Skipping values)
-    unsigned char exampleData[18] = {0x01,
+    unsigned char exampleData[18] = {0x01,  // Number Double 72.0
                                      0x00,
                                      0x00,
                                      0x00,
@@ -68,11 +68,11 @@ protected:
                                      0x00,
                                      0x52,
                                      0x40,
-                                     0x86,
+                                     0x86,  // Repeat 99 times
                                      0x43,
                                      0x81,
-                                     0x6b,
-                                     0x32,
+                                     0x6b,  // set delta to 0x2'0000'0000'0000, output 100: 72.5
+                                     0x32,  // Apply delta twice: output 101: 73.0, 102: 73.5
                                      0x22,
                                      0x41,
                                      0x00};
@@ -102,6 +102,23 @@ TEST_F(BSONColumnExampleTest, SimpleIteration) {
          exampleCol.objsize(),
          obj.objsize());
     ASSERT_EQ(exampleCol.nFields(), obj.nFields());
+}
+
+TEST_F(BSONColumnExampleTest, SimpleLookup) {
+    auto elem = exampleCol[1];
+    ASSERT_EQ(elem.type(), BSONType::NumberDouble);
+    ASSERT_EQ(elem.numberDouble(), 72.0);
+
+    elem = exampleCol[2];
+    ASSERT_EQ(elem.type(), BSONType::NumberDouble);
+    ASSERT_EQ(elem.numberDouble(), 72.0);
+
+    elem = exampleCol[103];
+    ASSERT_EQ(elem.type(), BSONType::NumberDouble);
+    ASSERT_EQ(elem.numberDouble(), 72.0);
+
+    elem = exampleCol[108];  // Missing field
+    ASSERT_EQ(elem.type(), BSONType::EOO);
 }
 
 }  // namespace

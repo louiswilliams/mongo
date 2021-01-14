@@ -29,6 +29,8 @@
 
 #pragma once
 
+#include <deque>
+#include <memory>
 
 #include "mongo/base/data_type.h"
 #include "mongo/base/string_data.h"
@@ -58,7 +60,11 @@ namespace mongo {
  *   - run length encoding: repeated identical deltas or elements use constant size storage
  * Delta values and repetition counts are variable sized, so the savings compound.
  *
- * The BSONColumn is always unowned, but otherwise implements an interface similar to BSONObj.
+ * The BSONColumn will not take ownership of the BinData element, but otherwise implements
+ * an interface similar to BSONObj. Because iterators over the BSONColumn need to rematerialize
+ * deltas, they use additional storage owned by the BSONColumn for this. As all iterators will
+ * create new delta's in the same order, they share a single DeltaWriter, with a worst-case memory
+ * usage bounded a total size  on the order of that of the size of the expanded BSONColumn.
  */
 class BSONColumn {
 public:
@@ -66,6 +72,58 @@ public:
     BSONColumn(BSONElement bin) : _bin(bin) {
         tassert(0, "invalid BSON type for column", isValid());
     }
+
+    /**
+     * Class to manage application of deltas between small BSONElements in the context of a
+     * BSONColumn. Owns all storage referred to by returned BSONElement values. Repeated
+     * delta applications for the same DeltaStore iterator must yield the same result.
+     */
+    class DeltaStore {
+    public:
+        static constexpr int maxElemSize = 18;
+        static constexpr int valueOffset = 2;  // Type byte and field name
+        struct Elem {
+            char elem[maxElemSize] = {0};
+        };
+        using iterator = std::deque<Elem>::iterator;
+
+        BSONElement applyDelta(unsigned deltaIndex, BSONElement base, uint64_t delta) {
+            int size = base.valuesize();
+            invariant(static_cast<size_t>(size) <= maxElemSize);
+
+            // For simplicity, always apply the delta using the maximum 64-bit size
+            uint64_t value;
+            memcpy(&value, base.value(), size);
+            value = endian::littleToNative(value);
+            value += delta;
+            value = endian::nativeToLittle(value);
+
+            // Copy the empty field name and type byte from the base, followed by the new value.
+            Elem elem;
+            memcpy(elem.elem, base.rawdata(), valueOffset);
+            memcpy(elem.elem + valueOffset, &value, sizeof(value));  // Always copy the entire value
+
+            invariant(deltaIndex <= _store.size());
+            if (deltaIndex == _store.size()) {
+                _store.push_back(elem);
+                BSONElement(_store.back().elem, 1, size, BSONElement::CachedSizeTag{});
+            }
+
+            invariant(!memcmp(elem.elem, _store[deltaIndex].elem, sizeof(elem)));  // slow->dassert?
+            return BSONElement(
+                _store[deltaIndex].elem, 1, size + valueOffset, BSONElement::CachedSizeTag{});
+        }
+
+        // Both element values must be at most 16 bytes in size
+        uint64_t calculateDelta(BSONElement base, BSONElement modified);
+
+        iterator begin() {
+            return _store.begin();
+        }
+
+    private:
+        std::deque<Elem> _store;
+    };
 
     /**
      * Like BSONObjStlIterator, but returns EOO elements for skipped values.
@@ -80,7 +138,7 @@ public:
 
         /**
          * All default constructed iterators are equal to each other.
-         * They are in a dereferencable state, and return an EOO BSONElement.
+         * They are in a dereferencable state, and return the EOO BSONElement.
          * They must not be incremented.
          */
         iterator() = default;
@@ -112,7 +170,7 @@ public:
             if (_count > 0)
                 --_count;  // Copy
             else if (++_count <= 0)
-                _applyDelta();
+                _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);  // Delta
             else
                 do {
                     _nextInsn();    // _count was zero (now one), so process next instruction
@@ -161,9 +219,12 @@ public:
         friend class BSONColumn;
         /**
          * Create an iterator pointing at the given element within the BSONColumn. Note that this
-         * can only be the first element, which is stored in full, or the last (EOO).
+         * can only be the first element, which is stored in full, or the last (EOO). The deltaOut
+         * iterator is needed to ensure that storage of materialized deltas lives for the life-time
+         * of the BSONColumn.
          */
-        explicit iterator(BSONElement elem) : _cur(elem.rawdata()), _insn(elem.rawdata()) {}
+        explicit iterator(BSONElement elem, DeltaStore* store)
+            : _cur(elem.rawdata()), _insn(elem.rawdata()), _store(store) {}
         void _nextInsn() {
             Instruction insn;
             std::tie(_insn, insn) = Instruction::parse(_insn);
@@ -190,8 +251,8 @@ public:
                     insn.deltaArg = -insn.deltaArg;
                     // Fall through.
                 case Instruction::SetDelta:
-                    _setDelta(insn.deltaArg);
-                    _applyDelta();
+                    _delta = insn.deltaArg;
+                    _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);
                     break;
                 default:
                     MONGO_UNREACHABLE;
@@ -199,32 +260,13 @@ public:
             invariant(_count || insn.kind() == Instruction::Skip);
         }
 
-        void _setDelta(uint64_t delta) {
-            _delta = delta;
-            if (_cur.rawdata() != _base) {
-                int size = _cur.size();
-                invariant(static_cast<unsigned>(size) < sizeof(_base));
-                memcpy(_base, _cur.rawdata(), size);
-                _cur = BSONElement(_base, 1, size, BSONElement::CachedSizeTag{});
-            }
-        }
-
-        void _applyDelta() {
-            // Always apply 64-bit deltas, as we have the full size reserved anyway.
-            uint64_t val;
-            memcpy(&val, _base + 2, sizeof(val));
-            val = endian::littleToNative<uint64_t>(val);
-            val += _delta;
-            val = endian::nativeToLittle<uint64_t>(val);
-            memcpy(_base + 2, &val, sizeof(val));
-        }
-
-        BSONElement _cur;     // Defaults to EOO, reference to last full BSONElement or _base
-        const char* _insn;    // Pointer to currently executing stream instruction
-        int _count = 0;       // number of iterations before advancing to the next instruction
-        int _index = 0;       // Position of iterator in the column, including skipped values.
-        char _base[18];       // BSON data for elements to apply delta modifications to
-        uint64_t _delta = 1;  // Last set delta value to apply to base
+        BSONElement _cur;          // Defaults to EOO, reference to last full BSONElement or _base
+        const char* _insn;         // Pointer to currently executing stream instruction
+        int _count = 0;            // Number of iterations before advancing to the next instruction
+        int _index = 0;            // Position of iterator in the column, including skipped values
+        DeltaStore* _store;        // Manages storage for applied deltas
+        unsigned _deltaIndex = 0;  // Index into _store for next delta application
+        uint64_t _delta = 1;       // Last set delta value to apply to base
     };
 
     using const_iterator = iterator;
@@ -269,15 +311,17 @@ public:
     }
 
     iterator begin() const {
-        return iterator(_bin.eoo() ? _bin : BSONElement(_bin.binData()));
+        auto elem = BSONElement(_bin.eoo() ? _bin : BSONElement(_bin.binData()));
+        return iterator(elem, const_cast<DeltaStore*>(&_deltas));
     }
 
     iterator end() const {
-        return iterator(BSONElement(objdata() + objsize() - 1));
+        return iterator(BSONElement(objdata() + objsize() - 1), const_cast<DeltaStore*>(&_deltas));
     }
 
 private:
-    BSONElement _bin;  // Contains the BinData with Column subtype.
+    BSONElement _bin;    // Contains the BinData with Column subtype.
+    DeltaStore _deltas;  // Owns actual storage for BSON elements stored as deltas.
 };
 
 

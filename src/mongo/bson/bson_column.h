@@ -63,8 +63,8 @@ namespace mongo {
  * The BSONColumn will not take ownership of the BinData element, but otherwise implements
  * an interface similar to BSONObj. Because iterators over the BSONColumn need to rematerialize
  * deltas, they use additional storage owned by the BSONColumn for this. As all iterators will
- * create new delta's in the same order, they share a single DeltaWriter, with a worst-case memory
- * usage bounded a total size  on the order of that of the size of the expanded BSONColumn.
+ * create new delta's in the same order, they share a single DeltaStore, with a worst-case memory
+ * usage bounded to a total size  on the order of that of the size of the expanded BSONColumn.
  */
 class BSONColumn {
 public:
@@ -80,16 +80,17 @@ public:
      */
     class DeltaStore {
     public:
-        static constexpr int maxElemSize = 18;
-        static constexpr int valueOffset = 2;  // Type byte and field name
+        static constexpr int valueOffset = 2;   // Type byte and field name
+        static constexpr int maxValueSize = 8;  // Should be 16 ideally (for Decimal).
+        static constexpr int maxElemSize = valueOffset + maxValueSize;
         struct Elem {
             char elem[maxElemSize] = {0};
         };
         using iterator = std::deque<Elem>::iterator;
 
         BSONElement applyDelta(unsigned deltaIndex, BSONElement base, uint64_t delta) {
-            int size = base.valuesize();
-            invariant(static_cast<size_t>(size) <= maxElemSize);
+            int size = base.valuesize();  // TODO: Fix size > 8 handling.
+            invariant(static_cast<size_t>(size) <= maxValueSize);
 
             // For simplicity, always apply the delta using the maximum 64-bit size
             uint64_t value;
@@ -114,8 +115,29 @@ public:
                 _store[deltaIndex].elem, 1, size + valueOffset, BSONElement::CachedSizeTag{});
         }
 
-        // Both element values must be at most 16 bytes in size
-        uint64_t calculateDelta(BSONElement base, BSONElement modified);
+        /**
+         * Computes 64-bit delta between both  Both element values must have the same type and have
+         * a value at most 16 bytes in length. Field names are ignored. A 0 return means either that
+         * the elements are binary identical, or otherwise invalid for commputing a delta.
+         */
+
+        static uint64_t calculateDelta(BSONElement base, BSONElement modified) {
+            int size = base.valuesize();  // TODO: Fix size > 8 handling
+            if (base.type() != modified.type() || size != modified.valuesize() ||
+                size > maxValueSize)
+                return 0;
+
+            // For simplicity, we always use a 64-bit delta.
+            uint64_t value;
+            uint64_t delta;
+            memcpy(&value, base.value(), size);
+            value = endian::littleToNative(value);
+            memcpy(&delta, modified.value(), size);
+            delta = endian::littleToNative(delta);
+            delta -= value;
+
+            return delta;
+        }
 
         iterator begin() {
             return _store.begin();
@@ -123,6 +145,80 @@ public:
 
     private:
         std::deque<Elem> _store;
+    };
+
+    /** represents a parsed stream instruction for a BSON column */
+    class Instruction {
+    public:
+        enum Kind { Literal0, Literal1, Skip, Delta, Copy, SetNegDelta, SetDelta };
+        Instruction() = default;
+        Instruction(Kind kind, uint64_t arg) {
+            switch (kind) {
+                case Skip:
+                case Delta:
+                case Copy:
+                    _prefix = arg / 16;
+                    _op = kind * 16 + _prefix % 16;
+                    break;
+                case SetNegDelta:
+                case SetDelta:
+                    invariant(arg);
+                    _op = kind * 16;
+                    while (arg % 16 == 0 && _op % 16 < 15) {
+                        ++_op;
+                        arg /= 16;
+                    }
+                    invariant(arg);
+                    _prefix = arg - 1;
+                    break;
+                default:
+                    MONGO_UNREACHABLE;
+            }
+        }
+        static std::pair<const char*, Instruction> parse(const char* input) {
+            Instruction insn;
+            while (insn._op = static_cast<uint8_t>(*input++), insn._op >= 128)
+                insn._prefix = insn._prefix * 128 + insn._op % 128;  // Accumulate prefix.
+
+            return {input, insn};
+        }
+
+        void append(BufBuilder& builder) {
+            for (; _prefix; _prefix /= 128)
+                builder.appendNum((char)0x80 + _prefix % 128);
+            builder.appendNum((char)_op);
+        }
+
+        Kind kind() {
+            return static_cast<Kind>(_op / 16);
+        }
+
+        int size() {
+            int size = 1;
+            uint8_t op = _op;
+            uint64_t prefix = _prefix;
+            while (op && prefix) {
+                ++size;
+                prefix /= 128;
+            }
+            return size;
+        }
+
+        uint8_t op() {
+            return _op;
+        }
+
+        uint64_t countArg() {
+            return _prefix * 16 + _op % 16;
+        }
+
+        uint64_t deltaArg() {
+            return (_prefix + 1) << (_op % 16 * 4);
+        }
+
+    private:
+        uint8_t _op = 0;  // Parsed operation. For literal BSON elements, this is the BSON type.
+        uint64_t _prefix = 0;
     };
 
     /**
@@ -193,27 +289,6 @@ public:
             return operator++();
         }
 
-        /** represents a parsed stream instruction for a BSON column */
-        struct Instruction {
-            static std::pair<const char*, Instruction> parse(const char* input) {
-                uint8_t op;
-                uint64_t prefix = 0;
-                while (op = static_cast<uint8_t>(*input++), op >= 128)
-                    prefix = prefix * 128 + op % 128;  // Accumulate prefix.
-
-                return {input, {op, prefix * 16 + op % 16, (prefix + 1) << (op % 16 * 4)}};
-            }
-
-            enum Kind { Literal0, Literal1, Skip, Delta, Copy, SetNegDelta, SetDelta };
-            Kind kind() {
-                return static_cast<Kind>(op / 16);
-            }
-
-            uint8_t op = 0;  // Parsed operation. For literal BSON elements, this is the BSON type.
-            uint64_t countArg;  // Which of countArg and deltaArg is applicable depends on the op.
-            uint64_t deltaArg;
-        };
-
     private:
         friend class BSONColumn;
         /**
@@ -231,27 +306,27 @@ public:
             switch (insn.kind()) {
                 case Instruction::Literal0:
                 case Instruction::Literal1:
-                    invariant(!insn.op || !*_insn, "expected BSONElement with empty name");
+                    invariant(!insn.op() || !*_insn, "expected BSONElement with empty name");
                     _cur = BSONElement(--_insn, 1, -1, BSONElement::CachedSizeTag{});
                     _count = 1;
                     _insn += _cur.size();
                     break;
                 case Instruction::Skip:
-                    _index += insn.countArg;
-                    insn.countArg = 0;
-                    // Fall through.
+                    _index += insn.countArg();
+                    break;
                 case Instruction::Delta:
-                    insn.countArg = -insn.countArg;
-                    // Fall through.
+                    _count = insn.countArg();
+                    break;
                 case Instruction::Copy:
-                    invariant(insn.countArg || insn.kind() == Instruction::Skip);
-                    _count = insn.countArg - 1;
+                    _count = insn.countArg() - 1;
                     break;
                 case Instruction::SetNegDelta:
-                    insn.deltaArg = -insn.deltaArg;
-                    // Fall through.
+                    _delta = -insn.deltaArg();
+                    _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);
+                    _count = 1;
+                    break;
                 case Instruction::SetDelta:
-                    _delta = insn.deltaArg;
+                    _delta = insn.deltaArg();
                     _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);
                     _count = 1;
                     break;
@@ -319,11 +394,83 @@ public:
     iterator end() const {
         return iterator(BSONElement(objdata() + objsize() - 1), const_cast<DeltaStore*>(&_deltas));
     }
+    class Builder {
+        Builder(BufBuilder& baseBuilder, const StringData fieldName)
+            : _b(baseBuilder), _offset(baseBuilder.len()) {
+            _b.appendNum((char)BinData);
+            _b.appendStr(fieldName);
+            _b.appendNum((int)0);
+            _b.appendNum((char)BinDataType::Column);
+        }
+
+        /**
+         * Append a new element to the column, skipping entries as needed based on the index.
+         * The index must be greater than that of the last appended item. Ignores field name.
+         */
+        void append(int index, BSONElement elem) {
+            invariant(index >= _index);
+            if (index > _index) {
+                _doDeferrals();
+                Instruction(Instruction::Skip, index - _index).append(_b);
+                _index = index;
+            }
+            // Try Copy
+            if (elem.binaryEqualValues(_last)) {
+                _doDeltas();
+                ++_deferrals;
+                ++_index;
+                return;
+            }
+            // Try Delta
+            if (auto delta = DeltaStore::calculateDelta(_last, elem)) {
+                _doCopies();
+                if (delta != _delta)
+                    _doDeltas();
+                Instruction pos(Instruction::SetDelta, delta);
+                Instruction neg(Instruction::SetNegDelta, -delta);
+                Instruction min = neg.size() < pos.size() ? neg : pos;
+                if (min.size() < _last.valuesize()) {
+                    --_deferrals;
+                    ++_index;
+                    _delta = delta;
+                    return;
+                }
+            }
+            // Store literal BSONElement, resets delta.
+            _doDeferrals();
+            _b.appendNum((char)elem.type());
+            _b.appendNum((char)0);
+            _b.appendBuf(elem.value(), elem.valuesize());
+            _delta = 1;
+        }
+
+    private:
+        void _doDeferrals() {
+            _doCopies();
+            _doDeltas();
+        }
+        void _doCopies() {
+            if (_deferrals <= 0)
+                return;
+            Instruction(Instruction::Copy, static_cast<uint64_t>(_deferrals)).append(_b);
+            _deferrals = 0;
+        }
+        void _doDeltas() {
+            if (_deferrals >= 0)
+                return;
+            Instruction(Instruction::Skip, static_cast<uint64_t>(-_deferrals)).append(_b);
+            _deferrals = 0;
+        }
+        BufBuilder& _b;          // Buffer to build the column in
+        int _offset = 0;         // Start of column relative to start of buffer
+        int _index = 0;          // Index of next element to add to builder
+        int _deferrals = 0;      // Positive indicates number copies, negative means deltas
+        uint64_t _delta = 0;     // Current delta
+        BSONElement _last = {};  // Last element appended to this column
+    };
 
 private:
     BSONElement _bin;    // Contains the BinData with Column subtype.
     DeltaStore _deltas;  // Owns actual storage for BSON elements stored as deltas.
-};
-
-
+};                       // namespace mongo
 }  // namespace mongo

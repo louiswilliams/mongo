@@ -315,6 +315,7 @@ RoutingTableHistory::RoutingTableHistory(
     std::unique_ptr<CollatorInterface> defaultCollator,
     bool unique,
     boost::optional<TypeCollectionReshardingFields> reshardingFields,
+    boost::optional<TypeCollectionTimeseriesFields> timeseriesFields,
     bool allowMigrations,
     ChunkMap chunkMap)
     : _nss(std::move(nss)),
@@ -323,6 +324,7 @@ RoutingTableHistory::RoutingTableHistory(
       _defaultCollator(std::move(defaultCollator)),
       _unique(unique),
       _reshardingFields(std::move(reshardingFields)),
+      _timeseriesFields(std::move(timeseriesFields)),
       _allowMigrations(allowMigrations),
       _chunkMap(std::move(chunkMap)),
       _shardVersions(_chunkMap.constructShardVersionMap()) {}
@@ -737,6 +739,7 @@ RoutingTableHistory RoutingTableHistory::makeNew(
     OID epoch,
     const boost::optional<Timestamp>& timestamp,
     boost::optional<TypeCollectionReshardingFields> reshardingFields,
+    boost::optional<TypeCollectionTimeseriesFields> timeseriesFields,
     bool allowMigrations,
     const std::vector<ChunkType>& chunks) {
     return RoutingTableHistory(std::move(nss),
@@ -745,6 +748,7 @@ RoutingTableHistory RoutingTableHistory::makeNew(
                                std::move(defaultCollator),
                                std::move(unique),
                                boost::none,
+                               timeseriesFields,
                                allowMigrations,
                                ChunkMap{epoch, timestamp})
         .makeUpdated(std::move(reshardingFields), allowMigrations, chunks);
@@ -769,6 +773,7 @@ RoutingTableHistory RoutingTableHistory::makeUpdated(
                                CollatorInterface::cloneCollator(getDefaultCollator()),
                                isUnique(),
                                std::move(reshardingFields),
+                               _timeseriesFields,
                                allowMigrations,
                                std::move(chunkMap));
 }
@@ -799,6 +804,7 @@ RoutingTableHistory RoutingTableHistory::makeUpdatedReplacingTimestamp(
                                CollatorInterface::cloneCollator(getDefaultCollator()),
                                _unique,
                                _reshardingFields,
+                               _timeseriesFields,
                                _allowMigrations,
                                std::move(newMap));
 }

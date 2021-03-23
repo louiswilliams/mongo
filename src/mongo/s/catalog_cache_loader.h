@@ -73,6 +73,7 @@ public:
             const BSONObj& collDefaultCollation,
             bool collShardKeyIsUnique,
             boost::optional<TypeCollectionReshardingFields> collReshardingFields,
+            boost::optional<TypeCollectionTimeseriesFields> collTimeseriesFields,
             bool allowMigrations,
             std::vector<ChunkType> chunks);
 
@@ -88,6 +89,7 @@ public:
         // If the collection is currently undergoing a resharding operation, the optional will be
         // populated.
         boost::optional<TypeCollectionReshardingFields> reshardingFields;
+        boost::optional<TypeCollectionTimeseriesFields> timeseriesFields;
 
         bool allowMigrations;
 

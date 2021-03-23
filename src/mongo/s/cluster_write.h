@@ -44,5 +44,12 @@ void write(OperationContext* opCtx,
            BatchedCommandResponse* response,
            boost::optional<OID> targetEpoch = boost::none);
 
+void writeTimeseries(OperationContext* opCtx,
+                     const BatchedCommandRequest& request,
+                     const NamespaceString& bucketsNs,
+                     BatchWriteExecStats* stats,
+                     BatchedCommandResponse* response,
+                     boost::optional<OID> targetEpoch = boost::none);
+
 }  // namespace cluster
 }  // namespace mongo

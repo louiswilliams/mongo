@@ -121,7 +121,7 @@ void BatchWriteExec::executeBatch(OperationContext* opCtx,
     const auto& nss(clientRequest.getNS());
 
     LOGV2_DEBUG(22904,
-                4,
+                0,
                 "Starting execution of a write batch of size {size} for collection {namespace}",
                 "Starting execution of a write batch",
                 "namespace"_attr = nss.ns(),
@@ -169,6 +169,7 @@ void BatchWriteExec::executeBatch(OperationContext* opCtx,
         bool recordTargetErrors = refreshedTargeter;
         Status targetStatus = batchOp.targetBatch(targeter, recordTargetErrors, &childBatches);
         if (!targetStatus.isOK()) {
+            LOGV2(0, "targeting error", "error"_attr = targetStatus);
             // Don't do anything until a targeter refresh
             targeter.noteCouldNotTarget();
             refreshedTargeter = true;
@@ -233,7 +234,7 @@ void BatchWriteExec::executeBatch(OperationContext* opCtx,
                 }();
 
                 LOGV2_DEBUG(22905,
-                            4,
+                            0,
                             "Sending write batch to {shardId}: {request}",
                             "Sending write batch",
                             "shardId"_attr = targetShardId,
@@ -295,7 +296,7 @@ void BatchWriteExec::executeBatch(OperationContext* opCtx,
                     trackedErrors.startTracking(ErrorCodes::StaleDbVersion);
 
                     LOGV2_DEBUG(22907,
-                                4,
+                                0,
                                 "Write results received from {shardInfo}: {response}",
                                 "Write results received",
                                 "shardInfo"_attr = shardInfo,
@@ -368,7 +369,7 @@ void BatchWriteExec::executeBatch(OperationContext* opCtx,
                     batchOp.noteBatchError(*batch, errorFromStatus(status));
 
                     LOGV2_DEBUG(22908,
-                                4,
+                                0,
                                 "Unable to receive write results from {shardInfo}: {error}",
                                 "Unable to receive write results",
                                 "shardInfo"_attr = shardInfo,

@@ -670,6 +670,7 @@ CatalogCache::CollectionCache::LookupResult CatalogCache::CollectionCache::_look
                                                 collectionAndChunks.epoch,
                                                 collectionAndChunks.creationTime,
                                                 std::move(collectionAndChunks.reshardingFields),
+                                                std::move(collectionAndChunks.timeseriesFields),
                                                 collectionAndChunks.allowMigrations,
                                                 collectionAndChunks.changedChunks);
         }();

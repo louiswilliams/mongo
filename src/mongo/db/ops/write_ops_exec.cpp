@@ -214,6 +214,7 @@ void assertCanWrite_inlock(OperationContext* opCtx, const NamespaceString& ns) {
             repl::ReplicationCoordinator::get(opCtx->getServiceContext())
                 ->canAcceptWritesFor(opCtx, ns));
 
+    LOGV2(0, "checking shard version 1", logAttrs(ns));
     CollectionShardingState::get(opCtx, ns)->checkShardVersionOrThrow(opCtx);
 }
 
@@ -563,6 +564,8 @@ WriteResult performInserts(OperationContext* opCtx,
                     curOp.isCommand(),
                     curOp.getReadWriteType());
     });
+
+    LOGV2(0, "performInserts", logAttrs(wholeOp.getNamespace()));
 
     {
         stdx::lock_guard<Client> lk(*opCtx->getClient());

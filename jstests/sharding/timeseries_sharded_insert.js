@@ -40,6 +40,11 @@ if (!TimeseriesTest.timeseriesCollectionsEnabled(st.shard0)) {
     assert.commandWorked(
         st.s.adminCommand({shardCollection: 'test.system.buckets.ts', key: {'meta': 1}}));
 
+    // For now, persist the collection catalog data manually.
+    assert.commandWorked(configDB.collections.update(
+        {_id: 'test.system.buckets.ts'},
+        {$set: {timeseriesFields: {timeField: 'time', metaField: 'hostId'}}}));
+
     const numDocs = 20;
     let docs = [];
     for (let i = 0; i < numDocs; i++) {

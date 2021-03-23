@@ -252,6 +252,7 @@ CollectionAndChangedChunks getPersistedMetadataSinceVersion(OperationContext* op
                                       shardCollectionEntry.getDefaultCollation(),
                                       shardCollectionEntry.getUnique(),
                                       shardCollectionEntry.getReshardingFields(),
+                                      shardCollectionEntry.getTimeseriesFields(),
                                       shardCollectionEntry.getAllowMigrations(),
                                       std::move(changedChunks)};
 }

@@ -60,5 +60,21 @@ void write(OperationContext* opCtx,
         4817401, 2, {logv2::LogComponent::kShardMigrationPerf}, "Finished batch write");
 }
 
+void writeTimeseries(OperationContext* opCtx,
+                     const BatchedCommandRequest& request,
+                     const NamespaceString& bucketsNs,
+                     BatchWriteExecStats* stats,
+                     BatchedCommandResponse* response,
+                     boost::optional<OID> targetEpoch) {
+    LastError::Disabled disableLastError(&LastError::get(opCtx->getClient()));
+
+    // Target chunks on the buckets collection, not the time-series namespace.
+    ChunkManagerTargeter targeter(opCtx, bucketsNs, targetEpoch);
+
+    LOGV2(0, "Starting batch write to time-series collection", logAttrs(bucketsNs));
+
+    BatchWriteExec::executeBatch(opCtx, targeter, request, response, stats);
+}
+
 }  // namespace cluster
 }  // namespace mongo

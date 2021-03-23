@@ -107,6 +107,7 @@ CollectionAndChangedChunks getChangedChunks(OperationContext* opCtx,
                                       coll.getDefaultCollation(),
                                       coll.getUnique(),
                                       coll.getReshardingFields(),
+                                      coll.getTimeseriesFields(),
                                       coll.getAllowMigrations(),
                                       std::move(collAndChunks.second)};
 }

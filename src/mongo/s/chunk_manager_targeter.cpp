@@ -353,12 +353,48 @@ const NamespaceString& ChunkManagerTargeter::getNS() const {
     return _nss;
 }
 
+BSONObj ChunkManagerTargeter::_generateShardKeyForBucketsNamespace(const BSONObj& doc) const {
+
+    // Build a new object with fields replaced enough that a shard key can be generated. Use this to
+    // generate a shard key in the correct order.
+
+    // For example: {t: T, host: H, extra: 1} -> {control.min.t: T, meta: H}
+    BSONObjBuilder builder;
+    auto tsFields = _cm->getTimeseriesFields();
+    uassert(
+        ErrorCodes::IllegalOperation, "missing timeseriesFields on buckets collection", tsFields);
+    for (const auto& elem : doc) {
+        auto timeField = tsFields->getTimeField();
+        auto metaField = tsFields->getMetaField();
+
+        if (elem.fieldName() == timeField) {
+            builder.appendAs(elem, fmt::format("control.min.{}", timeField));
+        } else if (metaField && elem.fieldName() == *metaField) {
+            builder.appendAs(elem, fmt::format("meta", timeField));
+        }
+    }
+
+    auto transformed = builder.obj();
+    auto shardKey = _cm->getShardKeyPattern().extractShardKeyFromDoc(transformed);
+    LOGV2(0,
+          "generated buckets shard key",
+          "orig"_attr = doc,
+          "transformed"_attr = transformed,
+          "shardKey"_attr = shardKey);
+    return shardKey;
+}
+
 ShardEndpoint ChunkManagerTargeter::targetInsert(OperationContext* opCtx,
                                                  const BSONObj& doc) const {
     BSONObj shardKey;
 
     if (_cm->isSharded()) {
-        shardKey = _cm->getShardKeyPattern().extractShardKeyFromDoc(doc);
+        if (_nss.isTimeseriesBucketsCollection()) {
+            shardKey = _generateShardKeyForBucketsNamespace(doc);
+        } else {
+            shardKey = _cm->getShardKeyPattern().extractShardKeyFromDoc(doc);
+        }
+
         // The shard key would only be empty after extraction if we encountered an error case, such
         // as the shard key possessing an array value or array descendants. If the shard key
         // presented to the targeter was empty, we would emplace the missing fields, and the

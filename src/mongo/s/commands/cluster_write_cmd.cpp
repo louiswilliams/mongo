@@ -468,7 +468,44 @@ private:
             batchedRequest.unsetWriteConcern();
         }
 
-        cluster::write(opCtx, batchedRequest, &stats, &response);
+        auto catalogCache = Grid::get(opCtx)->catalogCache();
+
+        auto bucketsNs = batchedRequest.getNS().makeTimeseriesBucketsNamespace();
+
+        bool timeseriesInsert = [&]() {
+            auto swBucketsInfo = catalogCache->getCollectionRoutingInfo(opCtx, bucketsNs);
+            if (!swBucketsInfo.isOK()) {
+                LOGV2(0,
+                      "ignoring error looking up time-series bucket namespace",
+                      "namespace"_attr = bucketsNs,
+                      "error"_attr = swBucketsInfo.getStatus());
+                return false;
+            }
+
+            auto info = swBucketsInfo.getValue();
+            if (!info.isSharded()) {
+                return false;
+            }
+
+            uassert(ErrorCodes::IllegalOperation,
+                    "Can only insert on time-series collection",
+                    batchedRequest.getBatchType() == BatchedCommandRequest::BatchType_Insert);
+
+            auto tsFields = info.getTimeseriesFields();
+            uassert(ErrorCodes::IllegalOperation,
+                    "Can't insert on buckets namespace with missing timeseriesFields",
+                    tsFields);
+
+            LOGV2(0, "routing insert for sharded buckets collection", "namespace"_attr = bucketsNs);
+            return true;
+        }();
+
+        if (timeseriesInsert) {
+            cluster::writeTimeseries(opCtx, batchedRequest, bucketsNs, &stats, &response);
+        } else {
+            cluster::write(opCtx, batchedRequest, &stats, &response);
+        }
+
 
         bool updatedShardKey = false;
         if (_batchedRequest.getBatchType() == BatchedCommandRequest::BatchType_Update) {
@@ -493,7 +530,6 @@ private:
 
         // TODO: increase opcounters by more than one
         auto& debug = CurOp::get(opCtx)->debug();
-        auto catalogCache = Grid::get(opCtx)->catalogCache();
         switch (_batchedRequest.getBatchType()) {
             case BatchedCommandRequest::BatchType_Insert:
                 for (size_t i = 0; i < numAttempts; ++i) {

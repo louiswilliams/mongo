@@ -144,6 +144,8 @@ private:
                                               const BSONObj& collation,
                                               long long estDataSize) const;
 
+    BSONObj _generateShardKeyForBucketsNamespace(const BSONObj& doc) const;
+
     // Full namespace of the collection for this targeter
     const NamespaceString _nss;
 

@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include "mongo/s/type_collection_timeseries_fields_gen.h"
 #include <set>
 #include <string>
 #include <vector>
@@ -170,6 +171,7 @@ public:
         OID epoch,
         const boost::optional<Timestamp>& timestamp,
         boost::optional<TypeCollectionReshardingFields> reshardingFields,
+        boost::optional<TypeCollectionTimeseriesFields> timeseriesFields,
         bool allowMigrations,
         const std::vector<ChunkType>& chunks);
 
@@ -305,6 +307,10 @@ public:
         return _reshardingFields;
     }
 
+    const boost::optional<TypeCollectionTimeseriesFields>& getTimeseriesFields() const {
+        return _timeseriesFields;
+    }
+
     bool allowMigrations() const {
         return _allowMigrations;
     }
@@ -318,6 +324,7 @@ private:
                         std::unique_ptr<CollatorInterface> defaultCollator,
                         bool unique,
                         boost::optional<TypeCollectionReshardingFields> reshardingFields,
+                        boost::optional<TypeCollectionTimeseriesFields> timeseriesFields,
                         bool allowMigrations,
                         ChunkMap chunkMap);
 
@@ -343,6 +350,10 @@ private:
     // resharding operation, and that these fields were present in the config.collections entry
     // for this collection.
     boost::optional<TypeCollectionReshardingFields> _reshardingFields;
+
+    // Fields related to the names of the top-level field names for this time-series buckets
+    // collection.
+    boost::optional<TypeCollectionTimeseriesFields> _timeseriesFields;
 
     bool _allowMigrations;
 
@@ -687,6 +698,10 @@ public:
 
     const boost::optional<TypeCollectionReshardingFields>& getReshardingFields() const {
         return _rt->optRt->getReshardingFields();
+    }
+
+    const boost::optional<TypeCollectionTimeseriesFields>& getTimeseriesFields() const {
+        return _rt->optRt->getTimeseriesFields();
     }
 
     const RoutingTableHistory& getRoutingTableHistory_ForTest() const {

@@ -182,6 +182,7 @@ env.Library(
         'shard_invalidated_for_targeting_exception.cpp',
         'sharded_collections_ddl_parameters.idl',
         'stale_exception.cpp',
+        'type_collection_timeseries_fields.idl',
         'would_change_owning_shard_exception.cpp',
     ],
     LIBDEPS=[

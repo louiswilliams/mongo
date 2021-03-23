@@ -75,6 +75,7 @@ imports:
     - "mongo/db/keypattern.idl"
     - "mongo/s/chunk_version.idl"
     - "mongo/s/resharding/type_collection_fields.idl"
+    - "mongo/s/type_collection_timeseries_fields.idl"
 
 structs:
     ShardCollectionTypeBase:
@@ -161,3 +162,9 @@ structs:
                               It must be optional and not present when running in FCV 4.4, because
                               binaries prior to 5.0 use strict parsing and will fail."
                 optional: true
+            timeseriesFields:
+                description: "Time-series fields. This is only set when the collection is a
+                              time-series buckets collection"
+                type: TypeCollectionTimeseriesFields
+                optional: true
+                

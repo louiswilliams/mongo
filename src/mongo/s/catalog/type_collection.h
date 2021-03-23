@@ -86,6 +86,7 @@ public:
     static constexpr auto kAllowMigrationsFieldName = kPre50CompatibleAllowMigrationsFieldName;
     using CollectionTypeBase::kNssFieldName;
     using CollectionTypeBase::kReshardingFieldsFieldName;
+    using CollectionTypeBase::kTimeseriesFieldsFieldName;
     using CollectionTypeBase::kTimestampFieldName;
     using CollectionTypeBase::kUniqueFieldName;
     using CollectionTypeBase::kUpdatedAtFieldName;
@@ -93,11 +94,13 @@ public:
     // Make getters and setters accessible.
     using CollectionTypeBase::getNss;
     using CollectionTypeBase::getReshardingFields;
+    using CollectionTypeBase::getTimeseriesFields;
     using CollectionTypeBase::getTimestamp;
     using CollectionTypeBase::getUnique;
     using CollectionTypeBase::getUpdatedAt;
     using CollectionTypeBase::setNss;
     using CollectionTypeBase::setReshardingFields;
+    using CollectionTypeBase::setTimeseriesFields;
     using CollectionTypeBase::setTimestamp;
     using CollectionTypeBase::setUnique;
     using CollectionTypeBase::setUpdatedAt;

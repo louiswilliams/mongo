@@ -83,7 +83,7 @@ if (!TimeseriesTest.timeseriesCollectionsEnabled(st.shard0)) {
 
     // Query with shard key
     assert.docEq([docs[0], docs[20]], sDB.ts.find({hostId: 0}).toArray());
-    assert.docEq([docs[19], docs[39]], sDB.ts.find({hostId: 10}).toArray());
+    assert.docEq([docs[19], docs[39]], sDB.ts.find({hostId: 19}).toArray());
 
     // Query without shard key
     assert.docEq(docs, sDB.ts.find().sort({time: 1}).toArray());

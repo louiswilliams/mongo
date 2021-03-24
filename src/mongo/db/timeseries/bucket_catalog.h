@@ -201,6 +201,8 @@ public:
      */
     StatusWith<std::shared_ptr<WriteBatch>> insert(OperationContext* opCtx,
                                                    const NamespaceString& ns,
+                                                   const CollatorInterface* collator,
+                                                   const TimeseriesOptions& options,
                                                    const BSONObj& doc);
 
     /**
@@ -274,7 +276,7 @@ private:
     struct BucketMetadata {
     public:
         BucketMetadata() = default;
-        BucketMetadata(BSONObj&& obj, std::shared_ptr<const ViewDefinition>& view);
+        BucketMetadata(BSONObj&& obj);
 
         bool operator==(const BucketMetadata& other) const;
 
@@ -289,7 +291,6 @@ private:
 
     private:
         BSONObj _metadata;
-        std::shared_ptr<const ViewDefinition> _view;
 
         // This stores the _metadata object with all fields sorted to allow for binary comparisons.
         BSONObj _sorted;

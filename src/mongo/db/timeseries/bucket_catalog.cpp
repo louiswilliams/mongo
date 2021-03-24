@@ -87,12 +87,11 @@ BSONObj BucketCatalog::getMetadata(const BucketId& bucketId) const {
 }
 
 StatusWith<std::shared_ptr<BucketCatalog::WriteBatch>> BucketCatalog::insert(
-    OperationContext* opCtx, const NamespaceString& ns, const BSONObj& doc) {
-    auto viewCatalog = DatabaseHolder::get(opCtx)->getViewCatalog(opCtx, ns.db());
-    invariant(viewCatalog);
-    auto viewDef = viewCatalog->lookup(opCtx, ns.ns());
-    invariant(viewDef);
-    const auto& options = *viewDef->timeseries();
+    OperationContext* opCtx,
+    const NamespaceString& ns,
+    const CollatorInterface* collator,
+    const TimeseriesOptions& options,
+    const BSONObj& doc) {
 
     BSONObjBuilder metadata;
     if (auto metaField = options.getMetaField()) {
@@ -102,7 +101,7 @@ StatusWith<std::shared_ptr<BucketCatalog::WriteBatch>> BucketCatalog::insert(
             metadata.appendNull(*metaField);
         }
     }
-    auto key = std::make_tuple(ns, BucketMetadata{metadata.obj(), viewDef});
+    auto key = std::make_tuple(ns, BucketMetadata{metadata.obj()});
 
     auto stats = _getExecutionStats(ns);
     invariant(stats);
@@ -187,9 +186,10 @@ StatusWith<std::shared_ptr<BucketCatalog::WriteBatch>> BucketCatalog::insert(
     } else {
         _memoryUsage.fetchAndSubtract(bucket->memoryUsage);
     }
+
     bucket->memoryUsage -= bucket->min.getMemoryUsage() + bucket->max.getMemoryUsage();
-    bucket->min.update(doc, options.getMetaField(), viewDef->defaultCollator(), std::less<>());
-    bucket->max.update(doc, options.getMetaField(), viewDef->defaultCollator(), std::greater<>());
+    bucket->min.update(doc, options.getMetaField(), collator, std::less<>());
+    bucket->max.update(doc, options.getMetaField(), collator, std::greater<>());
     bucket->memoryUsage +=
         newFieldNamesSize + bucket->min.getMemoryUsage() + bucket->max.getMemoryUsage();
     _memoryUsage.fetchAndAdd(bucket->memoryUsage);
@@ -497,9 +497,7 @@ void BucketCatalog::_setIdTimestamp(BucketId* id, const Date_t& time) {
     id->_id->setTimestamp(durationCount<Seconds>(time.toDurationSinceEpoch()));
 }
 
-BucketCatalog::BucketMetadata::BucketMetadata(BSONObj&& obj,
-                                              std::shared_ptr<const ViewDefinition>& v)
-    : _metadata(obj), _view(v) {
+BucketCatalog::BucketMetadata::BucketMetadata(BSONObj&& obj) : _metadata(obj) {
     BSONObjBuilder objBuilder;
     normalizeObject(&objBuilder, _metadata);
     _sorted = objBuilder.obj();

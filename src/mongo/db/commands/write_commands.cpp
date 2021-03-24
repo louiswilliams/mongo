@@ -62,6 +62,7 @@
 #include "mongo/db/retryable_writes_stats.h"
 #include "mongo/db/stats/counters.h"
 #include "mongo/db/storage/duplicate_key_error_info.h"
+#include "mongo/db/storage/durable_catalog.h"
 #include "mongo/db/timeseries/bucket_catalog.h"
 #include "mongo/db/transaction_participant.h"
 #include "mongo/db/views/view_catalog.h"
@@ -105,17 +106,13 @@ bool shouldSkipOutput(OperationContext* opCtx) {
  * Returns true if 'ns' refers to a time-series collection.
  */
 bool isTimeseries(OperationContext* opCtx, const NamespaceString& ns) {
-    auto viewCatalog = DatabaseHolder::get(opCtx)->getViewCatalog(opCtx, ns.db());
-    if (!viewCatalog) {
-        return false;
-    }
 
-    auto view = viewCatalog->lookupWithoutValidatingDurableViews(opCtx, ns.ns());
-    if (!view) {
-        return false;
+    auto bucketsNs = ns.makeTimeseriesBucketsNamespace();
+    AutoGetCollectionForRead autoColl(opCtx, bucketsNs);
+    if (autoColl.getCollection()) {
+        return true;
     }
-
-    return view->timeseries().has_value();
+    return false;
 }
 
 // Default for control.version in time-series bucket collection.
@@ -705,12 +702,29 @@ public:
             const boost::optional<std::vector<size_t>>& indices = boost::none) const {
             auto& bucketCatalog = BucketCatalog::get(opCtx);
 
+            const CollatorInterface* collator;
+            TimeseriesOptions options;
+            {
+                auto bucketsNs = ns().makeTimeseriesBucketsNamespace();
+                AutoGetCollectionForRead autoColl(opCtx, bucketsNs);
+                uassert(ErrorCodes::NamespaceNotFound,
+                        "could not find buckets collection",
+                        autoColl.getCollection());
+
+                auto bucketOptions = DurableCatalog::get(opCtx)->getCollectionOptions(
+                    opCtx, autoColl->getCatalogId());
+                collator = autoColl->getDefaultCollator();
+                invariant(bucketOptions.timeseries);
+                options = *bucketOptions.timeseries;
+            }
+
+
             std::vector<std::pair<std::shared_ptr<BucketCatalog::WriteBatch>, size_t>> batches;
             auto insert = [&](size_t index) {
                 invariant(start + index < request().getDocuments().size());
 
-                auto result =
-                    bucketCatalog.insert(opCtx, ns(), request().getDocuments()[start + index]);
+                auto result = bucketCatalog.insert(
+                    opCtx, ns(), collator, options, request().getDocuments()[start + index]);
                 if (auto error = generateError(opCtx, result, index, errors->size())) {
                     errors->push_back(*error);
                 } else {
@@ -802,6 +816,21 @@ public:
             if (isRetryableTimeseriesWriteExecuted(opCtx, request(), insertReply)) {
                 return;
             }
+
+            auto& curOp = *CurOp::get(opCtx);
+            ON_BLOCK_EXIT([&] {
+                // This is the only part of finishCurOp we need to do for inserts because they reuse
+                // the top-level curOp. The rest is handled by the top-level entrypoint.
+                curOp.done();
+                Top::get(opCtx->getServiceContext())
+                    .record(opCtx,
+                            request().getNamespace().ns(),
+                            LogicalOp::opInsert,
+                            Top::LockType::WriteLocked,
+                            durationCount<Microseconds>(curOp.elapsedTimeExcludingPauses()),
+                            curOp.isCommand(),
+                            curOp.getReadWriteType());
+            });
 
             std::vector<BSONObj> errors;
             boost::optional<repl::OpTime> opTime;

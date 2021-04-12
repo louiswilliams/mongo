@@ -40,8 +40,7 @@
 namespace mongo {
 namespace {
 
-class BSONColumnExampleTest : public unittest::Test {
-
+class BSONColumnExample : public unittest::Test {
 public:
     void setUp() override {
         BSONBinData bin(exampleData, sizeof(exampleData), BinDataType::Column);
@@ -79,7 +78,7 @@ protected:
     const StringData exampleFieldName = "col"_sd;
 };
 
-TEST_F(BSONColumnExampleTest, Basic) {
+TEST_F(BSONColumnExample, Basic) {
     BSONColumn col;
     ASSERT(col.isEmpty());
     ASSERT_EQ(col.nFields(), 0);
@@ -92,7 +91,7 @@ TEST_F(BSONColumnExampleTest, Basic) {
                   1 /*BinDataType*/ + sizeof(exampleData));
     ASSERT_FALSE(exampleCol.begin() == exampleCol.end());
 }
-TEST_F(BSONColumnExampleTest, SimpleIteration) {
+TEST_F(BSONColumnExample, SimpleIteration) {
     BSONObjBuilder bob;
     for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it)
         bob.appendAs(*it, std::to_string(it.index()));
@@ -104,7 +103,7 @@ TEST_F(BSONColumnExampleTest, SimpleIteration) {
     ASSERT_EQ(exampleCol.nFields(), obj.nFields());
 }
 
-TEST_F(BSONColumnExampleTest, SimpleLookup) {
+TEST_F(BSONColumnExample, SimpleLookup) {
     auto elem = exampleCol[1];
     ASSERT_EQ(elem.type(), BSONType::NumberDouble);
     ASSERT_EQ(elem.numberDouble(), 72.0);
@@ -119,6 +118,22 @@ TEST_F(BSONColumnExampleTest, SimpleLookup) {
 
     elem = exampleCol[105];  // Missing field
     ASSERT_EQ(elem.type(), BSONType::EOO);
+}
+
+TEST_F(BSONColumnExample, SimpleBuild) {
+    BufBuilder buf;
+    {
+        BSONColumn::Builder col(buf, "col");
+        for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it)
+            col.append(it.index(), *it);
+    }
+
+    BSONElement elem(buf.buf());
+    ASSERT(elem.type() == BinData && elem.binDataType() == Column);
+    int len;
+    const char* data;
+    data = elem.binDataClean(len);
+    logd("Got a bindata of length {}", len);
 }
 
 }  // namespace

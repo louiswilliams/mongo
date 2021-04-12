@@ -221,9 +221,7 @@ public:
         uint64_t _prefix = 0;
     };
 
-    /**
-     * Like BSONObjStlIterator, but returns EOO elements for skipped values.
-     */
+    /** Like BSONObjStlIterator */
     class iterator {
     public:
         using iterator_category = std::forward_iterator_tag;
@@ -395,10 +393,18 @@ public:
         return iterator(BSONElement(objdata() + objsize() - 1), const_cast<DeltaStore*>(&_deltas));
     }
     class Builder {
+    public:
+        ~Builder() {
+            _doDeferrals();
+            _b.appendNum((char)EOO);
+            _updateBinDataSize();
+        }
+
         Builder(BufBuilder& baseBuilder, const StringData fieldName)
             : _b(baseBuilder), _offset(baseBuilder.len()) {
             _b.appendNum((char)BinData);
             _b.appendStr(fieldName);
+            _sizeOffset = _b.len();
             _b.appendNum((int)0);
             _b.appendNum((char)BinDataType::Column);
         }
@@ -441,6 +447,8 @@ public:
             _b.appendNum((char)elem.type());
             _b.appendNum((char)0);
             _b.appendBuf(elem.value(), elem.valuesize());
+            _last = elem;
+            ++_index;
             _delta = 1;
         }
 
@@ -461,10 +469,16 @@ public:
             Instruction(Instruction::Skip, static_cast<uint64_t>(-_deferrals)).append(_b);
             _deferrals = 0;
         }
+        void _updateBinDataSize() {
+            int32_t size = endian::nativeToLittle(_b.len());
+            memcpy(_b.buf() + _sizeOffset, &size, sizeof(size));
+        }
+
         BufBuilder& _b;          // Buffer to build the column in
         int _offset = 0;         // Start of column relative to start of buffer
         int _index = 0;          // Index of next element to add to builder
         int _deferrals = 0;      // Positive indicates number copies, negative means deltas
+        int _sizeOffset = 0;     // Offset to location for storing final BinData size
         uint64_t _delta = 0;     // Current delta
         BSONElement _last = {};  // Last element appended to this column
     };

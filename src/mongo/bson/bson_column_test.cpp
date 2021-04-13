@@ -36,6 +36,7 @@
 #include "mongo/db/json.h"
 #include "mongo/logv2/log_debug.h"
 #include "mongo/unittest/unittest.h"
+#include "mongo/util/hex.h"
 
 namespace mongo {
 namespace {
@@ -94,7 +95,7 @@ TEST_F(BSONColumnExample, Basic) {
 TEST_F(BSONColumnExample, SimpleIteration) {
     BSONObjBuilder bob;
     for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it)
-        bob.appendAs(*it, std::to_string(it.index()));
+        bob.appendAs(*it, fmt::to_string(it.index()));
     BSONObj obj = bob.done();
     logd("expanded: {}, BSONColumn size: {}, BSONObj size: {}",
          obj,
@@ -134,6 +135,12 @@ TEST_F(BSONColumnExample, SimpleBuild) {
     const char* data;
     data = elem.binDataClean(len);
     logd("Got a bindata of length {}", len);
+    logd("disassemble: {}", BSONColumn::Instruction::disassemble(data, len));
+    logd("hex: {}", hexdump(data, len));
+    logd("disassemble example: {}",
+         BSONColumn::Instruction::disassemble(reinterpret_cast<char*>(exampleData),
+                                              sizeof(exampleData)));
+    logd("hex: {}", hexdump(reinterpret_cast<char*>(exampleData), sizeof(exampleData)));
 }
 
 }  // namespace

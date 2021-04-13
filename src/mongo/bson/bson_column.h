@@ -32,6 +32,8 @@
 #include <deque>
 #include <memory>
 
+#include <fmt/format.h>
+
 #include "mongo/base/data_type.h"
 #include "mongo/base/string_data.h"
 #include "mongo/base/string_data_comparator_interface.h"
@@ -116,9 +118,9 @@ public:
         }
 
         /**
-         * Computes 64-bit delta between both  Both element values must have the same type and have
-         * a value at most 16 bytes in length. Field names are ignored. A 0 return means either that
-         * the elements are binary identical, or otherwise invalid for commputing a delta.
+         * Computes a 64-bit delta. Both element values must have the same type and have a value of
+         * at most 16 bytes in length. Field names are ignored. A zero return means that either the
+         * elements are binary identical, or otherwise invalid for computing a delta.
          */
 
         static uint64_t calculateDelta(BSONElement base, BSONElement modified) {
@@ -157,8 +159,9 @@ public:
                 case Skip:
                 case Delta:
                 case Copy:
-                    _prefix = arg / 16;
-                    _op = kind * 16 + _prefix % 16;
+                    for (_prefix = 0; arg >= 16; arg /= 128)
+                        _prefix = 128 * _prefix + arg % 128;
+                    _op = kind * 16 + arg;
                     break;
                 case SetNegDelta:
                 case SetDelta:
@@ -183,17 +186,62 @@ public:
             return {input, insn};
         }
 
-        void append(BufBuilder& builder) {
-            for (; _prefix; _prefix /= 128)
-                builder.appendNum((char)0x80 + _prefix % 128);
-            builder.appendNum((char)_op);
+        operator std::string() const {
+            using namespace fmt::literals;
+            StringData kindStr[] = {"Literal0"_sd,
+                                    "Literal1"_sd,
+                                    "Skip"_sd,
+                                    "Delta"_sd,
+                                    "Copy"_sd,
+                                    "SetNegDelta"_sd,
+                                    "SetDelta"_sd};
+            switch (kind()) {
+                case Literal0:
+                case Literal1:
+                    return "Literal {}"_format(typeName(static_cast<BSONType>(op())));
+                case Skip:
+                case Delta:
+                case Copy:
+                    return "{} {}"_format(kindStr[kind()], countArg());
+                case SetNegDelta:
+                case SetDelta:
+                    return "{} {:#x}"_format(kindStr[kind()], endian::nativeToLittle(deltaArg()));
+            }
         }
 
-        Kind kind() {
+        /** Append a non-literal instruction to the builder */
+        void append(BufBuilder& builder) {
+            for (auto x = _prefix; x; x /= 128)
+                builder.appendNum(static_cast<char>(0x80 + x % 128));
+            builder.appendNum(static_cast<char>(_op));
+        }
+
+        static std::string disassemble(const char* data, int len) {
+            const char* end = data + len;
+            std::string out = "[ ";
+            while (data != end) {
+                if (!*data) {
+                    out.append("EOO");
+                    break;
+                }
+
+                auto [next, insn] = Instruction::parse(data);
+                if (insn.kind() <= Instruction::Kind::Literal1)
+                    next += BSONElement(next - 1).size() - 1;
+                data = next;
+
+                out.append(insn);
+                out.append(", ");
+            }
+            out.append("]");
+            return out;
+        }
+
+        Kind kind() const {
             return static_cast<Kind>(_op / 16);
         }
 
-        int size() {
+        int size() const {
             int size = 1;
             uint8_t op = _op;
             uint64_t prefix = _prefix;
@@ -204,15 +252,15 @@ public:
             return size;
         }
 
-        uint8_t op() {
+        uint8_t op() const {
             return _op;
         }
 
-        uint64_t countArg() {
+        uint64_t countArg() const {
             return _prefix * 16 + _op % 16;
         }
 
-        uint64_t deltaArg() {
+        uint64_t deltaArg() const {
             return (_prefix + 1) << (_op % 16 * 4);
         }
 
@@ -297,6 +345,7 @@ public:
          */
         explicit iterator(BSONElement elem, DeltaStore* store)
             : _cur(elem.rawdata()), _insn(elem.rawdata()), _store(store) {}
+
         void _nextInsn() {
             Instruction insn;
             std::tie(_insn, insn) = Instruction::parse(_insn);
@@ -392,6 +441,10 @@ public:
     iterator end() const {
         return iterator(BSONElement(objdata() + objsize() - 1), const_cast<DeltaStore*>(&_deltas));
     }
+
+    /**
+     * Constructs a BSONColumn, applying delta compression as elements are appended.
+     */
     class Builder {
     public:
         ~Builder() {

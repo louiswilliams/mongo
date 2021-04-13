@@ -92,6 +92,7 @@ TEST_F(BSONColumnExample, Basic) {
                   1 /*BinDataType*/ + sizeof(exampleData));
     ASSERT_FALSE(exampleCol.begin() == exampleCol.end());
 }
+
 TEST_F(BSONColumnExample, SimpleIteration) {
     BSONObjBuilder bob;
     for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it)
@@ -117,17 +118,22 @@ TEST_F(BSONColumnExample, SimpleLookup) {
     ASSERT_EQ(elem.type(), BSONType::NumberDouble);
     ASSERT_EQ(elem.numberDouble(), 72.5);
 
-    elem = exampleCol[105];  // Missing field
+    elem = exampleCol[103];  // Missing field
     ASSERT_EQ(elem.type(), BSONType::EOO);
 }
 
 TEST_F(BSONColumnExample, SimpleBuild) {
+    BSONObjBuilder bob;
     BufBuilder buf;
     {
         BSONColumn::Builder col(buf, "col");
-        for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it)
+        for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it) {
+            bob.appendAs(*it, fmt::to_string(it.index()));
             col.append(it.index(), *it);
+        }
     }
+    BSONObj example = bob.obj();
+    logd("example = {}", example);
 
     BSONElement elem(buf.buf());
     ASSERT(elem.type() == BinData && elem.binDataType() == Column);

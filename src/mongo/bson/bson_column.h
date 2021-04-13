@@ -43,6 +43,7 @@
 #include "mongo/bson/oid.h"
 #include "mongo/bson/timestamp.h"
 #include "mongo/bson/util/builder.h"
+#include "mongo/logv2/log_debug.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/platform/endian.h"
 #include "mongo/util/assert_util.h"
@@ -153,15 +154,26 @@ public:
     class Instruction {
     public:
         enum Kind { Literal0, Literal1, Skip, Delta, Copy, SetNegDelta, SetDelta };
+
+        static StringData toString(Kind k) {
+            StringData strings[] = {"Literal0"_sd,
+                                    "Literal1"_sd,
+                                    "Skip"_sd,
+                                    "Delta"_sd,
+                                    "Copy"_sd,
+                                    "SetNegDelta"_sd,
+                                    "SetDelta"_sd};
+            return strings[k];
+        }
         Instruction() = default;
         Instruction(Kind kind, uint64_t arg) {
+            // logd("new insn:  kind = {}, arg = {:x}", kind, arg);
             switch (kind) {
                 case Skip:
                 case Delta:
                 case Copy:
-                    for (_prefix = 0; arg >= 16; arg /= 128)
-                        _prefix = 128 * _prefix + arg % 128;
-                    _op = kind * 16 + arg;
+                    _prefix = arg / 16;
+                    _op = kind * 16 + arg % 16;
                     break;
                 case SetNegDelta:
                 case SetDelta:
@@ -186,15 +198,8 @@ public:
             return {input, insn};
         }
 
-        operator std::string() const {
+        std::string toString() const {
             using namespace fmt::literals;
-            StringData kindStr[] = {"Literal0"_sd,
-                                    "Literal1"_sd,
-                                    "Skip"_sd,
-                                    "Delta"_sd,
-                                    "Copy"_sd,
-                                    "SetNegDelta"_sd,
-                                    "SetDelta"_sd};
             switch (kind()) {
                 case Literal0:
                 case Literal1:
@@ -202,18 +207,26 @@ public:
                 case Skip:
                 case Delta:
                 case Copy:
-                    return "{} {}"_format(kindStr[kind()], countArg());
+                    return "{} {}"_format(toString(kind()), countArg());
                 case SetNegDelta:
                 case SetDelta:
-                    return "{} {:#x}"_format(kindStr[kind()], endian::nativeToLittle(deltaArg()));
+                    return "{} {:#x}"_format(toString(kind()), endian::nativeToLittle(deltaArg()));
             }
         }
 
         /** Append a non-literal instruction to the builder */
         void append(BufBuilder& builder) {
-            for (auto x = _prefix; x; x /= 128)
-                builder.appendNum(static_cast<char>(0x80 + x % 128));
-            builder.appendNum(static_cast<char>(_op));
+            // logd("append: prefix = {:x}, op = {:x}", _prefix, _op);
+            char buf[11];  // At most 10 prefix bytes and an op byte
+            char* end = buf + sizeof(buf);
+            char* begin = end;
+
+            *--begin = _op;
+            while (_prefix) {
+                *--begin = _prefix % 128 + 128;
+                _prefix /= 128;
+            }
+            builder.appendBuf(begin, end - begin);
         }
 
         static std::string disassemble(const char* data, int len) {
@@ -230,7 +243,7 @@ public:
                     next += BSONElement(next - 1).size() - 1;
                 data = next;
 
-                out.append(insn);
+                out.append(insn.toString());
                 out.append(", ");
             }
             out.append("]");
@@ -317,6 +330,7 @@ public:
                 ++_count;
                 _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);  // Delta
             }
+            // logd("advance: {}", *this);
             return *this;
         }
 
@@ -335,6 +349,11 @@ public:
             return operator++();
         }
 
+        std::string toString() const {
+            return fmt::format(
+                "iterator: _cur = {}, _count = {}, _index = {}", _cur.toString(), _count, _index);
+        }
+
     private:
         friend class BSONColumn;
         /**
@@ -344,7 +363,7 @@ public:
          * of the BSONColumn.
          */
         explicit iterator(BSONElement elem, DeltaStore* store)
-            : _cur(elem.rawdata()), _insn(elem.rawdata()), _store(store) {}
+            : _cur(elem.rawdata()), _insn(elem.rawdata() + elem.size()), _store(store) {}
 
         void _nextInsn() {
             Instruction insn;
@@ -362,10 +381,10 @@ public:
                     _index += insn.countArg();
                     break;
                 case Instruction::Delta:
-                    _count = insn.countArg();
+                    _count = -insn.countArg();
                     break;
                 case Instruction::Copy:
-                    _count = insn.countArg() - 1;
+                    _count = insn.countArg();
                     break;
                 case Instruction::SetNegDelta:
                     _delta = -insn.deltaArg();
@@ -377,10 +396,9 @@ public:
                     _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);
                     _count = 1;
                     break;
-                default:
-                    MONGO_UNREACHABLE;
             }
-            // invariant(_count || insn.kind() == Instruction::Skip);
+            // logd("_nextInsn: insn = {}, this = {}", insn, *this);
+            invariant(_count || insn.kind() == Instruction::Skip);
         }
 
         BSONElement _cur;          // Defaults to EOO, reference to last full BSONElement or _base
@@ -408,8 +426,10 @@ public:
         auto it = begin();
         auto endIt = end();
         int count = 0;
-        while (it != endIt)
-            ++count, ++it;  // TODO: Should skip ahead for copied fields.
+        while (it != endIt) {
+            ++count;
+            ++it;  // TODO: Should skip ahead for copied fields.
+        }
         return count;
     }
 
@@ -473,23 +493,28 @@ public:
                 Instruction(Instruction::Skip, index - _index).append(_b);
                 _index = index;
             }
+            BSONElement last = _lastLiteral
+                ? BSONElement(_b.buf() + _lastLiteral, 1, -1, BSONElement::CachedSizeTag())
+                : BSONElement();
+
             // Try Copy
-            if (elem.binaryEqualValues(_last)) {
+            if (elem.binaryEqualValues(last)) {
                 _doDeltas();
                 ++_deferrals;
                 ++_index;
                 return;
             }
             // Try Delta
-            if (auto delta = DeltaStore::calculateDelta(_last, elem)) {
+            if (auto delta = DeltaStore::calculateDelta(last, elem)) {
                 _doCopies();
-                if (delta != _delta)
-                    _doDeltas();
+                // Still need to handle the case of consecutive deltas.
+                // logd("calculated a delta of {:x}", delta);
                 Instruction pos(Instruction::SetDelta, delta);
                 Instruction neg(Instruction::SetNegDelta, -delta);
                 Instruction min = neg.size() < pos.size() ? neg : pos;
-                if (min.size() < _last.valuesize()) {
-                    --_deferrals;
+                // Only do the delta if it saves space.
+                if (min.size() < last.valuesize()) {
+                    min.append(_b);
                     ++_index;
                     _delta = delta;
                     return;
@@ -497,13 +522,16 @@ public:
             }
             // Store literal BSONElement, resets delta.
             _doDeferrals();
+            _lastLiteral = _b.len();
             _b.appendNum((char)elem.type());
             _b.appendNum((char)0);
             _b.appendBuf(elem.value(), elem.valuesize());
-            _last = elem;
+
+            // logd("set _lastLiteral to {}", BSONElement(_b.buf() + _lastLiteral));
             ++_index;
             _delta = 1;
         }
+
 
     private:
         void _doDeferrals() {
@@ -527,13 +555,13 @@ public:
             memcpy(_b.buf() + _sizeOffset, &size, sizeof(size));
         }
 
-        BufBuilder& _b;          // Buffer to build the column in
-        int _offset = 0;         // Start of column relative to start of buffer
-        int _index = 0;          // Index of next element to add to builder
-        int _deferrals = 0;      // Positive indicates number copies, negative means deltas
-        int _sizeOffset = 0;     // Offset to location for storing final BinData size
-        uint64_t _delta = 0;     // Current delta
-        BSONElement _last = {};  // Last element appended to this column
+        BufBuilder& _b;        // Buffer to build the column in
+        int _offset = 0;       // Start of column relative to start of buffer
+        int _index = 0;        // Index of next element to add to builder
+        int _deferrals = 0;    // Positive indicates number of copies, negative means deltas
+        int _sizeOffset = 0;   // Offset to location for storing final BinData size
+        int _lastLiteral = 0;  // Last literal element appended to this column
+        uint64_t _delta = 0;   // Current delta
     };
 
 private:

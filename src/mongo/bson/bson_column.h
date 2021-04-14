@@ -87,7 +87,15 @@ public:
         static constexpr int maxValueSize = 8;  // Should be 16 ideally (for Decimal).
         static constexpr int maxElemSize = valueOffset + maxValueSize;
         struct Elem {
-            char elem[maxElemSize] = {0};
+            char data[maxElemSize] = {0};
+            BSONElement store(BSONElement elem) {
+                const char* raw = elem.rawdata();
+                data[0] = *raw;
+                int valueSize = elem.valuesize();
+                invariant(valueSize <= maxValueSize);
+                memcpy(data + valueOffset, elem.value(), valueSize);
+                return BSONElement(data, 1, valueOffset + valueSize, BSONElement::CachedSizeTag{});
+            }
         };
         using iterator = std::deque<Elem>::iterator;
 
@@ -104,18 +112,18 @@ public:
 
             // Copy the empty field name and type byte from the base, followed by the new value.
             Elem elem;
-            memcpy(elem.elem, base.rawdata(), valueOffset);
-            memcpy(elem.elem + valueOffset, &value, sizeof(value));  // Always copy the entire value
+            memcpy(elem.data, base.rawdata(), valueOffset);
+            memcpy(elem.data + valueOffset, &value, sizeof(value));  // Always copy the entire value
 
             invariant(deltaIndex <= _store.size());
             if (deltaIndex == _store.size()) {
                 _store.push_back(elem);
-                BSONElement(_store.back().elem, 1, size, BSONElement::CachedSizeTag{});
+                BSONElement(_store.back().data, 1, size, BSONElement::CachedSizeTag{});
             }
 
-            invariant(!memcmp(elem.elem, _store[deltaIndex].elem, sizeof(elem)));  // slow->dassert?
+            invariant(!memcmp(elem.data, _store[deltaIndex].data, sizeof(elem)));  // slow->dassert?
             return BSONElement(
-                _store[deltaIndex].elem, 1, size + valueOffset, BSONElement::CachedSizeTag{});
+                _store[deltaIndex].data, 1, size + valueOffset, BSONElement::CachedSizeTag{});
         }
 
         /**
@@ -123,7 +131,6 @@ public:
          * at most 16 bytes in length. Field names are ignored. A zero return means that either the
          * elements are binary identical, or otherwise invalid for computing a delta.
          */
-
         static uint64_t calculateDelta(BSONElement base, BSONElement modified) {
             int size = base.valuesize();  // TODO: Fix size > 8 handling
             if (base.type() != modified.type() || size != modified.valuesize() ||
@@ -131,8 +138,8 @@ public:
                 return 0;
 
             // For simplicity, we always use a 64-bit delta.
-            uint64_t value;
-            uint64_t delta;
+            uint64_t value = 0;
+            uint64_t delta = 0;
             memcpy(&value, base.value(), size);
             value = endian::littleToNative(value);
             memcpy(&delta, modified.value(), size);
@@ -190,12 +197,21 @@ public:
                     MONGO_UNREACHABLE;
             }
         }
+        /** Parse an Instruction from the stream and return the updated stream pointer. */
         static std::pair<const char*, Instruction> parse(const char* input) {
             Instruction insn;
             while (insn._op = static_cast<uint8_t>(*input++), insn._op >= 128)
                 insn._prefix = insn._prefix * 128 + insn._op % 128;  // Accumulate prefix.
 
             return {input, insn};
+        }
+
+        /** Return the smallests possible SetDelta or SetNegDelta instruction. */
+        static Instruction makeDelta(uint64_t delta) {
+            Instruction pos(Instruction::SetDelta, delta);
+            Instruction neg(Instruction::SetNegDelta, -delta);
+            // logd("makeDelta: pos = {}, neg = {}", pos, neg);
+            return neg.size() < pos.size() ? neg : pos;
         }
 
         std::string toString() const {
@@ -307,7 +323,7 @@ public:
         }
 
         bool operator==(const iterator& other) {
-            return operator*().rawdata() == other.operator*().rawdata();
+            return _insn == other._insn && _count == other._count;
         }
 
         bool operator!=(const iterator& other) {
@@ -462,13 +478,22 @@ public:
         return iterator(BSONElement(objdata() + objsize() - 1), const_cast<DeltaStore*>(&_deltas));
     }
 
+    std::string toString() const {
+        std::string buf;
+        for (auto it = begin(); it != end(); ++it)
+            buf.append(fmt::format(", {} {}", it.index(), (*it).toString()));
+        buf[0] = '{';
+        buf.append(" }");
+        return buf;
+    }
+
     /**
      * Constructs a BSONColumn, applying delta compression as elements are appended.
      */
     class Builder {
     public:
         ~Builder() {
-            _doDeferrals();
+            _emitDeferrals();
             _b.appendNum((char)EOO);
             _updateBinDataSize();
         }
@@ -477,7 +502,6 @@ public:
             : _b(baseBuilder), _offset(baseBuilder.len()) {
             _b.appendNum((char)BinData);
             _b.appendStr(fieldName);
-            _sizeOffset = _b.len();
             _b.appendNum((int)0);
             _b.appendNum((char)BinDataType::Column);
         }
@@ -487,81 +511,106 @@ public:
          * The index must be greater than that of the last appended item. Ignores field name.
          */
         void append(int index, BSONElement elem) {
-            invariant(index >= _index);
-            if (index > _index) {
-                _doDeferrals();
-                Instruction(Instruction::Skip, index - _index).append(_b);
-                _index = index;
-            }
-            BSONElement last = _lastLiteral
-                ? BSONElement(_b.buf() + _lastLiteral, 1, -1, BSONElement::CachedSizeTag())
-                : BSONElement();
+            _emitSkips(index);
 
-            // Try Copy
-            if (elem.binaryEqualValues(last)) {
-                _doDeltas();
-                ++_deferrals;
-                ++_index;
-                return;
+            if (!_tryCopy(elem) && !_tryDelta(elem))
+                _emitLiteral(elem);
+
+            ++_index;
+        }
+
+    private:
+        void _emitDeferrals() {
+            _emitDeferredCopies();
+            _emitDeferredDeltas();
+        }
+        void _emitDeferredCopies() {
+            if (_deferrals > 0) {
+                Instruction(Instruction::Copy, _deferrals).append(_b);
+                _deferrals = 0;
             }
-            // Try Delta
-            if (auto delta = DeltaStore::calculateDelta(last, elem)) {
-                _doCopies();
-                // Still need to handle the case of consecutive deltas.
-                // logd("calculated a delta of {:x}", delta);
-                Instruction pos(Instruction::SetDelta, delta);
-                Instruction neg(Instruction::SetNegDelta, -delta);
-                Instruction min = neg.size() < pos.size() ? neg : pos;
-                // Only do the delta if it saves space.
-                if (min.size() < last.valuesize()) {
-                    min.append(_b);
-                    ++_index;
-                    _delta = delta;
-                    return;
-                }
+        }
+        void _emitDeferredDeltas() {
+            if (_deferrals < 0) {
+                Instruction(Instruction::Delta, -_deferrals).append(_b);
+                _deferrals = 0;
             }
-            // Store literal BSONElement, resets delta.
-            _doDeferrals();
-            _lastLiteral = _b.len();
+        }
+
+        /** Store a literal BSONElement, resets delta. */
+        void _emitLiteral(BSONElement elem) {
+            _emitDeferrals();
+            int offset = _b.len();
             _b.appendNum((char)elem.type());
             _b.appendNum((char)0);
             _b.appendBuf(elem.value(), elem.valuesize());
-
-            // logd("set _lastLiteral to {}", BSONElement(_b.buf() + _lastLiteral));
-            ++_index;
-            _delta = 1;
+            int size = _b.len() - offset;
+            _last = BSONElement(_b.buf() + offset, 1, size, BSONElement::CachedSizeTag{});
+            _delta = 0;
         }
 
-
-    private:
-        void _doDeferrals() {
-            _doCopies();
-            _doDeltas();
-        }
-        void _doCopies() {
-            if (_deferrals <= 0)
+        void _emitSkips(int index) {
+            if (index == _index)
                 return;
-            Instruction(Instruction::Copy, static_cast<uint64_t>(_deferrals)).append(_b);
-            _deferrals = 0;
+
+            invariant(index > _index);
+            _emitDeferrals();
+            Instruction(Instruction::Skip, index - _index).append(_b);
+            _index = index;
         }
-        void _doDeltas() {
-            if (_deferrals >= 0)
-                return;
-            Instruction(Instruction::Skip, static_cast<uint64_t>(-_deferrals)).append(_b);
-            _deferrals = 0;
+
+        /** Given the last value, tries to add elem using a copy. Returns true iff success. */
+        bool _tryCopy(BSONElement elem) {
+            if (!elem.binaryEqualValues(_last))
+                return false;
+
+            _emitDeferredDeltas();
+
+            ++_deferrals;
+            return true;
         }
+
+        /** Given the last value, tries to add elem using a delta. Returns true iff success. */
+        bool _tryDelta(BSONElement elem) {
+            auto delta = DeltaStore::calculateDelta(_last, elem);
+            if (!delta)
+                return false;
+
+            _emitDeferredCopies();
+            // logd("_tryDelta {:x}", delta);
+
+            if (delta == _delta) {
+                // Same delta, defer output.
+                --_deferrals;
+            } else {
+                auto instruction = Instruction::makeDelta(delta);
+                // Only do the delta if it saves space.
+                if (instruction.size() >= elem.size())
+                    return false;
+
+                instruction.append(_b);
+                _delta = delta;
+            }
+
+            _last = _deltaElem.store(elem);
+            // logd("delta: _last = {}", _last);
+            invariant(_last.rawdata());  // commenting out this useless variant causes a crash...
+            return true;
+        }
+
         void _updateBinDataSize() {
-            int32_t size = endian::nativeToLittle(_b.len());
-            memcpy(_b.buf() + _sizeOffset, &size, sizeof(size));
+            int sizeOffset = _offset + 1 + strlen(_b.buf() + _offset);
+            int size = endian::nativeToLittle(_b.len() - sizeOffset - sizeof(int) - 1);
+            memcpy(_b.buf() + sizeOffset, &size, sizeof(size));
         }
 
-        BufBuilder& _b;        // Buffer to build the column in
-        int _offset = 0;       // Start of column relative to start of buffer
-        int _index = 0;        // Index of next element to add to builder
-        int _deferrals = 0;    // Positive indicates number of copies, negative means deltas
-        int _sizeOffset = 0;   // Offset to location for storing final BinData size
-        int _lastLiteral = 0;  // Last literal element appended to this column
-        uint64_t _delta = 0;   // Current delta
+        BufBuilder& _b;               // Buffer to build the column in
+        BSONElement _last;            // Last element apended to this column
+        uint64_t _delta = 0;          // Current delta
+        DeltaStore::Elem _deltaElem;  // Storage for when _last refers to a computed delta element
+        int _offset = 0;              // Start of column relative to start of buffer
+        int _index = 0;               // Index of next element to add to builder
+        int _deferrals = 0;           // Positive indicates number of copies, negative means deltas
     };
 
 private:

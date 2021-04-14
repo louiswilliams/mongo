@@ -53,6 +53,13 @@ public:
     BSONObj exampleObj;
     BSONColumn exampleCol;
 
+    BSONObj expand(BSONColumn col) {
+        BSONObjBuilder bob;
+        for (auto it = col.begin(); it != col.end(); ++it)
+            bob.appendAs(*it, fmt::to_string(it.index()));
+        return bob.obj();
+    }
+
 protected:
     // This example encodes a typical column of metrics, which looks as follows:
     // { 0: 72.0, 1: 72.0, ..., 100: 72.0,  (Repeating values)
@@ -93,11 +100,8 @@ TEST_F(BSONColumnExample, Basic) {
     ASSERT_FALSE(exampleCol.begin() == exampleCol.end());
 }
 
-TEST_F(BSONColumnExample, SimpleIteration) {
-    BSONObjBuilder bob;
-    for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it)
-        bob.appendAs(*it, fmt::to_string(it.index()));
-    BSONObj obj = bob.done();
+TEST_F(BSONColumnExample, ExampleIteration) {
+    BSONObj obj = expand(exampleCol);
     logd("expanded: {}, BSONColumn size: {}, BSONObj size: {}",
          obj,
          exampleCol.objsize(),
@@ -105,7 +109,7 @@ TEST_F(BSONColumnExample, SimpleIteration) {
     ASSERT_EQ(exampleCol.nFields(), obj.nFields());
 }
 
-TEST_F(BSONColumnExample, SimpleLookup) {
+TEST_F(BSONColumnExample, ExampleLookup) {
     auto elem = exampleCol[1];
     ASSERT_EQ(elem.type(), BSONType::NumberDouble);
     ASSERT_EQ(elem.numberDouble(), 72.0);
@@ -122,7 +126,30 @@ TEST_F(BSONColumnExample, SimpleLookup) {
     ASSERT_EQ(elem.type(), BSONType::EOO);
 }
 
-TEST_F(BSONColumnExample, SimpleBuild) {
+TEST_F(BSONColumnExample, DeltaBuild) {
+    BufBuilder buf;
+    BSONObj obj = BSON("0" << 0 << "1" << 1 << "2" << 2 << "3" << 2 << "4" << 4);
+    {
+        BSONColumn::Builder builder(buf, "col");
+        int index = 0;
+        for (auto& elem : obj)
+            builder.append(index++, elem);
+    }
+    auto bufbuf = buf.buf();
+    BSONElement elem(bufbuf);
+    int len;
+    const char* data;
+    data = elem.binDataClean(len);
+    logd("Got a bindata of length {}", len);
+    logd("disassemble: {}", BSONColumn::Instruction::disassemble(data, len));
+    logd("hex: {}", hexdump(data, len));
+
+    BSONColumn col(elem);
+    BSONObj expanded = expand(col);
+    ASSERT_BSONOBJ_EQ(obj, expanded);
+}
+
+TEST_F(BSONColumnExample, ExampleBuild) {
     BSONObjBuilder bob;
     BufBuilder buf;
     {
@@ -132,6 +159,7 @@ TEST_F(BSONColumnExample, SimpleBuild) {
             col.append(it.index(), *it);
         }
     }
+
     BSONObj example = bob.obj();
     logd("example = {}", example);
 
@@ -147,6 +175,11 @@ TEST_F(BSONColumnExample, SimpleBuild) {
          BSONColumn::Instruction::disassemble(reinterpret_cast<char*>(exampleData),
                                               sizeof(exampleData)));
     logd("hex: {}", hexdump(reinterpret_cast<char*>(exampleData), sizeof(exampleData)));
+
+    BSONColumn col(elem);
+    BSONObj expanded = expand(col);
+    logd("expanded: {}", expanded);
+    ASSERT_BSONOBJ_EQ(example, expanded);
 }
 
 }  // namespace

@@ -31,6 +31,7 @@
 
 #include <set>
 
+#include "mongo/bson/bson_column.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/exec/document_value/document.h"
 
@@ -53,6 +54,74 @@ struct BucketSpec {
     // Vector of computed meta field projection names. Added at the end of materialized
     // measurements.
     std::vector<std::string> computedMetaProjFields;
+};
+
+class DataIterator {
+public:
+    virtual ~DataIterator(){};
+
+    virtual bool more() = 0;
+    virtual void advance() = 0;
+    virtual BSONElement get() = 0;
+    virtual int index() = 0;
+
+    BSONElement operator*() {
+        return get();
+    }
+    void operator++() {
+        advance();
+    }
+};
+
+class BSONObjDataIterator : public DataIterator {
+public:
+    BSONObjDataIterator(const BSONObj& obj) : _iter(obj) {}
+    ~BSONObjDataIterator(){};
+
+    bool more() final {
+        return _iter.more();
+    }
+
+    void advance() final {
+        _iter.next();
+    }
+
+    BSONElement get() final {
+        return *_iter;
+    }
+
+    int index() final {
+        return std::atoi((*_iter).fieldName());
+    }
+
+private:
+    BSONObjIterator _iter;
+};
+
+class BSONColumnDataIterator : public DataIterator {
+public:
+    BSONColumnDataIterator(BSONElement binData) : _column(binData), _iter(_column.begin()) {}
+    ~BSONColumnDataIterator(){};
+
+    bool more() final {
+        return _iter != _column.end();
+    }
+
+    void advance() final {
+        _iter++;
+    }
+
+    BSONElement get() final {
+        return *_iter;
+    }
+
+    int index() final {
+        return _iter.index();
+    }
+
+private:
+    BSONColumn _column;
+    BSONColumn::iterator _iter;
 };
 
 /**
@@ -92,6 +161,10 @@ public:
     enum class Behavior { kInclude, kExclude };
 
     BucketUnpacker(BucketSpec spec, Behavior unpackerBehavior);
+
+    BucketUnpacker copy() const {
+        return BucketUnpacker(_spec, _unpackerBehavior);
+    }
 
     /**
      * This method will continue to materialize Documents until the bucket is exhausted. A
@@ -148,7 +221,7 @@ private:
     Behavior _unpackerBehavior;
 
     // Iterates the timestamp section of the bucket to drive the unpacking iteration.
-    boost::optional<BSONObjIterator> _timeFieldIter;
+    std::unique_ptr<DataIterator> _timeFieldIter;
 
     // A flag used to mark that the timestamp value should be materialized in measurements.
     bool _includeTimeField;
@@ -166,7 +239,7 @@ private:
 
     // Iterators used to unpack the columns of the above bucket that are populated during the reset
     // phase according to the provided 'Behavior' and 'BucketSpec'.
-    std::vector<std::pair<std::string, BSONObjIterator>> _fieldIters;
+    std::vector<std::pair<std::string, std::unique_ptr<DataIterator>>> _fieldIters;
 
     // Map <name, BSONElement> for the computed meta field projections. Updated for
     // every bucket upon reset().

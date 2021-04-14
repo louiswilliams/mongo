@@ -227,6 +227,7 @@ void rewriteBucketAsColumn(OperationContext* opCtx,
                 continue;
             }
 
+            BSONObjBuilder dataBuilder = builder.subobjStart("data");
             for (auto& column : elem.Obj()) {
                 buf.reset();
                 BSONColumn::Builder columnBuilder(buf, column.fieldNameStringData());
@@ -237,7 +238,7 @@ void rewriteBucketAsColumn(OperationContext* opCtx,
                 }
 
                 BSONBinData bin(buf.buf(), buf.len(), BinDataType::Column);
-                builder.append(column.fieldName(), bin);
+                dataBuilder.append(column.fieldName(), bin);
 
                 LOGV2_DEBUG(0,
                             1,
@@ -246,6 +247,7 @@ void rewriteBucketAsColumn(OperationContext* opCtx,
                             "originalSize"_attr = column.size(),
                             "newSize"_attr = buf.len());
             }
+            dataBuilder.done();
         }
 
         // Technically we shouldn't need to get the owned object, however, updateDocument invariants

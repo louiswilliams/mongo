@@ -87,7 +87,7 @@ int BucketUnpacker::computeMeasurementCount(int targetTimestampObjSize) {
 
 void BucketUnpacker::reset(BSONObj&& bucket) {
     _fieldIters.clear();
-    _timeFieldIter = boost::none;
+    _timeFieldIter.reset();
 
     _bucket = std::move(bucket);
     uassert(5346510, "An empty bucket cannot be unpacked", !_bucket.isEmpty());
@@ -104,7 +104,11 @@ void BucketUnpacker::reset(BSONObj&& bucket) {
             "The $_internalUnpackBucket stage requires the data region to have a timeField object",
             timeFieldElem);
 
-    _timeFieldIter = BSONObjIterator{timeFieldElem.Obj()};
+    if (timeFieldElem.isBinData(BinDataType::Column)) {
+        _timeFieldIter = std::make_unique<BSONColumnDataIterator>(timeFieldElem);
+    } else {
+        _timeFieldIter = std::make_unique<BSONObjDataIterator>(timeFieldElem.Obj());
+    }
 
     _metaValue = _bucket[timeseries::kBucketMetaFieldName];
     if (_spec.metaField) {
@@ -137,7 +141,13 @@ void BucketUnpacker::reset(BSONObj&& bucket) {
         // Includes a field when '_unpackerBehavior' is 'kInclude' and it's found in 'fieldSet' or
         // _unpackerBehavior is 'kExclude' and it's not found in 'fieldSet'.
         if (determineIncludeField(colName, _unpackerBehavior, _spec)) {
-            _fieldIters.emplace_back(colName.toString(), BSONObjIterator{elem.Obj()});
+            if (elem.isBinData(BinDataType::Column)) {
+                _fieldIters.emplace_back(colName.toString(),
+                                         std::make_unique<BSONColumnDataIterator>(elem));
+            } else {
+                _fieldIters.emplace_back(colName.toString(),
+                                         std::make_unique<BSONObjDataIterator>(elem.Obj()));
+            }
         }
     }
 
@@ -177,21 +187,26 @@ Document BucketUnpacker::getNext() {
     tassert(5422100, "'getNext()' was called after the bucket has been exhausted", hasNext());
 
     auto measurement = MutableDocument{};
-    auto&& timeElem = _timeFieldIter->next();
+    auto&& timeElem = _timeFieldIter->get();
     if (_includeTimeField) {
         measurement.addField(_spec.timeField, Value{timeElem});
     }
+
+    auto currentIdx = _timeFieldIter->index();
+
+    // It is safe to advance the iterator after constructing a value and getting the current index.
+    _timeFieldIter->advance();
 
     // Includes metaField when we're instructed to do so and metaField value exists.
     if (_includeMetaField && _metaValue) {
         measurement.addField(*_spec.metaField, Value{_metaValue});
     }
 
-    auto& currentIdx = timeElem.fieldNameStringData();
     for (auto&& [colName, colIter] : _fieldIters) {
-        if (auto&& elem = *colIter; colIter.more() && elem.fieldNameStringData() == currentIdx) {
+        if (BSONElement&& elem = colIter->get();
+            colIter->more() && colIter->index() == currentIdx) {
             measurement.addField(colName, Value{elem});
-            colIter.advance(elem);
+            colIter->advance();
         }
     }
 

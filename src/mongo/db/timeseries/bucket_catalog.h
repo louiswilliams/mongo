@@ -204,8 +204,10 @@ public:
     /**
      * Records the result of a batch commit. Caller must already have commit rights on batch, and
      * batch must have been previously prepared.
+     *
+     * Returns true if this was the last insert into a bucket and it has been closed.
      */
-    void finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& info);
+    bool finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& info);
 
     /**
      * Aborts the given write batch and any other outstanding batches on the same bucket. Caller

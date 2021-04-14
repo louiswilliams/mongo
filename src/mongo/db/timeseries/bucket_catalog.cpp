@@ -266,11 +266,13 @@ bool BucketCatalog::prepareCommit(std::shared_ptr<WriteBatch> batch) {
     return true;
 }
 
-void BucketCatalog::finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& info) {
+bool BucketCatalog::finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& info) {
     invariant(!batch->finished());
     invariant(!batch->active());
 
     BucketAccess bucket(this, batch->bucket());
+
+    bool closedBucket = false;
 
     batch->_finish(info);
     if (bucket) {
@@ -312,10 +314,12 @@ void BucketCatalog::finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& 
                 _bucketStates.erase(ptr->_id);
             }
             _allBuckets.erase(ptr);
+            closedBucket = true;
         } else {
             _markBucketIdle(bucket);
         }
     }
+    return closedBucket;
 }
 
 void BucketCatalog::abort(std::shared_ptr<WriteBatch> batch) {

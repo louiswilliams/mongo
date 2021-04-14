@@ -60,6 +60,12 @@ server_parameters:
         cpp_vartype: bool
         cpp_varname: gTimeseriesBucketsCollectionClusterById
         default: true
+    "timeseriesRewriteColumns":
+        description: "When new buckets are closed, rewrite in a space-efficient column format"
+        set_at: [ startup ]
+        cpp_vartype: bool
+        cpp_varname: gTimeseriesRewriteColumns
+        default: false 
 
 enums:
     BucketGranularity:

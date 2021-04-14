@@ -27,9 +27,12 @@
  *    it in the license file.
  */
 
+#define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kDefault
+
 #include "mongo/platform/basic.h"
 
 #include "mongo/base/checked_cast.h"
+#include "mongo/bson/bson_column.h"
 #include "mongo/bson/bsonobjbuilder.h"
 #include "mongo/bson/mutable/document.h"
 #include "mongo/bson/mutable/element.h"
@@ -39,6 +42,7 @@
 #include "mongo/db/commands.h"
 #include "mongo/db/commands/update_metrics.h"
 #include "mongo/db/commands/write_commands_common.h"
+#include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/curop.h"
 #include "mongo/db/db_raii.h"
 #include "mongo/db/json.h"
@@ -55,6 +59,7 @@
 #include "mongo/db/pipeline/lite_parsed_pipeline.h"
 #include "mongo/db/query/explain.h"
 #include "mongo/db/query/get_executor.h"
+#include "mongo/db/record_id_helpers.h"
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/replication_coordinator.h"
 #include "mongo/db/repl/tenant_migration_access_blocker_registry.h"
@@ -67,6 +72,7 @@
 #include "mongo/db/transaction_participant.h"
 #include "mongo/db/views/view_catalog.h"
 #include "mongo/db/write_concern.h"
+#include "mongo/logv2/log.h"
 #include "mongo/logv2/redaction.h"
 #include "mongo/s/stale_exception.h"
 #include "mongo/util/fail_point.h"
@@ -188,6 +194,78 @@ write_ops::UpdateOpEntry makeTimeseriesUpdateOpEntry(
     invariant(!update.getMulti(), batch->bucket()->id().toString());
     invariant(!update.getUpsert(), batch->bucket()->id().toString());
     return update;
+}
+
+void rewriteBucketAsColumn(OperationContext* opCtx,
+                           const NamespaceString& nss,
+                           const OID& bucketId) {
+
+    writeConflictRetry(opCtx, "columnRewrite", nss.ns(), [&]() {
+        AutoGetCollection coll(opCtx, nss, MODE_IX);
+        // Assume collections don't get dropped for now.
+        invariant(coll);
+
+        WriteUnitOfWork wuow(opCtx);
+
+        // Assume buckets don't get deleted for now.
+        Snapshotted<BSONObj> snapshotted;
+
+        // Use clustered _id index for faster lookup.
+        auto rid = record_id_helpers::keyForOID(bucketId);
+        invariant(coll->findDoc(opCtx, rid, &snapshotted));
+        auto& bucketDoc = snapshotted.value();
+
+        // Reusable buffer to avoid extra allocs per column.
+        BufBuilder buf;
+
+        // Rewrite data fields as columns.
+        BSONObjBuilder builder;
+        for (auto& elem : bucketDoc) {
+            if (elem.fieldNameStringData() != "data") {
+                // Skip any updates to non-data fields.
+                builder.append(elem);
+                continue;
+            }
+
+            BSONObjBuilder dataBuilder = builder.subobjStart("data");
+            for (auto& column : elem.Obj()) {
+                buf.reset();
+                BSONColumn::Builder columnBuilder(buf, column.fieldNameStringData());
+                int index = 0;
+                for (auto& measurement : column.Obj()) {
+                    columnBuilder.append(index, measurement);
+                    index++;
+                }
+
+                BSONBinData bin(buf.buf(), buf.len(), BinDataType::Column);
+                dataBuilder.append(column.fieldName(), bin);
+
+                LOGV2_DEBUG(0,
+                            1,
+                            "rewriting column",
+                            "fieldName"_attr = column.fieldName(),
+                            "originalSize"_attr = column.size(),
+                            "newSize"_attr = buf.len());
+            }
+            dataBuilder.done();
+        }
+
+        // Technically we shouldn't need to get the owned object, however, updateDocument invariants
+        // that it is.
+        auto rewritten = builder.obj();
+        LOGV2(0,
+              "rewrote bucket",
+              "id"_attr = bucketId,
+              "originalSize"_attr = bucketDoc.objsize(),
+              "newSize"_attr = rewritten.objsize());
+
+        DisableDocumentValidation disableValidation(opCtx);
+        CollectionUpdateArgs args;
+        args.source = OperationSource::kTimeseries;
+        invariant(rid ==
+                  coll->updateDocument(opCtx, rid, snapshotted, rewritten, false, nullptr, &args));
+        wuow.commit();
+    });
 }
 
 /**
@@ -597,6 +675,11 @@ public:
                 opCtx, timeseriesUpdateBatch, OperationSource::kTimeseries));
         }
 
+        void _performTimeseriesColumnRewrite(OperationContext* opCtx, const OID& bucketId) const {
+            auto bucketNs = ns().makeTimeseriesBucketsNamespace();
+            rewriteBucketAsColumn(opCtx, bucketNs, bucketId);
+        }
+
         void _commitTimeseriesBucket(OperationContext* opCtx,
                                      std::shared_ptr<BucketCatalog::WriteBatch> batch,
                                      size_t start,
@@ -653,8 +736,14 @@ public:
                 ? boost::make_optional(replCoord->getElectionId())
                 : boost::none;
 
-            bucketCatalog.finish(
+            auto bucketId = bucketCatalog.finish(
                 batch, BucketCatalog::CommitInfo{std::move(result), *opTime, *electionId});
+            if (!bucketId || !gTimeseriesRewriteColumns) {
+                return;
+            }
+
+            // If this write closed a bucket, rewrite the data section using a column format.
+            _performTimeseriesColumnRewrite(opCtx, *bucketId);
         }
 
         /**

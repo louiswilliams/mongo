@@ -266,11 +266,14 @@ bool BucketCatalog::prepareCommit(std::shared_ptr<WriteBatch> batch) {
     return true;
 }
 
-void BucketCatalog::finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& info) {
+boost::optional<OID> BucketCatalog::finish(std::shared_ptr<WriteBatch> batch,
+                                           const CommitInfo& info) {
     invariant(!batch->finished());
     invariant(!batch->active());
 
     BucketAccess bucket(this, batch->bucket());
+
+    boost::optional<OID> closedBucket;
 
     batch->_finish(info);
     if (bucket) {
@@ -303,6 +306,8 @@ void BucketCatalog::finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& 
             bucket.release();
             auto lk = _lockExclusive();
 
+            closedBucket = ptr->_id;
+
             // Only remove from _allBuckets and _idleBuckets. If it was marked full, we know that
             // happened in BucketAccess::rollover, and that there is already a new open bucket for
             // this metadata.
@@ -316,6 +321,7 @@ void BucketCatalog::finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& 
             _markBucketIdle(bucket);
         }
     }
+    return closedBucket;
 }
 
 void BucketCatalog::abort(std::shared_ptr<WriteBatch> batch) {

@@ -1056,7 +1056,10 @@ RecordId CollectionImpl::updateDocument(OperationContext* opCtx,
 
     BSONElement oldId = oldDoc.value()["_id"];
     if (!oldId.eoo() && SimpleBSONElementComparator::kInstance.evaluate(oldId != newDoc["_id"]))
-        uasserted(13596, "in Collection::updateDocument _id mismatch");
+        uasserted(13596,
+                  fmt::format("in Collection::updateDocument _id mismatch {} != {}",
+                              oldId.toString(),
+                              newDoc["_id"].toString()));
 
     // The MMAPv1 storage engine implements capped collections in a way that does not allow records
     // to grow beyond their original size. If MMAPv1 part of a replicaset with storage engines that

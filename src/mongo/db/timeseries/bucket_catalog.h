@@ -204,8 +204,10 @@ public:
     /**
      * Records the result of a batch commit. Caller must already have commit rights on batch, and
      * batch must have been previously prepared.
+     *
+     * Returns the id of a bucket if one was closed.
      */
-    void finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& info);
+    boost::optional<OID> finish(std::shared_ptr<WriteBatch> batch, const CommitInfo& info);
 
     /**
      * Aborts the given write batch and any other outstanding batches on the same bucket. Caller

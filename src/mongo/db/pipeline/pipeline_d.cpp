@@ -220,7 +220,7 @@ createRandomCursorExecutor(const CollectionPtr& coll,
             expCtx.get(),
             ws.get(),
             std::move(root),
-            *bucketUnpacker,
+            std::move(*bucketUnpacker),
             // By using a quantity slightly higher than 'kMaxPresampleSize', we ensure that the
             // 'SampleFromTimeseriesBucket' stage won't fail due to too many consecutive sampling
             // attempts during the 'TrialStage's trial period.
@@ -232,7 +232,7 @@ createRandomCursorExecutor(const CollectionPtr& coll,
             expCtx.get(), coll, CollectionScanParams{}, ws.get(), nullptr);
 
         auto topkSortPlan = std::make_unique<UnpackTimeseriesBucket>(
-            expCtx.get(), ws.get(), std::move(collScanPlan), *bucketUnpacker);
+            expCtx.get(), ws.get(), std::move(collScanPlan), std::move(*bucketUnpacker));
 
         root = std::make_unique<TrialStage>(expCtx.get(),
                                             ws.get(),

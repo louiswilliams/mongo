@@ -97,7 +97,7 @@ public:
     };
 
     BucketUnpacker bucketUnpacker() const {
-        return _bucketUnpacker;
+        return _bucketUnpacker.copy();
     }
 
     Pipeline::SourceContainer::iterator doOptimizeAt(Pipeline::SourceContainer::iterator itr,

@@ -734,15 +734,14 @@ public:
                 ? boost::make_optional(replCoord->getElectionId())
                 : boost::none;
 
-            auto bucketId = batch->bucket()->id();
-            bool closed = bucketCatalog.finish(
+            auto bucketId = bucketCatalog.finish(
                 batch, BucketCatalog::CommitInfo{std::move(result), *opTime, *electionId});
-            if (!closed || !gTimeseriesRewriteColumns) {
+            if (!bucketId || !gTimeseriesRewriteColumns) {
                 return;
             }
 
             // If this write closed a bucket, rewrite the data section using a column format.
-            _performTimeseriesColumnRewrite(opCtx, bucketId);
+            _performTimeseriesColumnRewrite(opCtx, *bucketId);
         }
 
         /**

@@ -212,7 +212,10 @@ void rewriteBucketAsColumn(OperationContext* opCtx,
 
         // Use clustered _id index for faster lookup.
         auto rid = record_id_helpers::keyForOID(bucketId);
-        invariant(coll->findDoc(opCtx, rid, &snapshotted));
+        if (!coll->findDoc(opCtx, rid, &snapshotted)) {
+            LOGV2(0, "COULD NOT FIND BUCKET", "id"_attr = bucketId);
+            return;
+        }
         auto& bucketDoc = snapshotted.value();
 
         // Reusable buffer to avoid extra allocs per column.

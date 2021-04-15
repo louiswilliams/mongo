@@ -134,11 +134,14 @@ Status _createTimeseries(OperationContext* opCtx,
     CollectionOptions options = optionsArg;
     auto granularity = options.timeseries->getGranularity();
     if (granularity == BucketGranularityEnum::Seconds) {
+        // 3600 seconds in an hour
         options.timeseries->setBucketMaxSpanSeconds(60 * 60);
     } else if (granularity == BucketGranularityEnum::Minutes) {
+        // 1440 minutes in a day
         options.timeseries->setBucketMaxSpanSeconds(60 * 60 * 24);
     } else if (granularity == BucketGranularityEnum::Hours) {
-        options.timeseries->setBucketMaxSpanSeconds(60 * 60 * 24 * 7);
+        // 730 hours in 1 month
+        options.timeseries->setBucketMaxSpanSeconds(60 * 60 * 24 * 7 * 30);
     }
 
     // Set the validator option to a JSON schema enforcing constraints on bucket documents.

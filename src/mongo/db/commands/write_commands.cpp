@@ -230,15 +230,17 @@ void rewriteBucketAsColumn(OperationContext* opCtx,
             BSONObjBuilder dataBuilder = builder.subobjStart("data");
             for (auto& column : elem.Obj()) {
                 buf.reset();
-                BSONColumn::Builder columnBuilder(buf, column.fieldNameStringData());
-                int index = 0;
-                for (auto& measurement : column.Obj()) {
-                    columnBuilder.append(index, measurement);
-                    index++;
+                {
+                    BSONColumn::Builder columnBuilder(buf, column.fieldNameStringData());
+                    int index = 0;
+                    for (auto& measurement : column.Obj()) {
+                        columnBuilder.append(index, measurement);
+                        index++;
+                    }
+                    // Need to scope the columnBuilder so that its destructor appends EOO
+                    // terminator.
                 }
-
-                BSONBinData bin(buf.buf(), buf.len(), BinDataType::Column);
-                dataBuilder.append(column.fieldName(), bin);
+                dataBuilder.append(BSONElement(buf.buf()));
 
                 LOGV2_DEBUG(0,
                             1,

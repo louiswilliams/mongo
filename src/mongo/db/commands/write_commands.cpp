@@ -232,10 +232,8 @@ void rewriteBucketAsColumn(OperationContext* opCtx,
                 buf.reset();
                 {
                     BSONColumn::Builder columnBuilder(buf, column.fieldNameStringData());
-                    int index = 0;
                     for (auto& measurement : column.Obj()) {
-                        columnBuilder.append(index, measurement);
-                        index++;
+                        columnBuilder.append(std::atoi(measurement.fieldName()), measurement);
                     }
                     // Need to scope the columnBuilder so that its destructor appends EOO
                     // terminator.

@@ -74,6 +74,16 @@ public:
     }
 };
 
+class BSONColumnBuilder : public BSONColumnBasic {
+public:
+    BufBuilder buf;
+    BSONColumn::Builder builder;
+    BSONColumnBuilder() : builder(buf, "col") {}
+    BSONColumn col() {
+        return builder.done();
+    }
+};
+
 class BSONColumnExample : public BSONColumnBasic {
 public:
     void setUp() override {
@@ -120,33 +130,23 @@ TEST_F(BSONColumnBasic, Empty) {
     ASSERT(col.begin() == col.end());
 }
 
-TEST_F(BSONColumnBasic, DeltaBuild) {
-    BufBuilder buf;
+TEST_F(BSONColumnBuilder, DeltaBuild) {
     BSONObj obj = BSON("0" << 0 << "1" << 1 << "2" << 2 << "3" << 2 << "4" << 4);
-    {
-        BSONColumn::Builder builder(buf, "col");
-        int index = 0;
-        for (auto& elem : obj)
-            builder.append(index++, elem);
-    }
-    BSONColumn col(BSONElement(buf.buf()));
-    inspect(col);
-    ASSERT_BSONOBJ_EQ(obj, expand(col));
+    for (auto& elem : obj)
+        builder.append(elem);
+    inspect(col());
+    ASSERT_BSONOBJ_EQ(obj, expand(col()));
 }
 
-TEST_F(BSONColumnBasic, WindSpeed) {
+TEST_F(BSONColumnBuilder, WindSpeed) {
     BSONArray windspeed =
         BSON_ARRAY(6.0 << 6.5 << 4.3 << 9.2 << 11.4 << 7.8 << 12.1 << 11.4 << 5.8 << 5.1 << 3.4
                        << 7.6 << 7.4 << 7.6 << 7.4 << 6 << 5.6 << 5.4 << 6.7 << 2.5 << 5.4 << 6.3
                        << 10.5 << 5.4 << 6.5 << 4.0 << 2.7 << 3.4 << 7.6 << 8.9);
-    BufBuilder buf;
-    BSONColumn::Builder builder(buf, "windspeed");
-    int index = 0;
     for (auto speed : windspeed)
-        builder.append(index++, speed);
-    BSONColumn col = builder.done();
+        builder.append(speed);
 
-    inspect(col);
+    inspect(col());
 }
 
 TEST_F(BSONColumnExample, ExampleBasic) {

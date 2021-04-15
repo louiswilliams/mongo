@@ -135,7 +135,7 @@ BSONObj BucketCatalog::getMetadata(Bucket* ptr) const {
     return bucket->_metadata.toBSON();
 }
 
-StatusWith<std::shared_ptr<BucketCatalog::WriteBatch>> BucketCatalog::insert(
+StatusWith<BucketCatalog::InsertResult> BucketCatalog::insert(
     OperationContext* opCtx,
     const NamespaceString& ns,
     const StringData::ComparatorInterface* comparator,
@@ -204,8 +204,9 @@ StatusWith<std::shared_ptr<BucketCatalog::WriteBatch>> BucketCatalog::insert(
         return false;
     };
 
+    boost::optional<OID> closedBucket;
     if (!bucket->_ns.isEmpty() && isBucketFull(&bucket)) {
-        bucket.rollover(isBucketFull);
+        closedBucket = bucket.rollover(isBucketFull);
         bucket->_calculateBucketFieldsAndSizeChange(doc,
                                                     options.getMetaField(),
                                                     &newFieldNamesToBeInserted,
@@ -238,7 +239,7 @@ StatusWith<std::shared_ptr<BucketCatalog::WriteBatch>> BucketCatalog::insert(
     }
     _memoryUsage.fetchAndAdd(bucket->_memoryUsage);
 
-    return batch;
+    return InsertResult{batch, closedBucket};
 }
 
 bool BucketCatalog::prepareCommit(std::shared_ptr<WriteBatch> batch) {
@@ -849,7 +850,8 @@ BucketCatalog::BucketAccess::operator BucketCatalog::Bucket*() const {
     return _bucket;
 }
 
-void BucketCatalog::BucketAccess::rollover(const std::function<bool(BucketAccess*)>& isBucketFull) {
+boost::optional<OID> BucketCatalog::BucketAccess::rollover(
+    const std::function<bool(BucketAccess*)>& isBucketFull) {
     invariant(isLocked());
     invariant(_key);
     invariant(_time);
@@ -864,6 +866,8 @@ void BucketCatalog::BucketAccess::rollover(const std::function<bool(BucketAccess
     auto lk = _catalog->_lockExclusive();
     _findOrCreateOpenBucketAndLock(hash);
 
+    boost::optional<OID> closedBucket;
+
     // Recheck if still full now that we've reacquired the bucket.
     bool sameBucket =
         oldBucket == _bucket;  // Only record stats if bucket has changed, don't double-count.
@@ -872,6 +876,8 @@ void BucketCatalog::BucketAccess::rollover(const std::function<bool(BucketAccess
         if (_bucket->allCommitted()) {
             // The bucket does not contain any measurements that are yet to be committed, so we can
             // remove it now. Otherwise, we must keep the bucket around until it is committed.
+            closedBucket = _bucket->id();
+
             oldBucket = _bucket;
             release();
             bool removed = _catalog->_removeBucket(oldBucket, false /* expiringBuckets */);
@@ -883,6 +889,7 @@ void BucketCatalog::BucketAccess::rollover(const std::function<bool(BucketAccess
 
         _create(false /* openedDueToMetadata */);
     }
+    return closedBucket;
 }
 
 void BucketCatalog::BucketAccess::setTime() {

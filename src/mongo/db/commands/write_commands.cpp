@@ -678,6 +678,9 @@ public:
         }
 
         void _performTimeseriesColumnRewrite(OperationContext* opCtx, const OID& bucketId) const {
+            if (!gTimeseriesRewriteColumns) {
+                return;
+            }
             auto bucketNs = ns().makeTimeseriesBucketsNamespace();
             rewriteBucketAsColumn(opCtx, bucketNs, bucketId);
         }
@@ -740,7 +743,7 @@ public:
 
             auto bucketId = bucketCatalog.finish(
                 batch, BucketCatalog::CommitInfo{std::move(result), *opTime, *electionId});
-            if (!bucketId || !gTimeseriesRewriteColumns) {
+            if (!bucketId) {
                 return;
             }
 
@@ -802,11 +805,16 @@ public:
                 if (auto error = generateError(opCtx, result, index, errors->size())) {
                     errors->push_back(*error);
                 } else {
-                    const auto& batch = result.getValue();
+                    const auto& batch = result.getValue().batch;
                     batches.emplace_back(batch, index);
                     if (isTimeseriesWriteRetryable(opCtx) && !request().getStmtIds()) {
                         bucketStmtIds[batch->bucket()].push_back(stmtId);
                     }
+                }
+
+                // If this insert closed a bucket, rewrite it to be a column.
+                if (auto bucketId = result.getValue().closedBucket) {
+                    _performTimeseriesColumnRewrite(opCtx, *bucketId);
                 }
             };
 

@@ -186,13 +186,16 @@ public:
      * batch may commit or abort the batch after claiming commit rights. See WriteBatch for more
      * details.
      */
-    StatusWith<std::shared_ptr<WriteBatch>> insert(
-        OperationContext* opCtx,
-        const NamespaceString& ns,
-        const StringData::ComparatorInterface* comparator,
-        const TimeseriesOptions& options,
-        const BSONObj& doc,
-        CombineWithInsertsFromOtherClients combine);
+    struct InsertResult {
+        std::shared_ptr<WriteBatch> batch;
+        boost::optional<OID> closedBucket;
+    };
+    StatusWith<InsertResult> insert(OperationContext* opCtx,
+                                    const NamespaceString& ns,
+                                    const StringData::ComparatorInterface* comparator,
+                                    const TimeseriesOptions& options,
+                                    const BSONObj& doc,
+                                    CombineWithInsertsFromOtherClients combine);
 
     /**
      * Prepares a batch for commit, transitioning it to an inactive state. Caller must already have
@@ -611,8 +614,10 @@ private:
          * Parameter is a function which should check that the bucket is indeed still full after
          * reacquiring the necessary locks. The first parameter will give the function access to
          * this BucketAccess instance, with the bucket locked.
+         *
+         * Returns the id of a bucket if one was closed.
          */
-        void rollover(const std::function<bool(BucketAccess*)>& isBucketFull);
+        boost::optional<OID> rollover(const std::function<bool(BucketAccess*)>& isBucketFull);
 
         // Adjust the time associated with the bucket (id) if it hasn't been committed yet.
         void setTime();

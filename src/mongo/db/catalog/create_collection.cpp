@@ -123,7 +123,7 @@ Status _createView(OperationContext* opCtx,
 
 Status _createTimeseries(OperationContext* opCtx,
                          const NamespaceString& ns,
-                         const CollectionOptions& options) {
+                         const CollectionOptions& optionsArg) {
     // This path should only be taken when a user creates a new time-series collection on the
     // primary. Secondaries replicate individual oplog entries.
     invariant(!ns.isTimeseriesBucketsCollection());
@@ -131,16 +131,15 @@ Status _createTimeseries(OperationContext* opCtx,
 
     auto bucketsNs = ns.makeTimeseriesBucketsNamespace();
 
+    CollectionOptions options = optionsArg;
     auto granularity = options.timeseries->getGranularity();
-    uassert(ErrorCodes::InvalidOptions,
-            "Time-series 'granularity' is required to be 'seconds'",
-            granularity == BucketGranularityEnum::Seconds);
-
-    auto bucketMaxSpan = options.timeseries->getBucketMaxSpanSeconds();
-    uassert(ErrorCodes::InvalidOptions,
-            "Time-series 'bucketMaxSpanSeconds' is required to be 3600",
-            bucketMaxSpan == 3600);
-
+    if (granularity == BucketGranularityEnum::Seconds) {
+        options.timeseries->setBucketMaxSpanSeconds(60 * 60);
+    } else if (granularity == BucketGranularityEnum::Minutes) {
+        options.timeseries->setBucketMaxSpanSeconds(60 * 60 * 24);
+    } else if (granularity == BucketGranularityEnum::Hours) {
+        options.timeseries->setBucketMaxSpanSeconds(60 * 60 * 24 * 7);
+    }
 
     // Set the validator option to a JSON schema enforcing constraints on bucket documents.
     // This validation is only structural to prevent accidental corruption by users and

@@ -140,13 +140,11 @@ TEST_F(BSONColumnBasic, WindSpeed) {
                        << 7.6 << 7.4 << 7.6 << 7.4 << 6 << 5.6 << 5.4 << 6.7 << 2.5 << 5.4 << 6.3
                        << 10.5 << 5.4 << 6.5 << 4.0 << 2.7 << 3.4 << 7.6 << 8.9);
     BufBuilder buf;
-    {
-        BSONColumn::Builder builder(buf, "windspeed");
-        int index = 0;
-        for (auto speed : windspeed)
-            builder.append(index++, speed);
-    }
-    BSONColumn col(BSONElement(buf.buf()));
+    BSONColumn::Builder builder(buf, "windspeed");
+    int index = 0;
+    for (auto speed : windspeed)
+        builder.append(index++, speed);
+    BSONColumn col = builder.done();
 
     inspect(col);
 }
@@ -189,18 +187,16 @@ TEST_F(BSONColumnExample, ExampleLookup) {
 TEST_F(BSONColumnExample, ExampleBuild) {
     BSONObjBuilder bob;
     BufBuilder buf;
-    {
-        BSONColumn::Builder col(buf, "col");
-        for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it) {
-            bob.appendAs(*it, fmt::to_string(it.index()));
-            col.append(it.index(), *it);
-        }
+    BSONColumn::Builder builder(buf, "col");
+    for (auto it = exampleCol.begin(); it != exampleCol.end(); ++it) {
+        bob.appendAs(*it, fmt::to_string(it.index()));
+        builder.append(it.index(), *it);
     }
 
     BSONObj example = bob.obj();
-    BSONElement elem(buf.buf());
+    BSONColumn col = builder.done();
+    BSONElement elem(col.objdata());
     ASSERT_BSONELT_EQ(exampleObj[exampleFieldName], elem);
-    BSONColumn col(elem);
     BSONObj expanded = inspect(col);
     ASSERT_BSONOBJ_EQ(example, expanded);
 }

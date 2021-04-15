@@ -83,7 +83,7 @@ public:
      */
     class DeltaStore {
     public:
-        static constexpr int valueOffset = 2;   // Type byte and field name
+        static constexpr int valueOffset = 2;   // Type byte and empty field name
         static constexpr int maxValueSize = 8;  // Should be 16 ideally (for Decimal).
         static constexpr int maxElemSize = valueOffset + maxValueSize;
         struct Elem {
@@ -134,7 +134,7 @@ public:
         static uint64_t calculateDelta(BSONElement base, BSONElement modified) {
             int size = base.valuesize();  // TODO: Fix size > 8 handling
             if (base.type() != modified.type() || size != modified.valuesize() ||
-                size > maxValueSize)
+                size > maxValueSize || size == 0)
                 return 0;
 
             // For simplicity, we always use a 64-bit delta.
@@ -223,10 +223,10 @@ public:
                 case Skip:
                 case Delta:
                 case Copy:
-                    return "{} {}"_format(kind(), countArg());
+                    return "{} {}"_format(toString(kind()), countArg());
                 case SetNegDelta:
                 case SetDelta:
-                    return "{} {:#x} << {}"_format(kind(), _prefix + 1, _op % 16);
+                    return "{} {:#x} << {}"_format(toString(kind()), _prefix + 1, _op % 16);
             }
         }
 
@@ -493,9 +493,7 @@ public:
     class Builder {
     public:
         ~Builder() {
-            _emitDeferrals();
-            _b.appendNum((char)EOO);
-            _updateBinDataSize();
+            done();
         }
 
         Builder(BufBuilder& baseBuilder, const StringData fieldName)
@@ -511,12 +509,24 @@ public:
          * The index must be greater than that of the last appended item. Ignores field name.
          */
         void append(int index, BSONElement elem) {
+            _maybeUndoDone();
             _emitSkips(index);
 
             if (!_tryCopy(elem) && !_tryDelta(elem))
                 _emitLiteral(elem);
 
-            ++_index;
+            if (!elem.eoo())
+                ++_index;
+        }
+        /** As above, but append to at the next index without skipping. */
+        void append(BSONElement elem) {
+            append(_index, elem);
+        }
+
+        /** Call to append EOO and update the BinData size. Equivalent to appending EOO. */
+        BSONColumn done() {
+            append(BSONElement());
+            return BSONColumn(BSONElement(_b.buf() + _offset));
         }
 
     private:
@@ -542,8 +552,12 @@ public:
             _emitDeferrals();
             int offset = _b.len();
             _b.appendNum((char)elem.type());
-            _b.appendNum((char)0);
-            _b.appendBuf(elem.value(), elem.valuesize());
+            if (elem.type() == BSONType::EOO) {
+                _updateBinDataSize();
+            } else {
+                _b.appendNum((char)0);  // Empty field name
+                _b.appendBuf(elem.value(), elem.valuesize());
+            }
             int size = _b.len() - offset;
             _last = BSONElement(_b.buf() + offset, 1, size, BSONElement::CachedSizeTag{});
             _delta = 0;
@@ -559,9 +573,24 @@ public:
             _index = index;
         }
 
+        /** Check if Builder::done() was called, and if so, remove EOO and recover state. */
+        void _maybeUndoDone() {
+            if (!_last.eoo() || _b.len() == _valueOffset())
+                return;
+            logd("undoing done: _last == {}, _b.len() == {}, _offset == {}",
+                 _last,
+                 _b.len(),
+                 _offset);
+            _b.setlen(_b.len() - 1);
+        }
+
+        int _valueOffset() {
+            return _offset + 1 + strlen(_b.buf() + _offset) + sizeof(int) + 1;
+        }
+
         /** Given the last value, tries to add elem using a copy. Returns true iff success. */
         bool _tryCopy(BSONElement elem) {
-            if (!elem.binaryEqualValues(_last))
+            if (!elem.binaryEqualValues(_last) || _last.eoo())
                 return false;
 
             _emitDeferredDeltas();
@@ -599,9 +628,9 @@ public:
         }
 
         void _updateBinDataSize() {
-            int sizeOffset = _offset + 1 + strlen(_b.buf() + _offset);
-            int size = endian::nativeToLittle(_b.len() - sizeOffset - sizeof(int) - 1);
-            memcpy(_b.buf() + sizeOffset, &size, sizeof(size));
+            int valueOffset = _valueOffset();
+            int size = endian::nativeToLittle(_b.len() - valueOffset);
+            memcpy(_b.buf() + valueOffset - 1 - sizeof(int), &size, sizeof(size));
         }
 
         BufBuilder& _b;               // Buffer to build the column in

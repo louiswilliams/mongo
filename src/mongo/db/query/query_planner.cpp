@@ -39,6 +39,7 @@
 #include "mongo/base/string_data.h"
 #include "mongo/bson/simple_bsonelement_comparator.h"
 #include "mongo/db/bson/dotted_path_support.h"
+#include "mongo/db/catalog/collection.h"
 #include "mongo/db/index/wildcard_key_generator.h"
 #include "mongo/db/index_names.h"
 #include "mongo/db/matcher/expression_algo.h"
@@ -54,6 +55,7 @@
 #include "mongo/db/query/planner_ixselect.h"
 #include "mongo/db/query/query_planner_common.h"
 #include "mongo/db/query/query_solution.h"
+#include "mongo/db/record_id_helpers.h"
 #include "mongo/logv2/log.h"
 
 namespace mongo {
@@ -585,9 +587,73 @@ StatusWith<std::unique_ptr<QuerySolution>> QueryPlanner::planFromCache(
     return {std::move(soln)};
 }
 
+namespace {
+
+/**
+ * Helper function to add an RID range to collection scans.
+ * If the query solution tree contains a collection scan node with a suitable 'lt' or 'lte' match
+ * predicate on '_id', we add a maxRecord on the collection node.
+ */
+void handleRIDRangeScan(QuerySolution* qs) {
+    std::stack<QuerySolutionNode*> stack;
+    stack.push(qs->root());
+
+    while (!stack.empty()) {
+        auto node = stack.top();
+        stack.pop();
+
+        for (auto child : node->children) {
+            stack.push(child);
+        }
+
+        auto* collScan = dynamic_cast<CollectionScanNode*>(node);
+        if (collScan == nullptr || collScan->filter == nullptr) {
+            continue;
+        }
+
+        auto* andMatchPtr = dynamic_cast<AndMatchExpression*>(collScan->filter.get());
+        if (andMatchPtr == nullptr) {
+            continue;
+        }
+
+        for (size_t index = 0; index < andMatchPtr->numChildren(); index++) {
+            auto conjunct = andMatchPtr->getChild(index);
+            if (conjunct->path() != "_id") {
+                continue;
+            }
+
+            if (!collScan->maxRecord) {
+                if (auto ltConjunct = dynamic_cast<LTMatchExpression*>(conjunct)) {
+                    collScan->maxRecord = record_id_helpers::keyForElem(ltConjunct->getData());
+                } else if (auto lteConjunct = dynamic_cast<LTEMatchExpression*>(conjunct)) {
+                    collScan->maxRecord = record_id_helpers::keyForElem(lteConjunct->getData());
+                }
+            }
+
+            if (!collScan->minRecord) {
+                if (auto gtConjunct = dynamic_cast<GTMatchExpression*>(conjunct)) {
+                    collScan->minRecord = record_id_helpers::keyForElem(gtConjunct->getData());
+                } else if (auto gteConjunct = dynamic_cast<GTEMatchExpression*>(conjunct)) {
+                    collScan->minRecord = record_id_helpers::keyForElem(gteConjunct->getData());
+                }
+            }
+        }
+    }
+}
+
+}  // namespace
+
 // static
 StatusWith<std::vector<std::unique_ptr<QuerySolution>>> QueryPlanner::plan(
     const CanonicalQuery& query, const QueryPlannerParams& params) {
+    return plan(query, params, CollectionPtr::null);
+}
+
+// static
+StatusWith<std::vector<std::unique_ptr<QuerySolution>>> QueryPlanner::plan(
+    const CanonicalQuery& query,
+    const QueryPlannerParams& params,
+    const CollectionPtr& collectionPtr) {
     // It's a little silly to ask for a count and for owned data. This could indicate a bug earlier
     // on.
     tassert(5397500,
@@ -1126,6 +1192,11 @@ StatusWith<std::vector<std::unique_ptr<QuerySolution>>> QueryPlanner::plan(
             SolutionCacheData* scd = new SolutionCacheData();
             scd->solnType = SolutionCacheData::COLLSCAN_SOLN;
             collscan->cacheData.reset(scd);
+
+            if (out.empty() && collectionPtr != nullptr && collectionPtr->isClustered()) {
+                // Only add RID range if we are the only plan.
+                handleRIDRangeScan(collscan.get());
+            }
             out.push_back(std::move(collscan));
         }
     }

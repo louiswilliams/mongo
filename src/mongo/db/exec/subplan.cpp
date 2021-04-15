@@ -106,7 +106,7 @@ Status SubplanStage::choosePlanWholeQuery(PlanYieldPolicy* yieldPolicy) {
     _ws->clear();
 
     // Use the query planning module to plan the whole query.
-    auto statusWithSolutions = QueryPlanner::plan(*_query, _plannerParams);
+    auto statusWithSolutions = QueryPlanner::plan(*_query, _plannerParams, collection());
     if (!statusWithSolutions.isOK()) {
         return statusWithSolutions.getStatus().withContext(
             str::stream() << "error processing query: " << _query->toString()

@@ -40,6 +40,7 @@
 
 namespace mongo {
 namespace {
+static bool kDebug = false;
 
 class BSONColumnExample : public unittest::Test {
 public:
@@ -102,10 +103,11 @@ TEST_F(BSONColumnExample, Basic) {
 
 TEST_F(BSONColumnExample, ExampleIteration) {
     BSONObj obj = expand(exampleCol);
-    logd("expanded: {}, BSONColumn size: {}, BSONObj size: {}",
-         obj,
-         exampleCol.objsize(),
-         obj.objsize());
+    if (kDebug)
+        logd("expanded: {}, BSONColumn size: {}, BSONObj size: {}",
+             obj,
+             exampleCol.objsize(),
+             obj.objsize());
     ASSERT_EQ(exampleCol.nFields(), obj.nFields());
 }
 
@@ -137,13 +139,14 @@ TEST_F(BSONColumnExample, DeltaBuild) {
     }
     auto bufbuf = buf.buf();
     BSONElement elem(bufbuf);
-    int len;
-    const char* data;
-    data = elem.binDataClean(len);
-    logd("Got a bindata of length {}", len);
-    logd("disassemble: {}", BSONColumn::Instruction::disassemble(data, len));
-    logd("hex: {}", hexdump(data, len));
-
+    if (kDebug) {
+        int len;
+        const char* data;
+        data = elem.binDataClean(len);
+        logd("Got a bindata of length {}", len);
+        logd("disassemble: {}", BSONColumn::Instruction::disassemble(data, len));
+        logd("hex: {}", hexdump(data, len));
+    }
     BSONColumn col(elem);
     BSONObj expanded = expand(col);
     ASSERT_BSONOBJ_EQ(obj, expanded);
@@ -161,25 +164,50 @@ TEST_F(BSONColumnExample, ExampleBuild) {
     }
 
     BSONObj example = bob.obj();
-    logd("example = {}", example);
-
     BSONElement elem(buf.buf());
-    ASSERT(elem.type() == BinData && elem.binDataType() == Column);
-    int len;
-    const char* data;
-    data = elem.binDataClean(len);
-    logd("Got a bindata of length {}", len);
-    logd("disassemble: {}", BSONColumn::Instruction::disassemble(data, len));
-    logd("hex: {}", hexdump(data, len));
-    logd("disassemble example: {}",
-         BSONColumn::Instruction::disassemble(reinterpret_cast<char*>(exampleData),
-                                              sizeof(exampleData)));
-    logd("hex: {}", hexdump(reinterpret_cast<char*>(exampleData), sizeof(exampleData)));
-
+    ASSERT_BSONELT_EQ(exampleObj[exampleFieldName], elem);
     BSONColumn col(elem);
     BSONObj expanded = expand(col);
-    logd("expanded: {}", expanded);
     ASSERT_BSONOBJ_EQ(example, expanded);
+}
+
+TEST_F(BSONColumnExample, TSBSUsageNice) {
+    StringData hex =
+        "01000000000000804e40876b41875b976b876b836b31413241875b836b835b41876b835b483141876b875b4183"
+        "5b42836b835b836b418b6b835b836b835b3141876b835b3141836b41876b836b875b836b41835b836b835b836b"
+        "876b8b5b3141836b8b5b42835b41836b835b41936b5c6c5c936b8b5b8b6b875b876b3141836b41835b3141876b"
+        "5c836b876b935b936b8b5b8b6b875b8b6b836b5c6c875b8b6b8b5b876b835b836b835b876b875b876b875b8b6b"
+        "5c876b875b876b8b5b876b835b876b836b5c8b6b975b936b976bab5b936b9b6b975b935b826c815c816ca35b81"
+        "6c9b5b9b6b975b9b6b9b5b976b935b6c8b5b6c8b5b936b935b31416c8b5b8b6b8b5b876b835b41836b835b836b"
+        "41835b41876b8b5b876b41875b836b41835b443141836b835b875b835b3241875b836b835b836b3141875b4183"
+        "5b3141876b835b3241836b43835b3141836b835b876b835b875b41836b835b836b31428b6b835b31433241875b"
+        "3141a36ba35b9b6b835b5c8b6b875b836b875b6c975b976b975b976b975b9b6b9b5b9b6b9b5b976b975b936b8b"
+        "5b836b8b5b876b875b8b6b935b976b875b876b875b836b8b5b42875b876b31413141875b876b41875b876b3242"
+        "5c31413141876b875b876b976ba75ba76ba75b41816c875b6c975b9b6ba35ba36bab5bab6b876b835b876b836b"
+        "3142875b835b836b314100"_sd;
+    std::string bin = hexblob::decode(hex);
+
+    auto obj = BSON("usage_nice" << BSONBinData(bin.data(), bin.length(), BinDataType::Column));
+    auto elem = obj["usage_nice"];
+    if (kDebug) {
+        int len;
+        const char* data;
+        data = elem.binDataClean(len);
+        logd("Got a bindata of length {}", len);
+        logd("disassemble: {}", BSONColumn::Instruction::disassemble(data, len));
+    }
+    BSONColumn col(elem);
+    int metrics = col.nFields();
+    BSONObj expanded = expand(col);
+    if (kDebug)
+        logd("expanded: {}", expanded);
+    logd(
+        "Original = {:6.2f} bytes/metric, "
+        "Compressed = {:6.2f} bytes/metric, "
+        "Factor = {:6.2f}",
+        1.0 * expanded.objsize() / metrics,
+        1.0 * col.objsize() / metrics,
+        1.0 * expanded.objsize() / col.objsize());
 }
 
 }  // namespace

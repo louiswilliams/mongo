@@ -223,10 +223,10 @@ public:
                 case Skip:
                 case Delta:
                 case Copy:
-                    return "{} {}"_format(toString(kind()), countArg());
+                    return "{} {}"_format(kind(), countArg());
                 case SetNegDelta:
                 case SetDelta:
-                    return "{} {:#x}"_format(toString(kind()), endian::nativeToLittle(deltaArg()));
+                    return "{} {:#x} << {}"_format(kind(), _prefix + 1, _op % 16);
             }
         }
 
@@ -262,7 +262,7 @@ public:
                 out.append(insn.toString());
                 out.append(", ");
             }
-            out.append("]");
+            out.append(" ]");
             return out;
         }
 

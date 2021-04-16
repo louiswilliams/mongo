@@ -649,7 +649,7 @@ public:
             return buildSubPlan(plannerParams);
         }
 
-        auto statusWithSolutions = QueryPlanner::plan(*_cq, plannerParams, _collection);
+        auto statusWithSolutions = QueryPlanner::plan(*_cq, plannerParams);
         if (!statusWithSolutions.isOK()) {
             return statusWithSolutions.getStatus().withContext(
                 str::stream() << "error processing query: " << _cq->toString()

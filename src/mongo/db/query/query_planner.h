@@ -82,14 +82,8 @@ public:
 
     /**
      * Returns the list of possible query solutions for the provided 'query'. Uses the indices and
-     * other data in 'params' to determine the set of available plans. Additionally we pass in the
-     * collection pointer to check if we are clustered on id.
+     * other data in 'params' to determine the set of available plans.
      */
-    static StatusWith<std::vector<std::unique_ptr<QuerySolution>>> plan(
-        const CanonicalQuery& query,
-        const QueryPlannerParams& params,
-        const CollectionPtr& collectionPtr);
-
     static StatusWith<std::vector<std::unique_ptr<QuerySolution>>> plan(
         const CanonicalQuery& query, const QueryPlannerParams& params);
 

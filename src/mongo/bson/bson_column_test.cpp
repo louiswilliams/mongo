@@ -79,8 +79,22 @@ public:
     BufBuilder buf;
     BSONColumn::Builder builder;
     BSONColumnBuilder() : builder(buf, "col") {}
-    BSONColumn col() {
-        return builder.done();
+    void check(BSONObj expected) {
+        BSONColumn col = builder.done();
+        inspect(col);
+        auto colIt = col.begin();
+        for (auto& elem : expected) {
+            if (!elem.binaryEqualValues(*colIt)) {
+                logd("values not binary equal: expected {}, but found {} {}",
+                     elem,
+                     colIt.index(),
+                     *colIt);
+                logd("expected: {}", expected);
+                logd("found: {}", col);
+                ASSERT(false);
+            }
+            ++colIt;
+        }
     }
 };
 
@@ -134,20 +148,26 @@ TEST_F(BSONColumnBuilder, DeltaBuild) {
     BSONObj obj = BSON("0" << 0 << "1" << 1 << "2" << 2 << "3" << 2 << "4" << 4);
     for (auto& elem : obj)
         builder.append(elem);
-    inspect(col());
-    ASSERT_BSONOBJ_EQ(obj, expand(col()));
+    check(obj);
 }
 
 TEST_F(BSONColumnBuilder, WindSpeed) {
-    BSONArray windspeed =
+    BSONObj windspeed =
         BSON_ARRAY(6.0 << 6.5 << 4.3 << 9.2 << 11.4 << 7.8 << 12.1 << 11.4 << 5.8 << 5.1 << 3.4
                        << 7.6 << 7.4 << 7.6 << 7.4 << 6 << 5.6 << 5.4 << 6.7 << 2.5 << 5.4 << 6.3
                        << 10.5 << 5.4 << 6.5 << 4.0 << 2.7 << 3.4 << 7.6 << 8.9);
     for (auto speed : windspeed)
         builder.append(speed);
-
-    inspect(col());
+    check(windspeed);
 }
+
+TEST_F(BSONColumnBuilder, WindDirection) {
+    BSONArray winddir = BSON_ARRAY(170.0 << 216.0 << 212.0 << 230.0 << 170.0 << 184.0);
+    for (auto dir : winddir)
+        builder.append(dir);
+
+    check(winddir);
+};
 
 TEST_F(BSONColumnExample, ExampleBasic) {
     ASSERT_FALSE(exampleCol.isEmpty());

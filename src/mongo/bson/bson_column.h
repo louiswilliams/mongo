@@ -502,6 +502,7 @@ public:
             _b.appendStr(fieldName);
             _b.appendNum((int)0);
             _b.appendNum((char)BinDataType::Column);
+            _b.reserveBytes(1);  // Make sure we can add EOO without invalidation.
         }
 
         /**
@@ -525,7 +526,8 @@ public:
 
         /** Call to append EOO and update the BinData size. Equivalent to appending EOO. */
         BSONColumn done() {
-            append(BSONElement());
+            if (!_isDone())
+                append(BSONElement());
             return BSONColumn(BSONElement(_b.buf() + _offset));
         }
 
@@ -573,10 +575,15 @@ public:
             _index = index;
         }
 
+        bool _isDone() {
+            return _last.eoo() && _b.len() < _valueOffset();
+        }
+
         /** Check if Builder::done() was called, and if so, remove EOO and recover state. */
         void _maybeUndoDone() {
-            if (!_last.eoo() || _b.len() == _valueOffset())
+            if (!_isDone())
                 return;
+
             logd("undoing done: _last == {}, _b.len() == {}, _offset == {}",
                  _last,
                  _b.len(),

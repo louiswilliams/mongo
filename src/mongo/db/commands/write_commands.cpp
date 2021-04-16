@@ -253,11 +253,12 @@ void rewriteBucketAsColumn(OperationContext* opCtx,
         // Technically we shouldn't need to get the owned object, however, updateDocument invariants
         // that it is.
         auto rewritten = builder.obj();
-        LOGV2(0,
-              "rewrote bucket",
-              "id"_attr = bucketId,
-              "originalSize"_attr = bucketDoc.objsize(),
-              "newSize"_attr = rewritten.objsize());
+        LOGV2_DEBUG(0,
+                    1,
+                    "rewrote bucket",
+                    "id"_attr = bucketId,
+                    "originalSize"_attr = bucketDoc.objsize(),
+                    "newSize"_attr = rewritten.objsize());
 
         DisableDocumentValidation disableValidation(opCtx);
         CollectionUpdateArgs args;

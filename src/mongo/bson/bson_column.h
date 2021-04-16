@@ -392,7 +392,6 @@ public:
                     _cur = BSONElement(--_insn, 1, -1, BSONElement::CachedSizeTag{});
                     _count = 1;
                     _insn += _cur.size();
-                    _delta = 0;
                     break;
                 case Instruction::Skip:
                     _index += insn.countArg();
@@ -404,12 +403,12 @@ public:
                     _count = insn.countArg();
                     break;
                 case Instruction::SetNegDelta:
-                    _delta += -insn.deltaArg();
+                    _delta = -insn.deltaArg();
                     _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);
                     _count = 1;
                     break;
                 case Instruction::SetDelta:
-                    _delta += insn.deltaArg();
+                    _delta = insn.deltaArg();
                     _cur = _store->applyDelta(_deltaIndex++, _cur, _delta);
                     _count = 1;
                     break;
@@ -424,7 +423,7 @@ public:
         int _index = 0;            // Position of iterator in the column, including skipped values
         DeltaStore* _store;        // Manages storage for applied deltas
         unsigned _deltaIndex = 0;  // Index into _store for next delta application
-        uint64_t _delta = 0;       // Last set delta value to apply to base
+        uint64_t _delta = 1;       // Last set delta value to apply to base
     };
 
     using const_iterator = iterator;
@@ -613,8 +612,6 @@ public:
                 // Same delta, defer output.
                 --_deferrals;
             } else {
-                // Delta encode the delta
-                delta -= _delta;
                 auto instruction = Instruction::makeDelta(delta);
                 // Only do the delta if it saves space.
                 if (instruction.size() >= elem.size())

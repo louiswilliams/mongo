@@ -79,7 +79,7 @@ CollectionScan::CollectionScan(ExpressionContext* expCtx,
         }
     }
     LOGV2_DEBUG(5400802,
-                5,
+                2,
                 "collection scan bounds",
                 "min"_attr = (!_params.minRecord) ? "none" : _params.minRecord->toString(),
                 "max"_attr = (!_params.maxRecord) ? "none" : _params.maxRecord->toString());

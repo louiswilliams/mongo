@@ -209,6 +209,52 @@ bool isOplogTsLowerBoundPred(const mongo::MatchExpression* me) {
 
     return me->path() == repl::OpTime::kTimestampFieldName;
 }
+
+/**
+ * Helper function to add an RID range to collection scans.
+ * If the query solution tree contains a collection scan node with a suitable comparison
+ * predicate on '_id', we add a maxRecord on the collection node.
+ */
+void handleRIDRangeScan(CollectionScanNode* collScan) {
+    if (collScan == nullptr || collScan->filter == nullptr) {
+        return;
+    }
+
+    if (auto eq = dynamic_cast<EqualityMatchExpression*>(collScan->filter.get())) {
+        collScan->minRecord = record_id_helpers::keyForElem(eq->getData());
+        collScan->maxRecord = record_id_helpers::keyForElem(eq->getData());
+        return;
+    }
+
+    auto* andMatchPtr = dynamic_cast<AndMatchExpression*>(collScan->filter.get());
+    if (andMatchPtr == nullptr) {
+        return;
+    }
+
+    for (size_t index = 0; index < andMatchPtr->numChildren(); index++) {
+        auto conjunct = andMatchPtr->getChild(index);
+        if (conjunct->path() != "_id") {
+            continue;
+        }
+
+        if (!collScan->maxRecord) {
+            if (auto ltConjunct = dynamic_cast<LTMatchExpression*>(conjunct)) {
+                collScan->maxRecord = record_id_helpers::keyForElem(ltConjunct->getData());
+            } else if (auto lteConjunct = dynamic_cast<LTEMatchExpression*>(conjunct)) {
+                collScan->maxRecord = record_id_helpers::keyForElem(lteConjunct->getData());
+            }
+        }
+
+        if (!collScan->minRecord) {
+            if (auto gtConjunct = dynamic_cast<GTMatchExpression*>(conjunct)) {
+                collScan->minRecord = record_id_helpers::keyForElem(gtConjunct->getData());
+            } else if (auto gteConjunct = dynamic_cast<GTEMatchExpression*>(conjunct)) {
+                collScan->minRecord = record_id_helpers::keyForElem(gteConjunct->getData());
+            }
+        }
+    }
+}
+
 }  // namespace
 
 std::unique_ptr<QuerySolutionNode> QueryPlannerAccess::makeCollectionScan(
@@ -289,6 +335,11 @@ std::unique_ptr<QuerySolutionNode> QueryPlannerAccess::makeCollectionScan(
                                  "which does not imply a minimum 'ts' value ",
                 csn->assertTsHasNotFallenOffOplog);
     }
+
+    if (params.allowRIDRange && !csn->resumeAfterRecordId) {
+        handleRIDRangeScan(csn.get());
+    }
+
     return csn;
 }
 
